@@ -1,0 +1,63 @@
+name: publish
+
+# Explicit, git-tag-driven release. Bump package versions, commit, then:
+#   git tag v0.1.1 && git push origin v0.1.1
+# Pushing a `v*` tag publishes every workspace package at its package.json
+# version to GitHub Packages. workflow_dispatch is kept for manual re-runs.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 11.1.2
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+          scope: "@quanghuy1242"
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm check
+
+      - name: Verify tag matches package versions
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module -e '
+            import { readdirSync, readFileSync } from "node:fs";
+            const tag = process.env.TAG.replace(/^v/, "");
+            let bad = false;
+            for (const dir of readdirSync("packages")) {
+              const file = `packages/${dir}/package.json`;
+              let pkg;
+              try { pkg = JSON.parse(readFileSync(file, "utf8")); } catch { continue; }
+              if (pkg.private || !pkg.name) continue;
+              if (pkg.version !== tag) {
+                process.stderr.write(`${pkg.name} is ${pkg.version}, tag is ${tag}\n`);
+                bad = true;
+              }
+            }
+            if (bad) { process.stderr.write("Bump package versions to match the tag, then re-tag.\n"); process.exit(1); }
+          '
+
+      - name: Publish packages
+        run: pnpm publish -r --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

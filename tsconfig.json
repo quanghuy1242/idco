@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2025",
+    "lib": ["ES2025", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "ignoreDeprecations": "6.0",
+    "types": ["node", "vitest/globals", "@testing-library/jest-dom"],
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@idco/ui": ["./packages/ui/src/index.ts"],
+      "@idco/lib": ["./packages/lib/src/index.ts"],
+      "@idco/content-renderer": ["./packages/content-renderer/src/index.ts"],
+      "@idco/editor": ["./packages/editor/src/index.ts"]
+    }
+  },
+  "include": ["packages", "tests", ".ladle/mocks", "vitest.config.ts"]
+}

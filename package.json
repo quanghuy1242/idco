@@ -1,0 +1,52 @@
+{
+  "name": "idco",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.1.2",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter \"./packages/*\" run --if-present build",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt --write \"packages/**/*.ts\" \"packages/**/*.tsx\" \"tests/**/*.ts\" \"tests/**/*.tsx\"",
+    "format:check": "oxfmt --check \"packages/**/*.ts\" \"packages/**/*.tsx\" \"tests/**/*.ts\" \"tests/**/*.tsx\"",
+    "check:dup": "node scripts/check-duplication-threshold.mjs",
+    "typecheck": "tsgo --noEmit",
+    "typecheck:tsc": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "check": "pnpm format:check && pnpm lint && pnpm check:dup && pnpm typecheck && pnpm test && pnpm build",
+    "advise": "aislop scan --exclude node_modules,dist,coverage,.wrangler && fallow dupes --mode semantic --min-tokens 150 --min-lines 10 --skip-local --ignore-imports --format compact --quiet",
+    "advise:aislop": "aislop scan --exclude node_modules,dist,coverage,.wrangler",
+    "advise:dupes": "fallow dupes --mode semantic --min-tokens 150 --min-lines 10 --skip-local --ignore-imports --format compact --quiet"
+  },
+  "dependencies": {
+    "jose": "^6.2.3",
+    "lucide-react": "1.16.0",
+    "react-aria": "3.48.0",
+    "react-aria-components": "1.17.0",
+    "react-stately": "3.46.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "25.8.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@typescript/native-preview": "7.0.0-dev.20260603.1",
+    "@vitejs/plugin-react": "6.0.2",
+    "aislop": "0.9.0",
+    "fallow": "2.75.0",
+    "jsdom": "^29.1.1",
+    "next": "^16.2.6",
+    "oxfmt": "^0.53.0",
+    "oxlint": "^1.65.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "typescript": "6.0.3",
+    "vite": "8.0.16",
+    "vitest": "4.1.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["aislop", "fallow", "sharp"]
+  }
+}

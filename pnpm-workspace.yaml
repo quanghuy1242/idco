@@ -1,0 +1,13 @@
+packages:
+  - "."
+  - "packages/*"
+
+allowBuilds:
+  aislop: true
+  fallow: true
+  sharp: true
+
+onlyBuiltDependencies:
+  - aislop
+  - fallow
+  - sharp

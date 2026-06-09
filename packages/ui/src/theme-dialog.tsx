@@ -1,0 +1,90 @@
+"use client";
+
+// DaisyUI 5: https://daisyui.com/components/modal/
+// React Aria: https://react-spectrum.adobe.com/react-aria/Dialog.html
+import { useLayoutEffect, useState } from "react";
+import {
+  Dialog,
+  Modal,
+  ModalOverlay,
+  Heading as DialogHeading,
+} from "react-aria-components";
+import { Button } from "./button";
+import { RadioGroup } from "./form";
+import {
+  getStoredTheme,
+  applyTheme,
+  getActiveThemeName,
+  type ThemeMode,
+} from "./theme";
+
+type ThemeDialogProps = {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+};
+
+export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
+  const [themeName, setThemeName] = useState("idco-light");
+  const [selected, setSelected] = useState<ThemeMode>("system");
+
+  useLayoutEffect(() => {
+    if (open) {
+      setThemeName(getActiveThemeName());
+      setSelected(getStoredTheme());
+    }
+  }, [open]);
+
+  return (
+    <ModalOverlay
+      isOpen={open}
+      onOpenChange={onOpenChange}
+      isDismissable
+      className="modal modal-open bg-black/40 data-[entering]:animate-modal-overlay-in data-[exiting]:animate-modal-overlay-out"
+    >
+      <Modal
+        data-theme={themeName}
+        className="modal-box data-[entering]:animate-modal-panel-in data-[exiting]:animate-modal-panel-out"
+      >
+        <Dialog className="outline-none">
+          {({ close }) => (
+            <>
+              <DialogHeading slot="title" className="font-bold text-lg">
+                Theme
+              </DialogHeading>
+              <div className="py-4">
+                <RadioGroup
+                  title="Appearance"
+                  name="theme"
+                  value={selected}
+                  onChange={(value) => setSelected(value as ThemeMode)}
+                  options={[
+                    { value: "system", label: "System" },
+                    { value: "light", label: "Light" },
+                    { value: "dark", label: "Dark" },
+                  ]}
+                />
+              </div>
+              <div className="modal-action">
+                <Button type="button" variant="secondary" onClick={close}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => {
+                    applyTheme(selected);
+                    close();
+                  }}
+                >
+                  Apply
+                </Button>
+              </div>
+            </>
+          )}
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
+export { getStoredTheme, applyTheme, type ThemeMode } from "./theme";
