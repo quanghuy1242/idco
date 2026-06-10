@@ -15,7 +15,7 @@ description: Maintain the `@idco/ui` shared component package in `/home/quanghuy
 2. For a new component, add it under `packages/ui/src/`, keep the module side-effect-free, export it from `packages/ui/src/index.ts`, and add/extend a matching test under `tests/ui/`.
 3. Every component file should keep its DaisyUI 5 citation comment where a DaisyUI primitive informs the styling.
 4. Use typed props such as `variant`, `size`, `tone`, and `iconName` instead of exposing raw visual `className` as the main styling API.
-5. Keep route and product code out of `@idco/ui`; products compose these primitives in their own workers.
+5. Keep route and product code out of `@idco/ui`; products compose these primitives in their own workers. If a product needs reusable admin layout, typography, modal, menu, table, action, or form behavior, add a product-neutral primitive here instead of allowing product-local custom UI.
 6. Register any new `iconName` string in `packages/ui/src/nav-icons.tsx` before exposing it through `Button`, `NavLink`, `DockLink`, or navigation-related props.
 7. Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` after package changes; `pnpm check` is the full gate.
 
@@ -36,6 +36,7 @@ Consumers provide matching DaisyUI theme definitions in their app CSS. Component
 - Do not import product source, worker source, content-api framework modules, Better Auth, Drizzle, Hono, Cloudflare runtime types, or persistence/signing runtime dependencies from `packages/ui` or `packages/lib`.
 - Do not import `lucide-react` directly in product route files; expose icons through `NavIcon` and `iconName` props where possible.
 - Do not expose raw `className` as the primary API on new components. Route consumers should select typed props such as `variant`, `size`, `tone`, `density`, `placement`, and `iconName`.
+- Do not use native `<dialog>` for modal surfaces. Use React Aria `ModalOverlay`/`Modal`/`Dialog` with DaisyUI 5 `modal`/`modal-box` classes.
 - Do not hardcode `sm` as a default size in controls; default to `md` and expose a typed `"sm" | "md"` prop when smaller controls are needed.
 - Do not use `btn-neutral` for button variants; neutral is not a portable product action tone. Use the typed `secondary`/outline mapping or add a deliberate typed tone.
 - Do not create fake indicators for DaisyUI controls that depend on native selectors such as `:checked`; use React Aria hooks with native inputs.
@@ -50,6 +51,10 @@ Consumers provide matching DaisyUI theme definitions in their app CSS. Component
 - For `FilterDropdown`, use `select select-bordered` with `bg-none` on the trigger, `w-(--trigger-width)` on the popover, and React Aria `data-entering`/`data-exiting` animation hooks.
 - For modal/dialog overlays built with React Aria divs, use `modal modal-open bg-black/40` on the overlay and `modal-box` on the panel; do not rely on native `dialog::backdrop`.
 - React Aria portals render on `body`, outside consumer-local wrappers. Consumers must put theme attributes where portals can see them; component code should not assume a nested provider wrapper is enough.
+
+## Consumer Audit
+
+- For content-api admin work, run `rg -n '<(div|main|section|header|footer|aside|nav|h[1-6]|p|span|ul|ol|li|a|button|dialog|form|input|select|textarea)\b|className=' packages/ui/src/admin workers/ui/src || true` from `/home/quanghuy1242/pjs/content-api` before declaring success. The expected result is empty; if it is not empty, add/use an idco primitive rather than leaving product-local custom UI.
 
 ## Package Map
 
