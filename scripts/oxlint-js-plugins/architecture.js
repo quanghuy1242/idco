@@ -91,11 +91,64 @@ var uiNoSideEffectCssRule = {
   },
 };
 
+var uiNoNativeDialogRule = {
+  meta: { type: "problem", docs: { description: "@idco/ui modal surfaces use React Aria Modal/Dialog, not native <dialog>" } },
+  create: function (context) {
+    var filename = context.filename || context.physicalFilename || "";
+    if (!isUiPackageSource(filename)) return {};
+
+    return {
+      JSXOpeningElement: function (node) {
+        if (node.name.type === "JSXIdentifier" && node.name.name === "dialog") {
+          context.report({ node: node, message: "@idco/ui must not use native <dialog>; use React Aria ModalOverlay/Modal/Dialog with DaisyUI modal classes." });
+        }
+      },
+    };
+  },
+};
+
+function classNameLiteral(attr) {
+  if (!attr || attr.type !== "JSXAttribute") return null;
+  if (!attr.name || attr.name.type !== "JSXIdentifier" || attr.name.name !== "className") return null;
+  if (!attr.value) return null;
+  if (attr.value.type === "Literal" && typeof attr.value.value === "string") return attr.value.value;
+  if (
+    attr.value.type === "JSXExpressionContainer" &&
+    attr.value.expression &&
+    attr.value.expression.type === "Literal" &&
+    typeof attr.value.expression.value === "string"
+  ) {
+    return attr.value.expression.value;
+  }
+  return null;
+}
+
+var uiNoNeutralButtonClassRule = {
+  meta: { type: "problem", docs: { description: "@idco/ui does not expose DaisyUI btn-neutral as a portable action tone" } },
+  create: function (context) {
+    var filename = context.filename || context.physicalFilename || "";
+    if (!isUiPackageSource(filename)) return {};
+
+    return {
+      JSXOpeningElement: function (node) {
+        for (var i = 0; i < node.attributes.length; i++) {
+          var value = classNameLiteral(node.attributes[i]);
+          if (value && /\bbtn-neutral\b/.test(value)) {
+            context.report({ node: node.attributes[i], message: "Do not use btn-neutral in @idco/ui; use a typed secondary/outline tone instead." });
+          }
+        }
+      },
+    };
+  },
+};
+
 var plugin = {
   meta: { name: "architecture" },
   rules: {
     "idco-package-boundary": idcoPackageBoundaryRule,
     "ui-no-side-effect-css": uiNoSideEffectCssRule,
+    "ui-no-native-dialog": uiNoNativeDialogRule,
+    "ui-no-neutral-button-class": uiNoNeutralButtonClassRule,
   },
 };
 

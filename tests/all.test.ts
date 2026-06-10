@@ -39,6 +39,7 @@ await import("./ui/url-list-builder.test");
 await import("./ui/stepper.test");
 await import("./ui/timeline.test");
 await import("./ui/json-viewer.test");
+await import("./ui/layout.test");
 await import("./ui/code-editor.test");
 await import("./ui/file-dropzone.test");
 await import("./ui/drawer.test");

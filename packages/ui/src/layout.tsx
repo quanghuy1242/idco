@@ -30,6 +30,13 @@ const alignClass: Record<Align, string> = {
   stretch: "items-stretch",
 };
 
+const responsiveToolbarAlignClass: Record<Align, string> = {
+  start: "md:items-start",
+  center: "md:items-center",
+  end: "md:items-end",
+  stretch: "md:items-stretch",
+};
+
 const widthClass: Record<Width, string> = {
   narrow: "max-w-md",
   content: "max-w-3xl",
@@ -141,6 +148,42 @@ export function Stack({
   return (
     <div
       className={`flex flex-col ${alignClass[align]} ${justifyClass[justify]} ${gapClass[gap]} w-full ${fill ? "h-full" : ""}`.trim()}
+    >
+      {children}
+    </div>
+  );
+}
+
+type ToolbarProps = SurfaceProps & {
+  readonly gap?: Gap;
+  readonly align?: Align;
+};
+
+export function Toolbar({
+  gap = "sm",
+  align = "center",
+  children,
+}: ToolbarProps) {
+  return (
+    <div
+      className={`flex flex-col ${gapClass[gap]} md:flex-row ${responsiveToolbarAlignClass[align]}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+type PanelFooterProps = SurfaceProps & {
+  readonly justify?: "between" | "end";
+};
+
+export function PanelFooter({
+  justify = "between",
+  children,
+}: PanelFooterProps) {
+  return (
+    <div
+      className={`flex items-center ${justifyClass[justify]} border-t border-base-300 px-4 py-3`}
     >
       {children}
     </div>

@@ -20,7 +20,9 @@
     "typescript/no-explicit-any": "error",
     "unicorn/no-array-sort": "off",
     "architecture/idco-package-boundary": "error",
-    "architecture/ui-no-side-effect-css": "error"
+    "architecture/ui-no-side-effect-css": "error",
+    "architecture/ui-no-native-dialog": "error",
+    "architecture/ui-no-neutral-button-class": "error"
   },
   "overrides": [
     {
