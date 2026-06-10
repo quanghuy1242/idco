@@ -58,6 +58,8 @@ type TextInputProps = {
   readonly size?: "sm" | "md";
   readonly autoComplete?: string;
   readonly required?: boolean;
+  readonly showOptionalLabel?: boolean;
+  readonly value?: string;
   readonly defaultValue?: string;
   readonly error?: string;
   readonly validate?: (value: string) => string | true | null | undefined;
@@ -71,6 +73,8 @@ export function TextInput({
   size = "md",
   autoComplete,
   required,
+  showOptionalLabel = true,
+  value,
   defaultValue,
   error,
   validate,
@@ -84,6 +88,7 @@ export function TextInput({
       type={type}
       autoComplete={autoComplete}
       isRequired={required}
+      value={value}
       defaultValue={defaultValue}
       isInvalid={error ? true : undefined}
       validate={validate}
@@ -93,7 +98,7 @@ export function TextInput({
       <Label className="label">
         <span className="label-text text-base font-medium text-base-content">
           {label}
-          {!required ? " (Optional)" : ""}
+          {!required && showOptionalLabel ? " (Optional)" : ""}
         </span>
       </Label>
       <Input

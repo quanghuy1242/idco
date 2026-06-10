@@ -61,6 +61,26 @@ describe("TextInput", () => {
     expect(input).toHaveValue("John");
   });
 
+  it("supports controlled values", () => {
+    const { rerender } = render(
+      <TextInput label="Name" name="name" value="Ada" onChange={() => {}} />,
+    );
+    expect(screen.getByRole("textbox", { name: /name/i })).toHaveValue("Ada");
+
+    rerender(
+      <TextInput label="Name" name="name" value="Grace" onChange={() => {}} />,
+    );
+    expect(screen.getByRole("textbox", { name: /name/i })).toHaveValue("Grace");
+  });
+
+  it("can hide the optional label suffix", () => {
+    render(
+      <TextInput label="Filter" name="filter" showOptionalLabel={false} />,
+    );
+    expect(screen.getByText("Filter")).toBeInTheDocument();
+    expect(screen.queryByText(/optional/i)).toBeNull();
+  });
+
   it("shows error message when error prop is provided", () => {
     render(<TextInput label="Email" name="email" error="Invalid email" />);
     expect(screen.getByText(/invalid email/i)).toBeInTheDocument();

@@ -1,6 +1,6 @@
 {
   "name": "@quanghuy1242/idco-lib",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
