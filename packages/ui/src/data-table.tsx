@@ -1,6 +1,6 @@
 // DaisyUI 5: https://daisyui.com/components/table/
 "use client";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 import {
   Cell as AriaCell,
@@ -43,6 +43,13 @@ export type DataTableColumn<T extends object> = {
   readonly actions?: (row: T) => readonly DataTableAction[];
 };
 
+export type DataTableRowSelection<T extends object> = {
+  readonly selectedKeys: ReadonlySet<string>;
+  readonly onChange: (next: Set<string>) => void;
+  readonly getRowDisabled?: (row: T) => boolean;
+  readonly ariaLabel?: string;
+};
+
 type Pagination = {
   readonly total: number;
   readonly limit: number;
@@ -59,6 +66,7 @@ type DataTableProps<T extends object> = {
   readonly sortDirection?: SortDirection;
   readonly onSort?: (key: string, direction: SortDirection) => void;
   readonly pagination?: Pagination;
+  readonly rowSelection?: DataTableRowSelection<T>;
   readonly layout?: DataTableLayout;
   readonly overflow?: DataTableOverflow;
   readonly minWidth?: DataTableMinWidth;
@@ -203,6 +211,39 @@ function DataTableActions({
   );
 }
 
+function DataTableSelectionCheckbox({
+  ariaLabel,
+  checked,
+  disabled,
+  indeterminate,
+  onChange,
+}: {
+  readonly ariaLabel: string;
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly indeterminate?: boolean;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.indeterminate = Boolean(indeterminate);
+    }
+  }, [indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      aria-label={ariaLabel}
+      checked={checked}
+      disabled={disabled}
+      className="checkbox checkbox-primary checkbox-sm"
+      onChange={(event) => onChange(event.currentTarget.checked)}
+      onClick={(event) => event.stopPropagation()}
+    />
+  );
+}
+
 export function DataTable<T extends object>({
   columns,
   rows,
@@ -212,6 +253,7 @@ export function DataTable<T extends object>({
   sortDirection,
   onSort,
   pagination,
+  rowSelection,
   layout = "auto",
   overflow = "responsive",
   minWidth = "none",
@@ -228,6 +270,43 @@ export function DataTable<T extends object>({
     const dir: SortDirection =
       descriptor.direction === "descending" ? "desc" : "asc";
     onSort(String(descriptor.column), dir);
+  }
+
+  const selectableRows = rowSelection
+    ? rows.filter((row) => !rowSelection.getRowDisabled?.(row))
+    : [];
+  const selectableKeys = selectableRows.map(getRowKey);
+  const selectedVisibleKeys = selectableKeys.filter((key) =>
+    rowSelection?.selectedKeys.has(key),
+  );
+  const allVisibleSelected =
+    selectableKeys.length > 0 &&
+    selectedVisibleKeys.length === selectableKeys.length;
+  const someVisibleSelected = selectedVisibleKeys.length > 0;
+
+  function selectVisibleRows(checked: boolean) {
+    if (!rowSelection) return;
+    const next = new Set(rowSelection.selectedKeys);
+    for (const key of selectableKeys) {
+      if (checked) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+    }
+    rowSelection.onChange(next);
+  }
+
+  function selectRow(row: T, checked: boolean) {
+    if (!rowSelection) return;
+    const key = getRowKey(row);
+    const next = new Set(rowSelection.selectedKeys);
+    if (checked) {
+      next.add(key);
+    } else {
+      next.delete(key);
+    }
+    rowSelection.onChange(next);
   }
 
   return (
@@ -247,6 +326,21 @@ export function DataTable<T extends object>({
         }
       >
         <AriaTableHeader>
+          {rowSelection ? (
+            <AriaColumn
+              id="__selection"
+              className="w-12 text-center"
+              allowsSorting={false}
+            >
+              <DataTableSelectionCheckbox
+                ariaLabel={rowSelection.ariaLabel ?? "Select visible rows"}
+                checked={allVisibleSelected}
+                disabled={selectableKeys.length === 0}
+                indeterminate={someVisibleSelected && !allVisibleSelected}
+                onChange={selectVisibleRows}
+              />
+            </AriaColumn>
+          ) : null}
           {columns.map((col) => (
             <AriaColumn
               key={col.key}
@@ -275,6 +369,16 @@ export function DataTable<T extends object>({
                 onRowClick ? "cursor-pointer hover:bg-base-200/60" : ""
               }
             >
+              {rowSelection ? (
+                <AriaCell className="w-12 text-center align-top">
+                  <DataTableSelectionCheckbox
+                    ariaLabel={`Select row ${getRowKey(row)}`}
+                    checked={rowSelection.selectedKeys.has(getRowKey(row))}
+                    disabled={rowSelection.getRowDisabled?.(row)}
+                    onChange={(checked) => selectRow(row, checked)}
+                  />
+                </AriaCell>
+              ) : null}
               {columns.map((col) => (
                 <AriaCell
                   key={col.key}

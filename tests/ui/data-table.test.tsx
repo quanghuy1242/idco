@@ -260,4 +260,58 @@ describe("DataTable", () => {
     expect(onOpen).toHaveBeenCalledWith("a");
     expect(onRowClick).not.toHaveBeenCalled();
   });
+
+  it("selects rows through checkbox controls", () => {
+    const onChange = vi.fn<(next: Set<string>) => void>();
+    render(
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowKey={(r) => r.id}
+        rowSelection={{
+          selectedKeys: new Set(["a"]),
+          onChange,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Select row b"));
+    expect([...onChange.mock.calls[0]![0]].sort()).toEqual(["a", "b"]);
+  });
+
+  it("selects all visible rows from the header checkbox", () => {
+    const onChange = vi.fn<(next: Set<string>) => void>();
+    render(
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowKey={(r) => r.id}
+        rowSelection={{
+          selectedKeys: new Set(),
+          onChange,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Select visible rows"));
+    expect([...onChange.mock.calls[0]![0]].sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not trigger row navigation from selection clicks", () => {
+    const onChange = vi.fn<(next: Set<string>) => void>();
+    const onRowClick = vi.fn<(row: Item) => void>();
+    render(
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowKey={(r) => r.id}
+        onRowClick={onRowClick}
+        rowSelection={{
+          selectedKeys: new Set(),
+          onChange,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Select row a"));
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
 });
