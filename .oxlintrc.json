@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc", "vitest", "import", "promise"],
+  "jsPlugins": ["./scripts/oxlint-js-plugins/architecture.js"],
   "categories": {
     "correctness": "error",
     "suspicious": "error",
@@ -17,7 +18,9 @@
     "import/no-cycle": "error",
     "import/no-default-export": "off",
     "typescript/no-explicit-any": "error",
-    "unicorn/no-array-sort": "off"
+    "unicorn/no-array-sort": "off",
+    "architecture/idco-package-boundary": "error",
+    "architecture/ui-no-side-effect-css": "error"
   },
   "overrides": [
     {
