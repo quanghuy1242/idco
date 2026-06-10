@@ -7,6 +7,7 @@ await import("./ui/alert.test");
 await import("./ui/app-shell.test");
 await import("./ui/badge.test");
 await import("./ui/button.test");
+await import("./ui/command-palette.test");
 await import("./ui/confirm-dialog.test");
 await import("./ui/tooltip.test");
 await import("./ui/toast.test");

@@ -17,6 +17,7 @@ export * from "./responsive-actions";
 export * from "./scope-picker-trigger";
 export * from "./tabs";
 export * from "./confirm-dialog";
+export * from "./command-palette";
 export * from "./tooltip";
 export * from "./toast";
 export * from "./info-popover";
