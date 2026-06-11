@@ -50,12 +50,18 @@ export function getMockPathname() {
 }
 
 const mockRouter = {
-  push(href: string) { navigateMock(href, "push"); },
-  replace(href: string) { navigateMock(href, "replace"); },
+  push(href: string) {
+    navigateMock(href, "push");
+  },
+  replace(href: string) {
+    navigateMock(href, "replace");
+  },
   refresh() {},
   back() {},
   forward() {},
-  prefetch(_href: string) { return Promise.resolve(); },
+  prefetch(_href: string) {
+    return Promise.resolve();
+  },
 };
 
 export function setMockPathname(pathname: string) {

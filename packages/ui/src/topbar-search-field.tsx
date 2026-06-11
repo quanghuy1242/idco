@@ -14,7 +14,7 @@ export function TopbarSearchField({
   return (
     <SearchField
       aria-label={placeholder}
-      className="relative flex items-center"
+      className="group relative flex items-center"
     >
       <Input
         placeholder={placeholder}
@@ -22,7 +22,7 @@ export function TopbarSearchField({
       />
       <Button
         aria-label="Clear search"
-        className="absolute right-2 text-base-content/40 hover:text-base-content/70 text-base leading-none hidden group-data-empty:false:block"
+        className="absolute right-2 hidden text-base leading-none text-base-content/40 hover:text-base-content/70 group-data-[empty=false]:block"
       >
         ✕
       </Button>

@@ -35,7 +35,7 @@ export function SearchInput({
       value={value}
       onChange={onChange}
       aria-label="Search"
-      className={`relative flex items-center${grow ? " flex-1" : " w-full"}`}
+      className={`group relative flex items-center${grow ? " flex-1" : " w-full"}`}
     >
       <Input
         placeholder={placeholder}
@@ -43,7 +43,7 @@ export function SearchInput({
       />
       <ClearButton
         aria-label="Clear search"
-        className="absolute right-2 text-base-content/40 hover:text-base-content/70 text-base leading-none hidden [.group-data-empty=false_&]:block"
+        className="absolute right-2 hidden text-base leading-none text-base-content/40 hover:text-base-content/70 group-data-[empty=false]:block"
       >
         ✕
       </ClearButton>

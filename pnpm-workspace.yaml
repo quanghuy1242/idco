@@ -3,11 +3,17 @@ packages:
   - "packages/*"
 
 allowBuilds:
+  '@swc/core': true
   aislop: true
+  esbuild: true
   fallow: true
+  msw: true
   sharp: true
 
 onlyBuiltDependencies:
+  - '@swc/core'
   - aislop
+  - esbuild
   - fallow
+  - msw
   - sharp

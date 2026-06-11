@@ -33,7 +33,7 @@
       }
     }
   ],
-  "ignorePatterns": ["node_modules", "dist", "coverage", ".wrangler"],
+  "ignorePatterns": ["node_modules", "dist", "coverage", ".wrangler", ".ladle/build"],
   "env": {
     "es2022": true,
     "browser": true,
