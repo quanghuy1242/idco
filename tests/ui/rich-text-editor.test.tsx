@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RichTextEditor } from "@idco/ui";
 
 describe("RichTextEditor", () => {
-  it("edits plain text as a serialized rich text document", () => {
+  it("renders a Lexical textbox with formatting toolbar controls", () => {
     const onChange = vi.fn<(value: unknown) => void>();
     render(
       <RichTextEditor
@@ -15,26 +15,17 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.change(
-      screen.getByRole("textbox", { name: /body plain text/i }),
-      {
-        target: { value: "Hello" },
-      },
+    expect(screen.getByRole("textbox", { name: /^body$/i })).toHaveAttribute(
+      "contenteditable",
+      "true",
     );
-
-    expect(onChange).toHaveBeenCalledWith({
-      root: {
-        children: [
-          {
-            children: [{ text: "Hello", type: "text" }],
-            type: "paragraph",
-          },
-        ],
-      },
-    });
+    expect(screen.getByRole("button", { name: /bold/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /italic/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /slash menu/i })).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("adds starter nodes from typed toolbar actions", () => {
+  it("adds starter nodes from the slash menu", () => {
     const onChange = vi.fn<(value: unknown) => void>();
     render(
       <RichTextEditor
@@ -44,6 +35,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /slash menu/i }));
     fireEvent.click(screen.getByRole("button", { name: /code/i }));
 
     expect(onChange).toHaveBeenCalledWith({
@@ -69,6 +61,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /slash menu/i }));
     expect(screen.queryByRole("button", { name: /code/i })).toBeNull();
     expect(screen.getByRole("button", { name: /paragraph/i })).toBeVisible();
   });

@@ -1,6 +1,6 @@
 {
   "name": "idco",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "packageManager": "pnpm@11.1.2",
   "type": "module",
@@ -21,6 +21,10 @@
   },
   "dependencies": {
     "jose": "^6.2.3",
+    "@lexical/list": "0.45.0",
+    "@lexical/react": "0.45.0",
+    "@lexical/rich-text": "0.45.0",
+    "lexical": "0.45.0",
     "lucide-react": "1.16.0",
     "prismjs": "^1.30.0",
     "react-aria": "3.48.0",
