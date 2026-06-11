@@ -2,6 +2,7 @@ import { describe as moduleMarker } from "vitest";
 
 void moduleMarker;
 
+await import("./content-renderer.test");
 await import("./lib/auth-fetch.test");
 await import("./ui/alert.test");
 await import("./ui/app-shell.test");
@@ -43,3 +44,4 @@ await import("./ui/layout.test");
 await import("./ui/code-editor.test");
 await import("./ui/file-dropzone.test");
 await import("./ui/drawer.test");
+await import("./ui/rich-text-editor.test");

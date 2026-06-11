@@ -1,15 +1,19 @@
 // DaisyUI 5: https://daisyui.com/components/mockup-code/
 "use client";
 
+import Prism from "prismjs";
+
 type CodeEditorProps = {
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly name?: string;
-  readonly language?: "json";
+  readonly language?: "json" | "ts" | "tsx" | "text";
+  readonly engine?: "plain" | "prism";
   readonly error?: string;
   readonly label?: string;
   readonly placeholder?: string;
   readonly readOnly?: boolean;
+  readonly showPreview?: boolean;
 };
 
 // Controlled monospace editor. CodeMirror 6 upgrade deferred (docs/027 §14); prop surface is forward-compatible.
@@ -19,12 +23,19 @@ export function CodeEditor(props: CodeEditorProps) {
     onChange,
     name,
     language = "json",
+    engine = "plain",
     error,
     label,
     placeholder,
     readOnly,
+    showPreview,
   } = props;
   const rows = 8;
+  const grammar = grammarFor(language);
+  const preview =
+    engine === "prism" && showPreview
+      ? Prism.highlight(value, grammar, prismLanguage(language))
+      : null;
   return (
     <div className="form-control w-full">
       {label ? (
@@ -51,6 +62,29 @@ export function CodeEditor(props: CodeEditorProps) {
           {error}
         </span>
       ) : null}
+      {preview !== null ? (
+        <pre
+          aria-label={`${label ?? language} highlighted preview`}
+          className="mockup-code mt-2 overflow-auto bg-base-300 text-base-content"
+        >
+          <code dangerouslySetInnerHTML={{ __html: preview }} />
+        </pre>
+      ) : null}
     </div>
   );
+}
+
+function grammarFor(language: NonNullable<CodeEditorProps["language"]>) {
+  if (language === "json") return Prism.languages.json ?? Prism.languages.clike;
+  if (language === "ts" || language === "tsx") {
+    return Prism.languages.typescript ?? Prism.languages.javascript;
+  }
+  return Prism.languages.plain ?? {};
+}
+
+function prismLanguage(
+  language: NonNullable<CodeEditorProps["language"]>,
+): string {
+  if (language === "ts" || language === "tsx") return "typescript";
+  return language;
 }

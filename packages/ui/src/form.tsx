@@ -302,6 +302,7 @@ type TextareaProps = {
   readonly label: string;
   readonly name: string;
   readonly required?: boolean;
+  readonly value?: string;
   readonly defaultValue?: string;
   readonly error?: string;
   readonly rows?: number;
@@ -313,6 +314,7 @@ export function Textarea({
   label,
   name,
   required,
+  value,
   defaultValue,
   error,
   rows = 4,
@@ -323,6 +325,7 @@ export function Textarea({
     <TextField
       name={name}
       isRequired={required}
+      value={value}
       defaultValue={defaultValue}
       isInvalid={error ? true : undefined}
       onChange={onChange}

@@ -44,3 +44,4 @@ export * from "./json-viewer";
 export * from "./code-editor";
 export * from "./file-dropzone";
 export * from "./drawer";
+export * from "./rich-text-editor";

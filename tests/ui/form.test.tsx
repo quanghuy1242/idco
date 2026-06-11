@@ -73,6 +73,20 @@ describe("TextInput", () => {
     expect(screen.getByRole("textbox", { name: /name/i })).toHaveValue("Grace");
   });
 
+  it("supports controlled textarea values", () => {
+    render(
+      <Textarea
+        label="Body"
+        name="body"
+        value="Existing"
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: /body/i })).toHaveValue(
+      "Existing",
+    );
+  });
+
   it("can hide the optional label suffix", () => {
     render(
       <TextInput label="Filter" name="filter" showOptionalLabel={false} />,

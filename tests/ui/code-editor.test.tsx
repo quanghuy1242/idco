@@ -64,4 +64,20 @@ describe("CodeEditor", () => {
       '{"a":1}',
     );
   });
+
+  it("can render a Prism highlighted preview", () => {
+    render(
+      <CodeEditor
+        value="const value = true;"
+        onChange={() => {}}
+        label="Snippet"
+        language="ts"
+        engine="prism"
+        showPreview
+      />,
+    );
+    expect(
+      screen.getByLabelText(/snippet highlighted preview/i),
+    ).toBeInTheDocument();
+  });
 });

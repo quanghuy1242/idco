@@ -14,6 +14,9 @@ importers:
       lucide-react:
         specifier: 1.16.0
         version: 1.16.0(react@19.2.6)
+      prismjs:
+        specifier: ^1.30.0
+        version: 1.30.0
       react-aria:
         specifier: 3.48.0
         version: 3.48.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -33,6 +36,9 @@ importers:
       '@types/node':
         specifier: 25.8.0
         version: 25.8.0
+      '@types/prismjs':
+        specifier: ^1.26.5
+        version: 1.26.6
       '@types/react':
         specifier: 19.2.14
         version: 19.2.14
@@ -79,7 +85,11 @@ importers:
         specifier: 4.1.6
         version: 4.1.6(@types/node@25.8.0)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.8.0)(jiti@2.7.0)(yaml@2.9.0))
 
-  packages/content-renderer: {}
+  packages/content-renderer:
+    dependencies:
+      react:
+        specifier: ^19.0.0
+        version: 19.2.6
 
   packages/editor:
     dependencies:
@@ -104,6 +114,9 @@ importers:
       next:
         specifier: ^16.0.0
         version: 16.2.7(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      prismjs:
+        specifier: ^1.30.0
+        version: 1.30.0
       react:
         specifier: ^19.0.0
         version: 19.2.6
@@ -1079,6 +1092,9 @@ packages:
   '@types/node@25.8.0':
     resolution: {integrity: sha512-TCFSk8IZh+iLX1xtksoBVtdmgL+1IX0fC9BeU4QqFSuNdN/K+HUlhqOzEmSYYpZUVsLYcPqc9KX+60iDuninSQ==}
 
+  '@types/prismjs@1.26.6':
+    resolution: {integrity: sha512-vqlvI7qlMvcCBbVe0AKAb4f97//Hy0EBTaiW8AalRnG/xAN5zOiWWyrNqNXeq8+KAuvRewjCVY1+IPxk4RdNYw==}
+
   '@types/react-dom@19.2.3':
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
     peerDependencies:
@@ -1859,6 +1875,10 @@ packages:
   pretty-format@27.5.1:
     resolution: {integrity: sha512-Qb1gy5OrP5+zDf2Bvnzdl3jsTf1qXVMazbvCoKhtKqVs4/YK4ozX4gKQJJVyNe+cajNPn0KoC0MC3FUmaHWEmQ==}
     engines: {node: ^10.13.0 || ^12.13.0 || ^14.15.0 || >=15.0.0}
+
+  prismjs@1.30.0:
+    resolution: {integrity: sha512-DEvV2ZF2r2/63V+tK8hQvrR2ZGn10srHbXviTlcv7Kpzw8jWiNTqbVgjO3IY8RxrrOUF8VPMQQFysYYYv0YZxw==}
+    engines: {node: '>=6'}
 
   proxy-addr@2.0.7:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
@@ -2903,6 +2923,8 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
+  '@types/prismjs@1.26.6': {}
+
   '@types/react-dom@19.2.3(@types/react@19.2.14)':
     dependencies:
       '@types/react': 19.2.14
@@ -3675,6 +3697,8 @@ snapshots:
       ansi-regex: 5.0.1
       ansi-styles: 5.2.0
       react-is: 17.0.2
+
+  prismjs@1.30.0: {}
 
   proxy-addr@2.0.7:
     dependencies:

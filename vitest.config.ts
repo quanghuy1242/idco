@@ -19,6 +19,12 @@ export default defineConfig({
         ),
       },
       {
+        find: "@idco/content-renderer",
+        replacement: fileURLToPath(
+          new URL("./packages/content-renderer/src/index.ts", import.meta.url),
+        ),
+      },
+      {
         find: "next/link",
         replacement: fileURLToPath(
           new URL("./.ladle/mocks/next-link.tsx", import.meta.url),

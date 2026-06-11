@@ -6,8 +6,8 @@
 
 - `@idco/ui` locally, published as `@quanghuy1242/idco-ui` — shared React admin/component system extracted from the auth product's local UI package.
 - `@idco/lib` locally, published as `@quanghuy1242/idco-lib` — framework-free shared contracts and browser helpers extracted from the auth product's local library package.
-- `@idco/content-renderer` locally, published as `@quanghuy1242/idco-content-renderer` — placeholder for the lightweight public content renderer planned by `content-api` Track X.
-- `@idco/editor` locally, published as `@quanghuy1242/idco-editor` — placeholder for shared editor primitives planned by `content-api` Track X.
+- `@idco/content-renderer` locally, published as `@quanghuy1242/idco-content-renderer` — lightweight public rich-text renderer for serialized content documents.
+- `@idco/editor` locally, published as `@quanghuy1242/idco-editor` — reserved package for editor-specific APIs; current shared rich-text primitives live in `@idco/ui`.
 
 GitHub Packages requires the npm scope to match the account or organization namespace. The source and local workspace keep `@idco/*` import names; CI consumers install the GitHub Packages artifacts through npm aliases such as `@idco/ui -> npm:@quanghuy1242/idco-ui@0.1.0`.
 
