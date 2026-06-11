@@ -22,6 +22,7 @@ import { CodeEditor } from "./code-editor";
 import { FileDropzone } from "./file-dropzone";
 import { Inline } from "./inline";
 import { Panel, Stack, Toolbar } from "./layout";
+import { ResourceSelector } from "./resource-selector";
 import { Text } from "./typography";
 
 export type RichTextEditorNode = {
@@ -46,6 +47,13 @@ export type RichTextEditorDocument = {
   };
 };
 
+export type RichTextEditorMediaOption = {
+  readonly id: string;
+  readonly label: string;
+  readonly alt?: string;
+  readonly caption?: string;
+};
+
 type RichTextEditorProps = {
   readonly value: unknown;
   readonly onChange: (value: RichTextEditorDocument) => void;
@@ -53,7 +61,18 @@ type RichTextEditorProps = {
   readonly name?: string;
   readonly error?: string;
   readonly allowedNodes?: readonly string[];
-  readonly onUploadMedia?: (files: File[]) => void;
+  readonly mediaLibrary?: {
+    readonly load: (
+      query: string,
+      signal?: AbortSignal,
+    ) => Promise<readonly RichTextEditorMediaOption[]>;
+  };
+  readonly onUploadMedia?: (
+    files: File[],
+  ) =>
+    | void
+    | readonly RichTextEditorNode[]
+    | Promise<readonly RichTextEditorNode[] | void>;
 };
 
 const defaultAllowedNodes = [
@@ -75,6 +94,7 @@ export function RichTextEditor({
   name,
   error,
   allowedNodes = defaultAllowedNodes,
+  mediaLibrary,
   onUploadMedia,
 }: RichTextEditorProps) {
   const document = useMemo(() => normalizeDocument(value), [value]);
@@ -103,6 +123,22 @@ export function RichTextEditor({
     onChange({
       root: { children: [...document.root.children, node] },
     });
+  }
+
+  function appendMany(nodes: readonly RichTextEditorNode[]) {
+    if (nodes.length === 0) {
+      return;
+    }
+    onChange({
+      root: { children: [...document.root.children, ...nodes] },
+    });
+  }
+
+  async function uploadInlineMedia(files: File[]) {
+    const nodes = await onUploadMedia?.(files);
+    if (nodes) {
+      appendMany(nodes);
+    }
   }
 
   return (
@@ -165,7 +201,36 @@ export function RichTextEditor({
         <FileDropzone
           label="Upload inline media"
           accept={["image/*"]}
-          onFiles={onUploadMedia}
+          onFiles={(files) => void uploadInlineMedia(files)}
+        />
+      ) : null}
+      {mediaLibrary && canUse("media", allowedNodes) ? (
+        <ResourceSelector
+          kind="media"
+          value=""
+          onChange={(id) => {
+            if (!id) {
+              return;
+            }
+            append({
+              alt: "",
+              caption: "",
+              mediaId: String(id),
+              type: "media",
+            });
+          }}
+          source={{
+            load: async (query, signal) =>
+              (await mediaLibrary.load(query, signal)).map((option) => ({
+                id: option.id,
+                label: option.label,
+              })),
+            mode: "async",
+          }}
+          label="Insert media"
+          name={`${name ?? "rich-text"}-media`}
+          showLabel
+          variant="menu"
         />
       ) : null}
       <CodeEditor

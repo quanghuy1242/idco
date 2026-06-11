@@ -24,7 +24,12 @@ import { useAsyncList } from "react-stately";
 import { ChevronDown } from "lucide-react";
 import { Avatar } from "./avatar";
 
-export type ResourceKind = "user" | "organization" | "team" | "member";
+export type ResourceKind =
+  | "user"
+  | "organization"
+  | "team"
+  | "member"
+  | "media";
 
 export type ResourceOption = {
   readonly id: string;
