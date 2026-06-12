@@ -132,6 +132,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@internationalized/date':
+        specifier: 3.12.2
+        version: 3.12.2
       '@lexical/list':
         specifier: 0.45.0
         version: 0.45.0

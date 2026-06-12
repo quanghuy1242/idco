@@ -191,4 +191,39 @@ describe("ResourceSelector", () => {
     ) as HTMLInputElement;
     expect(hidden.value).toBe("u1,u2");
   });
+
+  it("supports the oauth-client kind without an avatar figure", async () => {
+    const { container } = render(
+      <ResourceSelector
+        kind="oauth-client"
+        label="OAuth client"
+        value=""
+        onChange={() => {}}
+        source={{
+          mode: "sync",
+          items: [{ id: "cli_web", label: "Web app", sublabel: "cli_web" }],
+        }}
+      />,
+    );
+    expect(await screen.findByText("Web app")).toBeInTheDocument();
+    expect(container.querySelector(".avatar")).toBeNull();
+  });
+
+  it("supports the resource-server kind", async () => {
+    render(
+      <ResourceSelector
+        kind="resource-server"
+        label="Resource server"
+        value=""
+        onChange={() => {}}
+        source={{
+          mode: "sync",
+          items: [
+            { id: "rs_content", label: "Content API", sublabel: "rs_content" },
+          ],
+        }}
+      />,
+    );
+    expect(await screen.findByText("Content API")).toBeInTheDocument();
+  });
 });

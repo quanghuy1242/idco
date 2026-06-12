@@ -29,7 +29,9 @@ export type ResourceKind =
   | "organization"
   | "team"
   | "member"
-  | "media";
+  | "media"
+  | "oauth-client"
+  | "resource-server";
 
 export type ResourceOption = {
   readonly id: string;

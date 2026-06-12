@@ -2,20 +2,24 @@ import { useState } from "react";
 import type { Story, StoryDefault } from "@ladle/react";
 import {
   Checkbox,
+  DateTimeInput,
   DurationInput,
   FilterDropdown,
   Form,
   HiddenInput,
   Inline,
+  NumberInput,
   Panel,
   RadioGroup,
   SearchInput,
   Stack,
   Switch,
+  TagInput,
   Text,
   TextInput,
   Textarea,
   TopbarSearchField,
+  defaultDomainValidate,
 } from "@idco/ui";
 
 export default { title: "Packages UI / Forms" } satisfies StoryDefault;
@@ -150,3 +154,47 @@ export const Duration: Story = () => (
     />
   </Stack>
 );
+
+export const NumbersAndDates: Story = () => {
+  const [quota, setQuota] = useState<number | null>(1000);
+  const [startsAt, setStartsAt] = useState<number | null>(Date.now());
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  const [domains, setDomains] = useState<string[]>(["acme.com"]);
+
+  return (
+    <Stack>
+      <NumberInput
+        label="Quota limit"
+        name="quotaLimit"
+        value={quota}
+        onChange={setQuota}
+        minValue={0}
+        description="Leave empty for an unlimited quota."
+      />
+      <DateTimeInput
+        label="Starts at"
+        name="startsAt"
+        value={startsAt}
+        onChange={setStartsAt}
+      />
+      <DateTimeInput
+        label="Expires at"
+        name="expiresAt"
+        value={expiresAt}
+        onChange={setExpiresAt}
+      />
+      <TagInput
+        label="Email domains"
+        name="emailDomains"
+        value={domains}
+        onChange={setDomains}
+        validate={defaultDomainValidate}
+        normalize={(value) => value.toLowerCase()}
+        placeholder="acme.com, then Enter"
+      />
+      <Text variant="caption">
+        Quota: {quota ?? "∞"}; domains: {domains.join(", ") || "any"}
+      </Text>
+    </Stack>
+  );
+};
