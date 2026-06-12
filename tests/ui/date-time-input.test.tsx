@@ -45,6 +45,29 @@ describe("DateTimeInput", () => {
     expect(await screen.findByRole("application")).toBeInTheDocument();
   });
 
+  it("offers a time field in the popover for datetime mode", async () => {
+    render(
+      <DateTimeInput label="Starts at" name="startsAt" defaultValue={sample} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /open calendar/i }));
+    expect(await screen.findByRole("application")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: /time/i })).toBeInTheDocument();
+  });
+
+  it("omits the time field in date mode", async () => {
+    render(
+      <DateTimeInput
+        label="Day"
+        name="day"
+        mode="date"
+        defaultValue={sample}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /open calendar/i }));
+    expect(await screen.findByRole("application")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /time/i })).toBeNull();
+  });
+
   it("only renders day segments in date mode", () => {
     render(
       <DateTimeInput

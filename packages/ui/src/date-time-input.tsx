@@ -6,8 +6,10 @@ import { useState } from "react";
 import {
   type CalendarDate,
   type CalendarDateTime,
+  Time,
   fromDate,
   getLocalTimeZone,
+  now,
   toCalendarDate,
   toCalendarDateTime,
 } from "@internationalized/date";
@@ -27,6 +29,8 @@ import {
   Heading,
   Label,
   Popover,
+  TimeField,
+  type TimeValue,
 } from "react-aria-components";
 import {
   Calendar as CalendarIcon,
@@ -84,9 +88,21 @@ export function DateTimeInput({
   const inputSize = size === "sm" ? "input-sm" : "";
   const hidden = current ? String(toMillis(current)) : "";
 
+  const withTime = mode === "datetime";
+  const dateTimeCurrent = current && "hour" in current ? current : null;
+  const timeValue: Time | null = dateTimeCurrent
+    ? new Time(dateTimeCurrent.hour, dateTimeCurrent.minute)
+    : null;
+
   function handleChange(next: DateValue | null) {
     if (!isControlled) setInternal(next);
     onChange?.(toMillis(next));
+  }
+
+  function handleTimeChange(next: TimeValue | null) {
+    if (!next) return;
+    const base = dateTimeCurrent ?? toCalendarDateTime(now(getLocalTimeZone()));
+    handleChange(base.set({ hour: next.hour, minute: next.minute }));
   }
 
   return (
@@ -166,6 +182,28 @@ export function DateTimeInput({
                 </CalendarGridBody>
               </CalendarGrid>
             </Calendar>
+            {withTime ? (
+              <div className="mt-3 flex items-center justify-between gap-2 border-t border-base-300 pt-3">
+                <span className="text-sm font-medium text-base-content/70">
+                  Time
+                </span>
+                <TimeField
+                  aria-label="Time"
+                  value={timeValue}
+                  onChange={handleTimeChange}
+                  shouldForceLeadingZeros
+                >
+                  <DateInput className="input input-bordered input-sm flex w-fit items-center bg-base-100 text-base-content">
+                    {(segment) => (
+                      <DateSegment
+                        segment={segment}
+                        className="rounded px-0.5 tabular-nums outline-none data-[focused]:bg-primary data-[focused]:text-primary-content data-[placeholder]:text-base-content/40"
+                      />
+                    )}
+                  </DateInput>
+                </TimeField>
+              </div>
+            ) : null}
           </Dialog>
         </Popover>
       </DatePicker>

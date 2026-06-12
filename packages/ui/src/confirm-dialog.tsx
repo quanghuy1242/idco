@@ -19,6 +19,17 @@ import { Button } from "./button";
 import { Form } from "./form";
 import { getActiveThemeName } from "./theme";
 
+export type ConfirmDialogSize = "sm" | "md" | "lg" | "xl";
+
+// Wider than DaisyUI's narrow `modal-box` default so multi-field forms read as a
+// panel, not a tall thin column. Pick `lg`/`xl` for builder-heavy dialogs.
+const sizeClass: Record<ConfirmDialogSize, string> = {
+  sm: "max-w-sm",
+  md: "max-w-xl",
+  lg: "max-w-3xl",
+  xl: "max-w-5xl",
+};
+
 type ConfirmDialogProps = {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
@@ -27,6 +38,7 @@ type ConfirmDialogProps = {
   readonly confirmLabel?: string;
   readonly cancelLabel?: string;
   readonly variant?: "primary" | "danger";
+  readonly size?: ConfirmDialogSize;
   readonly error?: string;
   readonly onConfirm: (
     formData: FormData,
@@ -43,6 +55,7 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   variant = "primary",
+  size = "md",
   error,
   onConfirm,
   confirmDisabled,
@@ -63,7 +76,7 @@ export function ConfirmDialog({
     >
       <Modal
         data-theme={themeName}
-        className="modal-box data-[entering]:animate-modal-panel-in data-[exiting]:animate-modal-panel-out"
+        className={`modal-box w-full ${sizeClass[size]} data-[entering]:animate-modal-panel-in data-[exiting]:animate-modal-panel-out`}
       >
         <Dialog className="outline-none">
           {({ close }) => (

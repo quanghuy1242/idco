@@ -49,6 +49,28 @@ describe("ConfirmDialog", () => {
     );
   });
 
+  it("defaults to a comfortable width and accepts a wider size", () => {
+    const { rerender } = render(
+      <ConfirmDialog
+        open
+        onOpenChange={() => {}}
+        title="Default"
+        onConfirm={() => {}}
+      />,
+    );
+    expect(document.querySelector(".modal-box")).toHaveClass("max-w-xl");
+    rerender(
+      <ConfirmDialog
+        open
+        onOpenChange={() => {}}
+        title="Wide"
+        size="lg"
+        onConfirm={() => {}}
+      />,
+    );
+    expect(document.querySelector(".modal-box")).toHaveClass("max-w-3xl");
+  });
+
   it("renders API errors inside the dialog", () => {
     render(
       <ConfirmDialog
