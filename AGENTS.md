@@ -23,6 +23,10 @@ Current invariants:
 - `packages/ui` source modules must remain side-effect-free. Consumers own app-global CSS, Tailwind setup, DaisyUI theme definitions, and portal theme placement.
 - Consumers must not compensate for missing primitives by hand-rolling UI in product repos. When `content-api` or `auth` needs reusable admin layout, typography, modal, menu, table, action, or form behavior, add the product-neutral primitive here with tests, publish a tagged idco release, then have the consumer repin the registry alias.
 
+## Cross-repo release (do this, do not improvise)
+
+Edit idco here → in the consumer run `pnpm dev:link` and prove `pnpm check` passes against your local idco → bump the version in EVERY publishable `packages/*/package.json` (and the root) to the same `X.Y.Z` so it matches the tag (the publish workflow verifies tag == every package version) → commit, `git tag vX.Y.Z && git push origin main vX.Y.Z` (the tag triggers publish) → back in the consumer run `pnpm dev:unlink` to repin the registry. Never hand-symlink `node_modules/@idco/*` and never delete the consumer lockfile for a full reinstall — `dev:link`/`dev:unlink` are the only supported paths and `dev:unlink` keeps the lockfile registry-clean with a minimal diff.
+
 ## UI package rules
 
 `@idco/ui` is the shared React component package used by `auth` and `content-api`. Shared primitives, icon registration, DaisyUI/React Aria behavior, typed visual props, and theme-adjacent helpers belong here. Product routes, generated clients, OAuth/session flows, and content/auth-specific data fetching stay in the consuming product repos.
