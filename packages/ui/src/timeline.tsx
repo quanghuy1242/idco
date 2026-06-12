@@ -33,42 +33,57 @@ const toneClass: Record<TimelineTone, string> = {
   info: "text-info",
 };
 
+const markerClass: Record<TimelineTone, string> = {
+  neutral: "bg-base-content text-base-100",
+  primary: "bg-primary text-primary-content",
+  success: "bg-success text-success-content",
+  warning: "bg-warning text-warning-content",
+  error: "bg-error text-error-content",
+  info: "bg-info text-info-content",
+};
+
 export function Timeline({ items, compact }: TimelineProps) {
   return (
     <ul
-      className={`timeline timeline-vertical timeline-compact ${compact ? "gap-0" : ""}`.trim()}
+      className={`timeline timeline-snap-icon timeline-vertical timeline-compact ${compact ? "gap-0" : ""}`.trim()}
     >
-      {items.map((item, index) => (
-        <li key={item.id}>
-          {index > 0 ? <hr className="bg-base-300" /> : null}
-          <div
-            className={`timeline-middle ${toneClass[item.tone ?? "neutral"]}`}
-          >
-            {item.icon ? (
-              <NavIcon name={item.icon} />
-            ) : (
-              <span
-                className="block size-2 rounded-full bg-current"
-                aria-hidden="true"
-              />
-            )}
-          </div>
-          <div className={`timeline-end ${compact ? "mb-2" : "mb-4"}`}>
-            <div className="text-sm font-medium text-base-content">
-              {item.title}
+      {items.map((item, index) => {
+        const tone = item.tone ?? "neutral";
+        return (
+          <li key={item.id}>
+            {index > 0 ? <hr className="bg-base-300" /> : null}
+            <div className={`timeline-middle ${toneClass[tone]}`}>
+              {item.icon ? (
+                <span
+                  className={`flex size-4 items-center justify-center rounded-full ${markerClass[tone]}`}
+                  aria-hidden="true"
+                >
+                  <NavIcon name={item.icon} variant="timeline" />
+                </span>
+              ) : (
+                <span
+                  className={`block size-4 rounded-full ${markerClass[tone]}`}
+                  aria-hidden="true"
+                />
+              )}
             </div>
-            {item.meta ? (
-              <div className="text-xs text-base-content/50">{item.meta}</div>
-            ) : null}
-            {item.detail ? (
-              <div className="mt-1 text-sm text-base-content/70">
-                {item.detail}
+            <div className={`timeline-end ${compact ? "mb-2" : "mb-4"}`}>
+              <div className="text-sm font-medium text-base-content">
+                {item.title}
               </div>
-            ) : null}
-          </div>
-          {index < items.length - 1 ? <hr className="bg-base-300" /> : null}
-        </li>
-      ))}
+              {item.meta ? (
+                <div className="text-xs text-base-content/50">{item.meta}</div>
+              ) : null}
+              {item.detail ? (
+                <div className="mt-1 text-sm text-base-content/70">
+                  {item.detail}
+                </div>
+              ) : null}
+            </div>
+            {index < items.length - 1 ? <hr className="bg-base-300" /> : null}
+          </li>
+        );
+      })}
     </ul>
   );
 }

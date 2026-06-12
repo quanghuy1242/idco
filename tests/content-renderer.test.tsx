@@ -16,15 +16,51 @@ describe("@idco/content-renderer", () => {
                 children: [{ text: "Hello", type: "text" }],
                 type: "paragraph",
               },
+              {
+                children: [{ text: "Heads up", type: "text" }],
+                tone: "warning",
+                type: "callout",
+              },
               { language: "ts", text: "const x = 1;", type: "code-block" },
+              { alt: "Logo", mediaId: "media-logo", type: "media" },
+              { postId: "post-1", title: "Read next", type: "post-ref" },
+              { type: "embed", url: "https://example.com/embed/demo" },
             ],
           },
         }}
+        allowedEmbedDomains={["example.com"]}
+        resolveMedia={(node) =>
+          node.mediaId === "media-logo"
+            ? { alt: "Resolved logo", src: "/logo.png" }
+            : null
+        }
+        resolvePost={(node) =>
+          node.postId === "post-1"
+            ? { href: "/posts/read-next", label: "Read next" }
+            : null
+        }
       />,
     );
 
     expect(screen.getByText("Hello").tagName.toLowerCase()).toBe("p");
-    expect(screen.getByText("const x = 1;").tagName.toLowerCase()).toBe("code");
+    expect(screen.getByText("Heads up").closest("aside")).toHaveAttribute(
+      "data-tone",
+      "warning",
+    );
+    expect(screen.getByText("const").closest("code")).toHaveTextContent(
+      "const x = 1;",
+    );
+    expect(screen.getByRole("img", { name: /resolved logo/i })).toHaveAttribute(
+      "src",
+      "/logo.png",
+    );
+    expect(screen.getByRole("link", { name: /read next/i })).toHaveAttribute(
+      "href",
+      "/posts/read-next",
+    );
+    expect(
+      screen.getByRole("link", { name: "https://example.com/embed/demo" }),
+    ).toHaveAttribute("href", "https://example.com/embed/demo");
   });
 
   it("falls back to children for unknown node types", () => {
@@ -48,5 +84,20 @@ describe("@idco/content-renderer", () => {
 
   it("returns null for malformed documents", () => {
     expect(renderRichTextDocument({ body: [] })).toBeNull();
+  });
+
+  it("skips disallowed embeds", () => {
+    render(
+      <RichTextRenderer
+        value={{
+          root: {
+            children: [{ type: "embed", url: "https://evil.test/embed" }],
+          },
+        }}
+        allowedEmbedDomains={["example.com"]}
+      />,
+    );
+
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });

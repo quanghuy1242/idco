@@ -41,6 +41,35 @@ describe("Timeline", () => {
     expect(container.querySelector(".timeline-middle svg")).toBeInTheDocument();
   });
 
+  it("uses DaisyUI timeline markers and connector segments", () => {
+    const { container } = render(
+      <Timeline
+        items={[
+          { id: "1", title: "Created", tone: "success", icon: "Check" },
+          { id: "2", title: "Reviewed", tone: "info" },
+          { id: "3", title: "Published", tone: "primary", icon: "Upload" },
+        ]}
+      />,
+    );
+    expect(container.querySelector("ul")).toHaveClass(
+      "timeline",
+      "timeline-snap-icon",
+      "timeline-vertical",
+      "timeline-compact",
+    );
+    expect(container.querySelector(".timeline-middle > span")).toHaveClass(
+      "size-4",
+      "rounded-full",
+    );
+    expect(container.querySelector(".timeline-middle svg")).toHaveClass(
+      "size-2.5",
+    );
+    expect(
+      container.querySelectorAll(".timeline-middle > span.size-4"),
+    ).toHaveLength(3);
+    expect(container.querySelectorAll("hr")).toHaveLength(4);
+  });
+
   it("renders an empty list without crashing", () => {
     const { container } = render(<Timeline items={[]} />);
     expect(container.querySelector("ul.timeline")).toBeInTheDocument();

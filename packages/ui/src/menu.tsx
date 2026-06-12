@@ -57,14 +57,15 @@ export function MenuTrigger({
 
 export function Menu<T extends object>(props: MenuProps<T>) {
   const { className, ...menuProps } = props;
+  const panelClassName =
+    "rounded-box border border-base-300 bg-base-100 p-2 shadow-lg";
   const baseClassName = className
-    ? "menu popover-panel z-1"
-    : "menu popover-panel w-52 z-1";
+    ? `menu ${panelClassName} z-1`
+    : `menu ${panelClassName} w-52 z-1`;
 
   return (
     <AriaMenu
       {...menuProps}
-      render={((rp: Record<string, unknown>) => <ul {...rp} />) as never}
       className={composeRenderProps(className, (resolvedClassName) =>
         [baseClassName, resolvedClassName].filter(Boolean).join(" "),
       )}
@@ -79,33 +80,32 @@ type MenuItemHref = {
 };
 
 export function MenuItem(props: MenuItemProps & Partial<MenuItemHref>) {
+  const { badge, children, className, label, ...itemProps } = props;
   const textValue =
     props.textValue ??
-    props.label ??
-    (typeof props.children === "string" ? props.children : undefined);
+    label ??
+    (typeof children === "string" ? children : undefined);
   const content = (
     <>
-      {props.label ?? (props.children as ReactNode)}
-      {props.badge ? (
-        <span className="badge badge-sm">{props.badge}</span>
-      ) : null}
+      {label ?? (children as ReactNode)}
+      {badge ? <span className="badge badge-sm">{badge}</span> : null}
     </>
   );
 
   return (
     <AriaMenuItem
-      {...props}
+      {...itemProps}
       textValue={textValue}
-      render={
-        ((dp: Record<string, unknown>) =>
-          "href" in dp ? (
-            <li>
-              <a {...dp}>{content}</a>
-            </li>
-          ) : (
-            <li {...dp}>{content}</li>
-          )) as never
-      }
-    />
+      className={composeRenderProps(className, (resolvedClassName) =>
+        [
+          "flex cursor-pointer items-center gap-2 rounded-field px-3 py-2 text-sm outline-none hover:bg-base-200 focus:bg-base-200 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
+          resolvedClassName,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      )}
+    >
+      {content}
+    </AriaMenuItem>
   );
 }

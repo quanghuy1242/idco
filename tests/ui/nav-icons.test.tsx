@@ -25,6 +25,11 @@ describe("NavIcon", () => {
     expect(container.querySelector("svg")).toHaveClass("size-[1.2em]");
   });
 
+  it("renders the timeline size for timeline markers", () => {
+    const { container } = render(<NavIcon name="Check" variant="timeline" />);
+    expect(container.querySelector("svg")).toHaveClass("size-2.5");
+  });
+
   it("renders nothing for an unregistered name", () => {
     const { container } = render(
       <NavIcon name="DefinitelyNotARegisteredIcon" />,

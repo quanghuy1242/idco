@@ -9,7 +9,8 @@ describe("CodeBlock", () => {
     render(<CodeBlock value={'{\n  "kid": "abc"\n}'} />);
     const code = screen.getByText(/"kid"/i);
     expect(code.tagName.toLowerCase()).toBe("code");
-    expect(code.closest("pre")).toHaveClass("whitespace-pre", "max-h-72");
+    expect(code.closest(".mockup-code")).toHaveClass("max-h-72");
+    expect(code.closest("pre")).toHaveAttribute("data-prefix", "");
   });
 
   it("renders a label and action", () => {
@@ -26,6 +27,8 @@ describe("CodeBlock", () => {
 
   it("supports compact height", () => {
     render(<CodeBlock value="short" maxHeight="sm" />);
-    expect(screen.getByText("short").closest("pre")).toHaveClass("max-h-40");
+    expect(screen.getByText("short").closest(".mockup-code")).toHaveClass(
+      "max-h-40",
+    );
   });
 });

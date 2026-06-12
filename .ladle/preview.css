@@ -222,3 +222,54 @@
     @apply text-xs font-semibold text-base-content/60 mb-0.5;
   }
 }
+
+/* Prism syntax highlighting — theme-aware token palette for the CodeEditor / code-block nodes. */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+  font-style: italic;
+}
+.token.punctuation {
+  color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}
+.token.keyword,
+.token.tag,
+.token.selector,
+.token.atrule,
+.token.important {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.token.string,
+.token.char,
+.token.attr-value,
+.token.regex,
+.token.url {
+  color: var(--color-success);
+}
+.token.number,
+.token.boolean,
+.token.constant {
+  color: var(--color-warning);
+}
+.token.function,
+.token.class-name,
+.token.builtin,
+.token.namespace {
+  color: var(--color-info);
+}
+.token.property,
+.token.attr-name,
+.token.symbol,
+.token.variable {
+  color: var(--color-secondary);
+}
+.token.operator,
+.token.entity {
+  color: var(--color-accent);
+}
+.token.deleted {
+  color: var(--color-error);
+}

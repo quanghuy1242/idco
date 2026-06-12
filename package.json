@@ -1,6 +1,6 @@
 {
   "name": "idco",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "packageManager": "pnpm@11.1.2",
   "type": "module",
@@ -25,6 +25,8 @@
     "@lexical/list": "0.45.0",
     "@lexical/react": "0.45.0",
     "@lexical/rich-text": "0.45.0",
+    "@lexical/selection": "0.45.0",
+    "@lexical/utils": "0.45.0",
     "jose": "^6.2.3",
     "lexical": "0.45.0",
     "lucide-react": "1.16.0",
@@ -59,6 +61,10 @@
     "vitest": "4.1.6"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["aislop", "fallow", "sharp"]
+    "onlyBuiltDependencies": [
+      "aislop",
+      "fallow",
+      "sharp"
+    ]
   }
 }

@@ -37,11 +37,15 @@ export function CodeBlock({
           {action}
         </div>
       ) : null}
-      <pre
-        className={`m-0 overflow-auto p-3 font-mono text-sm leading-relaxed text-base-content whitespace-pre ${maxHeightClass[maxHeight]}`}
+      <div
+        className={`mockup-code overflow-auto rounded-none bg-base-200 text-base-content ${maxHeightClass[maxHeight]}`}
       >
-        <code>{value}</code>
-      </pre>
+        {value.split("\n").map((line, index) => (
+          <pre key={index} data-prefix="">
+            <code>{line || " "}</code>
+          </pre>
+        ))}
+      </div>
     </div>
   );
 }

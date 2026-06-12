@@ -1,4 +1,13 @@
 import { Fragment, createElement, type ReactNode } from "react";
+import Prism from "prismjs";
+// Load grammars beyond Prism's core so json/ts/python render with token parity to the editor.
+/* eslint-disable import/no-unassigned-import -- Prism grammar packs register onto the Prism singleton via import side effect; there is no functional API. */
+import "prismjs/components/prism-json";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-jsx";
+import "prismjs/components/prism-tsx";
+import "prismjs/components/prism-python";
+/* eslint-enable import/no-unassigned-import */
 
 export type RichTextNode = {
   readonly type?: string;
@@ -183,11 +192,36 @@ function renderCodeBlock(
   _children: ReactNode,
   key: string,
 ) {
+  const language = stringValue(node.language) ?? "text";
+  const grammar = grammarFor(language);
   return createElement(
     "pre",
-    { "data-language": stringValue(node.language) ?? "text", key },
-    createElement("code", null, stringValue(node.text) ?? ""),
+    { "data-language": language, key },
+    createElement("code", {
+      dangerouslySetInnerHTML: {
+        __html: Prism.highlight(
+          stringValue(node.text) ?? "",
+          grammar,
+          language,
+        ),
+      },
+    }),
   );
+}
+
+function grammarFor(language: string) {
+  if (language === "json") return Prism.languages.json ?? Prism.languages.clike;
+  if (language === "tsx") return Prism.languages.tsx ?? Prism.languages.jsx;
+  if (language === "ts" || language === "typescript") {
+    return Prism.languages.typescript ?? Prism.languages.javascript;
+  }
+  if (language === "js" || language === "javascript") {
+    return Prism.languages.javascript;
+  }
+  if (language === "python" || language === "py") {
+    return Prism.languages.python ?? {};
+  }
+  return Prism.languages.plain ?? {};
 }
 
 function embedAllowed(

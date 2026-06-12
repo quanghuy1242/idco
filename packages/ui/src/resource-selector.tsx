@@ -37,7 +37,8 @@ export type ResourceKind =
   | "member"
   | "media"
   | "oauth-client"
-  | "resource-server";
+  | "resource-server"
+  | "record";
 
 export type ResourceOption = {
   readonly id: string;
@@ -75,6 +76,7 @@ type ResourceSelectorProps = {
   /** Debounce in ms for async search input. Default 250. */
   readonly searchDebounceMs?: number;
   readonly renderOption?: (option: ResourceOption) => ReactNode;
+  readonly onSelectOption?: (option: ResourceOption) => void;
   readonly size?: "sm" | "md";
   readonly variant?: "inline" | "menu";
   readonly width?: "full" | "compact";
@@ -165,6 +167,7 @@ export function ResourceSelector({
   name,
   excludeIds = [],
   renderOption,
+  onSelectOption,
   size = "md",
   variant = "inline",
   width = "full",
@@ -251,7 +254,10 @@ export function ResourceSelector({
 
   function pick(id: string) {
     const option = sourceItems.find((o) => o.id === id) ?? cache[id];
-    if (option) setCache((c) => ({ ...c, [id]: option }));
+    if (option) {
+      setCache((c) => ({ ...c, [id]: option }));
+      onSelectOption?.(option);
+    }
     if (selectionMode === "multiple") {
       const next = selectedSet.has(id)
         ? selectedIds.filter((v) => v !== id)
@@ -353,7 +359,7 @@ export function ResourceSelector({
             />
           </AriaButton>
           <Popover className="z-50 w-(--trigger-width) data-[entering]:animate-popover-in data-[exiting]:animate-popover-out">
-            <div className="popover-panel flex max-h-80 w-full flex-col gap-2 p-2">
+            <div className="flex max-h-80 w-full flex-col gap-2 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
               <Autocomplete
                 inputValue={rawQuery}
                 onInputChange={setRawQuery}
