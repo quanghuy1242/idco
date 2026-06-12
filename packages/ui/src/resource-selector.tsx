@@ -1,7 +1,13 @@
 // DaisyUI 5: https://daisyui.com/components/dropdown/
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Autocomplete,
   Button as AriaButton,
@@ -62,6 +68,12 @@ type ResourceSelectorProps = {
   readonly showLabel?: boolean;
   readonly name?: string;
   readonly excludeIds?: ReadonlyArray<string>;
+  /** Options to seed the id-to-label cache up front for selected async values. */
+  readonly initialOptions?: ReadonlyArray<ResourceOption>;
+  /** Minimum query length before async loading starts. Default 0. */
+  readonly minQueryLength?: number;
+  /** Debounce in ms for async search input. Default 250. */
+  readonly searchDebounceMs?: number;
   readonly renderOption?: (option: ResourceOption) => ReactNode;
   readonly size?: "sm" | "md";
   readonly variant?: "inline" | "menu";
@@ -99,12 +111,54 @@ function defaultRenderOption(
   );
 }
 
+function optionChanged(
+  current: ResourceOption | undefined,
+  next: ResourceOption,
+): boolean {
+  return (
+    !current ||
+    current.label !== next.label ||
+    current.sublabel !== next.sublabel ||
+    current.image !== next.image ||
+    current.badge !== next.badge
+  );
+}
+
+function useDebouncedCallback<T extends readonly unknown[]>(
+  callback: (...args: T) => void,
+  delayMs: number,
+) {
+  const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timeout.current) clearTimeout(timeout.current);
+    },
+    [],
+  );
+
+  return useCallback(
+    (...args: T) => {
+      if (timeout.current) clearTimeout(timeout.current);
+      if (delayMs <= 0) {
+        callback(...args);
+        return;
+      }
+      timeout.current = setTimeout(() => callback(...args), delayMs);
+    },
+    [callback, delayMs],
+  );
+}
+
 export function ResourceSelector({
   kind,
   selectionMode = "single",
   value,
   onChange,
   source,
+  initialOptions,
+  minQueryLength = 0,
+  searchDebounceMs = 250,
   placeholder = "Search…",
   label,
   showLabel,
@@ -118,17 +172,34 @@ export function ResourceSelector({
   const { contains } = useFilter({ sensitivity: "base" });
   const [cache, setCache] = useState<Record<string, ResourceOption>>({});
   const [menuOpen, setMenuOpen] = useState(false);
+  const [rawQuery, setRawQuery] = useState("");
   const fieldLabel = label ?? `Search ${kind}s`;
 
   const list = useAsyncList<ResourceOption>({
     async load({ signal, filterText }) {
       if (source.mode === "async") {
-        const items = await source.load(filterText ?? "", signal);
+        const query = filterText ?? "";
+        if (query.trim().length < minQueryLength) return { items: [] };
+        const items = await source.load(query, signal);
         return { items };
       }
       return { items: [...source.items] };
     },
   });
+  const setListFilterTextRef = useRef(list.setFilterText);
+  setListFilterTextRef.current = list.setFilterText;
+  const setListFilterText = useCallback(
+    (query: string) => setListFilterTextRef.current(query),
+    [],
+  );
+  const debouncedSetFilterText = useDebouncedCallback(
+    setListFilterText,
+    source.mode === "async" ? searchDebounceMs : 0,
+  );
+
+  useEffect(() => {
+    debouncedSetFilterText(rawQuery);
+  }, [debouncedSetFilterText, rawQuery]);
 
   const selectedIds = Array.isArray(value) ? value : value ? [value] : [];
   const selectedSet = new Set(selectedIds);
@@ -137,7 +208,7 @@ export function ResourceSelector({
     ...(selectionMode === "multiple" ? selectedIds : []),
   ]);
   const sourceItems = source.mode === "sync" ? source.items : list.items;
-  const query = list.filterText.trim();
+  const query = rawQuery.trim();
   const filteredItems =
     source.mode === "sync" && query !== ""
       ? sourceItems.filter((o) =>
@@ -154,7 +225,7 @@ export function ResourceSelector({
       let changed = false;
       const next = { ...current };
       for (const option of sourceItems) {
-        if (!next[option.id]) {
+        if (optionChanged(next[option.id], option)) {
           next[option.id] = option;
           changed = true;
         }
@@ -162,6 +233,21 @@ export function ResourceSelector({
       return changed ? next : current;
     });
   }, [sourceItems]);
+
+  useEffect(() => {
+    if (!initialOptions?.length) return;
+    setCache((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const option of initialOptions) {
+        if (optionChanged(next[option.id], option)) {
+          next[option.id] = option;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [initialOptions]);
 
   function pick(id: string) {
     const option = sourceItems.find((o) => o.id === id) ?? cache[id];
@@ -174,6 +260,7 @@ export function ResourceSelector({
     } else {
       onChange(id);
       list.setFilterText("");
+      setRawQuery("");
       setMenuOpen(false);
     }
   }
@@ -196,7 +283,11 @@ export function ResourceSelector({
         : placeholder;
   const renderedEmptyState = (
     <div className="px-3 py-2 text-sm text-base-content/50">
-      {list.loadingState === "loading" ? "Searching…" : "No results"}
+      {source.mode === "async" && query.length < minQueryLength
+        ? "Type to search"
+        : list.loadingState === "loading"
+          ? "Searching…"
+          : "No results"}
     </div>
   );
 
@@ -264,8 +355,8 @@ export function ResourceSelector({
           <Popover className="z-50 w-(--trigger-width) data-[entering]:animate-popover-in data-[exiting]:animate-popover-out">
             <div className="popover-panel flex max-h-80 w-full flex-col gap-2 p-2">
               <Autocomplete
-                inputValue={list.filterText}
-                onInputChange={list.setFilterText}
+                inputValue={rawQuery}
+                onInputChange={setRawQuery}
                 filter={source.mode === "sync" ? contains : undefined}
               >
                 {searchField}
@@ -294,8 +385,8 @@ export function ResourceSelector({
         </MenuTrigger>
       ) : (
         <Autocomplete
-          inputValue={list.filterText}
-          onInputChange={list.setFilterText}
+          inputValue={rawQuery}
+          onInputChange={setRawQuery}
           filter={source.mode === "sync" ? contains : undefined}
         >
           {searchField}

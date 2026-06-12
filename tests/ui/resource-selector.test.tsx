@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ResourceSelector,
   type ResourceOption,
@@ -20,6 +26,10 @@ const members: ResourceOption[] = [
 ];
 
 const syncSource: ResourceSource = { mode: "sync", items: members };
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("ResourceSelector", () => {
   it("renders options from a sync source", async () => {
@@ -164,6 +174,7 @@ describe("ResourceSelector", () => {
         value=""
         onChange={() => {}}
         source={asyncSource}
+        searchDebounceMs={0}
       />,
     );
     expect(await screen.findByText("Alice Nguyen")).toBeInTheDocument();
@@ -173,6 +184,214 @@ describe("ResourceSelector", () => {
     });
     expect(await screen.findByText("Alice Nguyen")).toBeInTheDocument();
     expect(load).toHaveBeenCalledWith("alice", expect.any(AbortSignal));
+  });
+
+  it("debounces async search input before loading", async () => {
+    vi.useFakeTimers();
+    const load = vi.fn<
+      (query: string, signal: AbortSignal) => Promise<ResourceOption[]>
+    >(async (query) =>
+      query === "ali" ? [members[0]!] : query ? [] : members,
+    );
+    render(
+      <ResourceSelector
+        kind="user"
+        value=""
+        onChange={() => {}}
+        source={{ mode: "async", load }}
+        minQueryLength={1}
+        searchDebounceMs={300}
+      />,
+    );
+
+    load.mockClear();
+    const input = screen.getByRole("searchbox", { name: /search users/i });
+    fireEvent.change(input, { target: { value: "a" } });
+    fireEvent.change(input, { target: { value: "al" } });
+    fireEvent.change(input, { target: { value: "ali" } });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(299);
+    });
+    expect(load).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(load).toHaveBeenCalledWith("ali", expect.any(AbortSignal));
+  });
+
+  it("renders a preset single value from initialOptions in async mode", async () => {
+    render(
+      <ResourceSelector
+        kind="oauth-client"
+        label="Client"
+        value="cli_content"
+        onChange={() => {}}
+        source={{ mode: "async", load: async () => [] }}
+        initialOptions={[
+          {
+            id: "cli_content",
+            label: "Content Web",
+            sublabel: "cli_content",
+          },
+        ]}
+        variant="menu"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /client/i }),
+    ).toHaveTextContent("Content Web");
+  });
+
+  it("replaces placeholder cached labels when initialOptions hydrate later", async () => {
+    const { rerender } = render(
+      <ResourceSelector
+        kind="oauth-client"
+        label="Client"
+        value="cli_content"
+        onChange={() => {}}
+        source={{ mode: "async", load: async () => [] }}
+        initialOptions={[{ id: "cli_content", label: "cli_content" }]}
+        variant="menu"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /client/i }),
+    ).toHaveTextContent("cli_content");
+
+    rerender(
+      <ResourceSelector
+        kind="oauth-client"
+        label="Client"
+        value="cli_content"
+        onChange={() => {}}
+        source={{ mode: "async", load: async () => [] }}
+        initialOptions={[
+          {
+            id: "cli_content",
+            label: "Content Web",
+            sublabel: "cli_content",
+          },
+        ]}
+        variant="menu"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /client/i })).toHaveTextContent(
+        "Content Web",
+      ),
+    );
+  });
+
+  it("renders preset multi-value chips from initialOptions in async mode", async () => {
+    render(
+      <ResourceSelector
+        kind="team"
+        label="Default teams"
+        selectionMode="multiple"
+        value={["team_ops", "team_editorial"]}
+        onChange={() => {}}
+        source={{ mode: "async", load: async () => [] }}
+        initialOptions={[
+          { id: "team_ops", label: "Operations" },
+          { id: "team_editorial", label: "Editorial" },
+        ]}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /remove operations/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /remove editorial/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("suppresses async loading below minQueryLength", async () => {
+    const load = vi.fn<
+      (query: string, signal: AbortSignal) => Promise<ResourceOption[]>
+    >(async () => members);
+    render(
+      <ResourceSelector
+        kind="user"
+        value=""
+        onChange={() => {}}
+        source={{ mode: "async", load }}
+        minQueryLength={3}
+        searchDebounceMs={0}
+      />,
+    );
+
+    expect(await screen.findByText("Type to search")).toBeInTheDocument();
+    expect(load).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: /search users/i }), {
+      target: { value: "al" },
+    });
+    expect(await screen.findByText("Type to search")).toBeInTheDocument();
+    expect(load).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: /search users/i }), {
+      target: { value: "ali" },
+    });
+    expect(await screen.findByText("Alice Nguyen")).toBeInTheDocument();
+    expect(load).toHaveBeenCalledWith("ali", expect.any(AbortSignal));
+  });
+
+  it("keeps the latest async query results when an older load resolves late", async () => {
+    let resolveA: ((items: ResourceOption[]) => void) | undefined;
+    let resolveAl: ((items: ResourceOption[]) => void) | undefined;
+    const load = vi.fn<
+      (query: string, signal: AbortSignal) => Promise<ResourceOption[]>
+    >((query) => {
+      if (query === "a") {
+        return new Promise((resolve) => {
+          resolveA = resolve;
+        });
+      }
+      if (query === "al") {
+        return new Promise((resolve) => {
+          resolveAl = resolve;
+        });
+      }
+      return Promise.resolve([]);
+    });
+
+    render(
+      <ResourceSelector
+        kind="user"
+        value=""
+        onChange={() => {}}
+        source={{ mode: "async", load }}
+        searchDebounceMs={0}
+      />,
+    );
+
+    const input = screen.getByRole("searchbox", { name: /search users/i });
+    fireEvent.change(input, { target: { value: "a" } });
+    await waitFor(() =>
+      expect(load).toHaveBeenCalledWith("a", expect.any(AbortSignal)),
+    );
+    fireEvent.change(input, { target: { value: "al" } });
+    await waitFor(() =>
+      expect(load).toHaveBeenCalledWith("al", expect.any(AbortSignal)),
+    );
+
+    await act(async () => {
+      resolveAl?.([members[1]!]);
+    });
+    expect(await screen.findByText("Bob Tran")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveA?.([members[0]!]);
+    });
+    expect(screen.getByText("Bob Tran")).toBeInTheDocument();
+    expect(screen.queryByText("Alice Nguyen")).toBeNull();
   });
 
   it("serializes selected ids into a hidden field", async () => {

@@ -39,6 +39,27 @@ const resources: ResourceOption[] = [
   },
 ];
 
+const oauthClients: ResourceOption[] = [
+  {
+    id: "cli_content_web",
+    label: "Content Web",
+    sublabel: "cli_content_web",
+    badge: "web",
+  },
+  {
+    id: "cli_admin_console",
+    label: "Admin Console",
+    sublabel: "cli_admin_console",
+    badge: "public",
+  },
+  {
+    id: "cli_docs",
+    label: "Docs Portal",
+    sublabel: "cli_docs",
+    badge: "native",
+  },
+];
+
 const scopeSuggestions = [
   { value: "members:read", description: "Read members", group: "Members" },
   { value: "members:write", description: "Write members", group: "Members" },
@@ -100,6 +121,31 @@ export const Builders: Story = () => {
             setMultiResource(Array.isArray(next) ? next : [next])
           }
           source={{ mode: "sync", items: resources }}
+          variant="menu"
+          width="compact"
+          showLabel
+        />
+        <ResourceSelector
+          kind="oauth-client"
+          label="Async OAuth client"
+          value="cli_content_web"
+          onChange={(next) => setSingleResource(String(next))}
+          source={{
+            mode: "async",
+            load: async (query) => {
+              await new Promise((resolve) => setTimeout(resolve, 150));
+              const normalized = query.trim().toLowerCase();
+              return oauthClients.filter((client) =>
+                normalized
+                  ? `${client.label} ${client.sublabel}`
+                      .toLowerCase()
+                      .includes(normalized)
+                  : true,
+              );
+            },
+          }}
+          initialOptions={oauthClients.slice(0, 1)}
+          minQueryLength={1}
           variant="menu"
           width="compact"
           showLabel
