@@ -20,6 +20,15 @@ GitHub Packages requires the npm scope to match the account or organization name
 - `pnpm typecheck` — `tsgo --noEmit`.
 - `pnpm test` — Vitest UI/lib suite.
 - `pnpm build` — package build outputs under `packages/*/dist`.
+- `pnpm build:ladle` — static Ladle component gallery output under `.ladle/build`.
+
+## Component gallery
+
+The `pages` workflow publishes the static Ladle build to GitHub Pages on every push to `main` and on manual dispatch. The workflow runs `pnpm build:ladle` with `LADLE_BASE=/idco/` so asset URLs work from the repository Pages path:
+
+```
+https://quanghuy1242.github.io/idco/
+```
 
 ## Publishing
 

@@ -4,6 +4,9 @@
     "noEmit": false,
     "declaration": true,
     "declarationMap": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "paths": {
+      "@quanghuy1242/idco-ui": ["../ui/dist/index.d.ts"]
+    }
   }
 }

@@ -14,8 +14,9 @@
     "forceConsistentCasingInFileNames": true,
     "paths": {
       "@idco/ui": ["./packages/ui/src/index.ts"],
+      "@quanghuy1242/idco-ui": ["./packages/ui/src/index.ts"],
       "@idco/lib": ["./packages/lib/src/index.ts"],
-      "@idco/content-renderer": ["./packages/content-renderer/src/index.ts"],
+      "@idco/content-renderer": ["./packages/content-renderer/src/index.tsx"],
       "@idco/editor": ["./packages/editor/src/index.ts"]
     }
   },

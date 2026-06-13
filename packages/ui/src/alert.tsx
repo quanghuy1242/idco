@@ -45,7 +45,11 @@ export function AlertGlyph({ tone }: { readonly tone: AlertTone }) {
 
 export function Alert({ tone = "info", children }: AlertProps) {
   return (
-    <div role="alert" className={`alert ${alertToneClass[tone]}`}>
+    <div
+      role="alert"
+      data-tone={tone}
+      className={`alert ${alertToneClass[tone]} items-start`}
+    >
       <AlertGlyph tone={tone} />
       <span>{children}</span>
     </div>

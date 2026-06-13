@@ -117,9 +117,9 @@ importers:
 
   packages/content-renderer:
     dependencies:
-      prismjs:
-        specifier: ^1.30.0
-        version: 1.30.0
+      '@quanghuy1242/idco-ui':
+        specifier: workspace:^
+        version: link:../ui
       react:
         specifier: ^19.0.0
         version: 19.2.6

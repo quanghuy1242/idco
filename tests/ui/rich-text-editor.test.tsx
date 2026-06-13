@@ -1,6 +1,23 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+
+// The shared ResourceSelector picker is a React Aria ComboBox: focus opens the
+// popover listbox, then options can be clicked.
+async function pickFromCombo(name: RegExp, option: RegExp): Promise<void> {
+  const combo = (await screen.findAllByRole("combobox", { name }))[0]!;
+  await act(async () => {
+    combo.focus();
+    fireEvent.focus(combo);
+  });
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { RichTextEditor, type RichTextEditorDocument } from "@idco/ui";
@@ -176,14 +193,7 @@ describe("RichTextEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /insert/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /media/i }));
-    fireEvent.click(
-      (
-        await screen.findAllByRole("button", {
-          name: /pick from media library/i,
-        })
-      )[0],
-    );
-    fireEvent.click(await screen.findByRole("menuitem", { name: /cover/i }));
+    await pickFromCombo(/pick from media library/i, /cover/i);
 
     await waitFor(() =>
       expect(onChange).toHaveBeenLastCalledWith(
@@ -264,12 +274,7 @@ describe("RichTextEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /insert/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /post ref/i }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: /referenced post/i }),
-    );
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: /referenced post/i }),
-    );
+    await pickFromCombo(/referenced post/i, /referenced post/i);
 
     await waitFor(() =>
       expect(onChange).toHaveBeenLastCalledWith(
@@ -348,14 +353,7 @@ describe("RichTextEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /insert/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /media/i }));
-    fireEvent.click(
-      (
-        await screen.findAllByRole("button", {
-          name: /pick from media library/i,
-        })
-      )[0],
-    );
-    fireEvent.click(await screen.findByRole("menuitem", { name: /cover/i }));
+    await pickFromCombo(/pick from media library/i, /cover/i);
 
     const image = await screen.findByRole("img", { name: /cover/i });
     expect(image).toHaveAttribute("src", "https://cdn.test/cover.png");

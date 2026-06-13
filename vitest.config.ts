@@ -13,6 +13,12 @@ export default defineConfig({
         ),
       },
       {
+        find: "@quanghuy1242/idco-ui",
+        replacement: fileURLToPath(
+          new URL("./packages/ui/src/index.ts", import.meta.url),
+        ),
+      },
+      {
         find: "@idco/lib",
         replacement: fileURLToPath(
           new URL("./packages/lib/src/index.ts", import.meta.url),
@@ -21,7 +27,7 @@ export default defineConfig({
       {
         find: "@idco/content-renderer",
         replacement: fileURLToPath(
-          new URL("./packages/content-renderer/src/index.ts", import.meta.url),
+          new URL("./packages/content-renderer/src/index.tsx", import.meta.url),
         ),
       },
       {

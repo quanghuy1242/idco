@@ -1,6 +1,6 @@
 {
   "name": "@quanghuy1242/idco-content-renderer",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "type": "module",
   "sideEffects": false,
   "publishConfig": {
@@ -17,7 +17,7 @@
     "typecheck": "tsgo -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "prismjs": "^1.30.0"
+    "@quanghuy1242/idco-ui": "workspace:^"
   },
   "peerDependencies": {
     "react": "^19.0.0"

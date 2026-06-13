@@ -1,6 +1,6 @@
 {
   "name": "idco",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "packageManager": "pnpm@11.1.2",
   "type": "module",

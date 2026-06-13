@@ -1,8 +1,18 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ScopeBuilder, defaultScopeValidate } from "@idco/ui";
+
+// The ComboBox opens its popover on focus (menuTrigger="focus").
+async function openCombo(name: RegExp): Promise<HTMLElement> {
+  const input = screen.getByRole("combobox", { name });
+  await act(async () => {
+    input.focus();
+    fireEvent.focus(input);
+  });
+  return input;
+}
 
 const suggestions = [
   { value: "openid", description: "OpenID" },
@@ -67,7 +77,7 @@ describe("ScopeBuilder", () => {
     expect(screen.getAllByText("openid")).toHaveLength(1);
   });
 
-  it("adds a scope when a suggestion is selected", () => {
+  it("adds a scope when a suggestion is selected", async () => {
     const onChange = vi.fn<(v: string[]) => void>();
     render(
       <ScopeBuilder
@@ -77,11 +87,12 @@ describe("ScopeBuilder", () => {
         suggestions={suggestions}
       />,
     );
-    fireEvent.click(screen.getByText("content:read"));
+    await openCombo(/scopes/i);
+    fireEvent.click(await screen.findByText("content:read"));
     expect(onChange).toHaveBeenCalledWith(["content:read"]);
   });
 
-  it("supports a menu variant with search and animated popover", async () => {
+  it("opens an animated popover listbox of suggestions", async () => {
     const onChange = vi.fn<(v: string[]) => void>();
     render(
       <ScopeBuilder
@@ -89,18 +100,14 @@ describe("ScopeBuilder", () => {
         value={[]}
         onChange={onChange}
         suggestions={suggestions}
-        variant="menu"
       />,
     );
 
     expect(screen.queryByText("content:read")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /scope filters/i }));
+    await openCombo(/scope filters/i);
 
-    expect(
-      await screen.findByRole("searchbox", { name: /search scope filters/i }),
-    ).toBeInTheDocument();
-    const menu = await screen.findByRole("menu");
-    expect(menu.parentElement?.parentElement).toHaveClass(
+    const listbox = await screen.findByRole("listbox");
+    expect(listbox.closest(".z-50")).toHaveClass(
       "data-[entering]:animate-popover-in",
       "data-[exiting]:animate-popover-out",
     );
@@ -108,7 +115,7 @@ describe("ScopeBuilder", () => {
     expect(onChange).toHaveBeenCalledWith(["content:read"]);
   });
 
-  it("can route-control the menu search value", async () => {
+  it("can route-control the search value", async () => {
     const onSearchValueChange = vi.fn<(v: string) => void>();
     render(
       <ScopeBuilder
@@ -116,25 +123,18 @@ describe("ScopeBuilder", () => {
         value={[]}
         onChange={() => {}}
         suggestions={suggestions}
-        variant="menu"
         searchValue="content"
         onSearchValueChange={onSearchValueChange}
       />,
     );
 
-    expect(
-      screen.getByRole("button", { name: /scope filters/i }),
-    ).toHaveTextContent("content");
-    fireEvent.click(screen.getByRole("button", { name: /scope filters/i }));
-    const input = await screen.findByRole("searchbox", {
-      name: /search scope filters/i,
-    });
+    const input = screen.getByRole("combobox", { name: /scope filters/i });
     expect(input).toHaveValue("content");
     fireEvent.change(input, { target: { value: "profile" } });
     expect(onSearchValueChange).toHaveBeenCalledWith("profile");
   });
 
-  it("filters suggestions while typing", () => {
+  it("filters suggestions while typing", async () => {
     render(
       <ScopeBuilder
         label="Scopes"
@@ -143,11 +143,9 @@ describe("ScopeBuilder", () => {
         suggestions={suggestions}
       />,
     );
-    fireEvent.change(
-      screen.getByRole("searchbox", { name: /search scopes/i }),
-      { target: { value: "content" } },
-    );
-    expect(screen.getByText("content:read")).toBeInTheDocument();
+    const input = await openCombo(/scopes/i);
+    fireEvent.change(input, { target: { value: "content" } });
+    expect(await screen.findByText("content:read")).toBeInTheDocument();
     expect(screen.queryByText("profile")).toBeNull();
   });
 
@@ -161,7 +159,7 @@ describe("ScopeBuilder", () => {
         suggestions={suggestions}
       />,
     );
-    const input = screen.getByRole("searchbox", { name: /search scopes/i });
+    const input = screen.getByRole("combobox", { name: /scopes/i });
     fireEvent.change(input, { target: { value: "content" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith(["content:read"]);
@@ -178,7 +176,7 @@ describe("ScopeBuilder", () => {
         allowCustom
       />,
     );
-    const input = screen.getByRole("searchbox", { name: /search scopes/i });
+    const input = screen.getByRole("combobox", { name: /scopes/i });
     fireEvent.change(input, { target: { value: "billing:read" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith(["billing:read"]);
@@ -194,10 +192,9 @@ describe("ScopeBuilder", () => {
         suggestions={suggestions}
       />,
     );
-    fireEvent.keyDown(
-      screen.getByRole("searchbox", { name: /search scopes/i }),
-      { key: "Backspace" },
-    );
+    fireEvent.keyDown(screen.getByRole("combobox", { name: /scopes/i }), {
+      key: "Backspace",
+    });
     expect(onChange).toHaveBeenCalledWith(["openid"]);
   });
 

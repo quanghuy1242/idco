@@ -1,19 +1,17 @@
 // DaisyUI 5: https://daisyui.com/components/badge/
+// React Aria: https://react-spectrum.adobe.com/react-aria/ComboBox.html
 "use client";
 
 import { useState, type KeyboardEvent } from "react";
 import {
-  Autocomplete,
   Button as AriaButton,
+  Collection,
+  ComboBox,
+  Group,
   Input,
-  Label,
   ListBox,
   ListBoxItem,
-  Menu,
-  MenuItem,
-  MenuTrigger,
   Popover,
-  SearchField,
   Tag,
   TagGroup,
   TagList,
@@ -37,6 +35,10 @@ type ScopeBuilderProps = {
   readonly validate?: (scope: string) => string | undefined;
   readonly name?: string;
   readonly size?: "sm" | "md";
+  /**
+   * Retained for API compatibility. The builder now always renders the same
+   * React Aria `ComboBox`; the prop no longer changes the structure.
+   */
   readonly variant?: "inline" | "menu";
   readonly placeholder?: string;
   readonly searchValue?: string;
@@ -60,7 +62,6 @@ export function ScopeBuilder({
   validate = defaultScopeValidate,
   name,
   size = "md",
-  variant = "inline",
   placeholder = "Filter scopes…",
   searchValue,
   onSearchValueChange,
@@ -68,7 +69,6 @@ export function ScopeBuilder({
   const { contains } = useFilter({ sensitivity: "base" });
   const [internalInputValue, setInternalInputValue] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const inputValue = searchValue ?? internalInputValue;
   const selected = new Set(value);
@@ -84,7 +84,7 @@ export function ScopeBuilder({
           ),
         );
   const showCustom =
-    allowCustom &&
+    allowCustom === true &&
     trimmed !== "" &&
     !selected.has(trimmed) &&
     !available.some((s) => s.value === trimmed);
@@ -92,6 +92,7 @@ export function ScopeBuilder({
   function setInputValue(next: string) {
     if (searchValue === undefined) setInternalInputValue(next);
     onSearchValueChange?.(next);
+    if (error) setError(undefined);
   }
 
   function addScope(scope: string) {
@@ -108,7 +109,13 @@ export function ScopeBuilder({
     onChange([...value, next]);
     setInputValue("");
     setError(undefined);
-    setMenuOpen(false);
+  }
+
+  // ComboBox multiple selection only fires for additions here — selected scopes
+  // are excluded from the list, so the only path to remove them is the TagGroup.
+  function handleSelectionChange(keys: Key[]) {
+    const added = keys.map(String).find((id) => !selected.has(id));
+    if (added !== undefined) addScope(added);
   }
 
   function removeKeys(keys: Set<Key>) {
@@ -116,12 +123,16 @@ export function ScopeBuilder({
   }
 
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    // ComboBox does not auto-highlight the first option, so Enter on the raw
+    // input adds the exact/custom/top match — matching the other pickers' feel.
     if (event.key === "Enter") {
-      event.preventDefault();
       const exact = filteredAvailable.find((s) => s.value === trimmed);
       const next =
         exact?.value ?? (showCustom ? trimmed : filteredAvailable[0]?.value);
-      if (next) addScope(next);
+      if (next) {
+        event.preventDefault();
+        addScope(next);
+      }
       return;
     }
 
@@ -132,57 +143,10 @@ export function ScopeBuilder({
   }
 
   const inputSize = size === "sm" ? "input-sm" : "";
-  const triggerSize = size === "sm" ? "select-sm" : "";
-  const triggerLabel =
-    value.length > 0 ? `${value.length} selected` : trimmed || placeholder;
   const emptyState = (
     <div className="px-3 py-2 text-sm text-base-content/50">
       No matching scopes
     </div>
-  );
-
-  const searchField = (
-    <SearchField
-      aria-label={`Search ${label}`}
-      className="w-full"
-      onClear={() => setError(undefined)}
-    >
-      <Label className="sr-only">{label}</Label>
-      <Input
-        placeholder={placeholder}
-        onKeyDown={handleInputKeyDown}
-        className={`input input-bordered ${inputSize} w-full bg-base-100 text-base-content focus:input-primary`.trim()}
-      />
-    </SearchField>
-  );
-
-  const suggestionItems = (
-    <>
-      {showCustom ? (
-        <ListBoxItem
-          id={trimmed}
-          textValue={trimmed}
-          className="rounded-field px-3 py-2 text-sm data-[focused]:bg-base-200"
-        >
-          Add “<span className="font-mono">{trimmed}</span>”
-        </ListBoxItem>
-      ) : null}
-      {filteredAvailable.map((s) => (
-        <ListBoxItem
-          key={s.value}
-          id={s.value}
-          textValue={s.value}
-          className="flex flex-col rounded-field px-3 py-2 text-sm data-[focused]:bg-base-200"
-        >
-          <span className="font-mono text-base-content">{s.value}</span>
-          {s.description ? (
-            <span className="text-xs text-base-content/50">
-              {s.description}
-            </span>
-          ) : null}
-        </ListBoxItem>
-      ))}
-    </>
   );
 
   return (
@@ -225,87 +189,66 @@ export function ScopeBuilder({
         </TagGroup>
       ) : null}
 
-      {variant === "menu" ? (
-        <MenuTrigger isOpen={menuOpen} onOpenChange={setMenuOpen}>
+      <ComboBox
+        aria-label={label}
+        selectionMode="multiple"
+        value={[...value]}
+        onChange={handleSelectionChange}
+        inputValue={inputValue}
+        onInputChange={setInputValue}
+        allowsCustomValue={allowCustom}
+        menuTrigger="focus"
+        allowsEmptyCollection
+        className="w-full"
+      >
+        <Group className="relative w-full">
+          <Input
+            placeholder={placeholder}
+            onKeyDown={handleInputKeyDown}
+            className={`input input-bordered ${inputSize} w-full bg-base-100 pr-9 text-base-content focus:input-primary`.trim()}
+          />
           <AriaButton
-            aria-label={label}
-            className={`select select-bordered ${triggerSize} flex w-full items-center justify-between gap-2 bg-none text-left`.trim()}
+            aria-label={`Toggle ${label}`}
+            className="absolute inset-y-0 right-0 flex items-center px-2 text-base-content/50 outline-none"
           >
-            <span className="truncate">{triggerLabel}</span>
-            <ChevronDown
-              className="h-3 w-3 shrink-0 text-base-content/50"
-              aria-hidden="true"
-            />
+            <ChevronDown className="h-4 w-4" aria-hidden="true" />
           </AriaButton>
-          <Popover className="z-50 w-(--trigger-width) data-[entering]:animate-popover-in data-[exiting]:animate-popover-out">
-            <div className="popover-panel flex max-h-80 w-full flex-col gap-2 p-2">
-              <Autocomplete
-                inputValue={inputValue}
-                onInputChange={(next) => {
-                  setInputValue(next);
-                  if (error) setError(undefined);
-                }}
-                filter={contains}
-              >
-                {searchField}
-                <Menu
-                  aria-label={`${label} suggestions`}
-                  onAction={(key) => addScope(String(key))}
-                  renderEmptyState={() => emptyState}
-                  className="menu menu-sm max-h-56 w-full overflow-auto p-1"
-                >
-                  {showCustom ? (
-                    <MenuItem
-                      id={trimmed}
-                      textValue={trimmed}
-                      className="rounded-field px-3 py-2 text-sm outline-none data-[focused]:bg-base-200"
-                    >
-                      Add “<span className="font-mono">{trimmed}</span>”
-                    </MenuItem>
-                  ) : null}
-                  {filteredAvailable.map((s) => (
-                    <MenuItem
-                      key={s.value}
-                      id={s.value}
-                      textValue={s.value}
-                      className="flex flex-col rounded-field px-3 py-2 text-sm outline-none data-[focused]:bg-base-200"
-                    >
-                      <span className="font-mono text-base-content">
-                        {s.value}
-                      </span>
-                      {s.description ? (
-                        <span className="text-xs text-base-content/50">
-                          {s.description}
-                        </span>
-                      ) : null}
-                    </MenuItem>
-                  ))}
-                </Menu>
-              </Autocomplete>
-            </div>
-          </Popover>
-        </MenuTrigger>
-      ) : (
-        <Autocomplete
-          inputValue={inputValue}
-          onInputChange={(next) => {
-            setInputValue(next);
-            if (error) setError(undefined);
-          }}
-          filter={contains}
-        >
-          {searchField}
+        </Group>
+        <Popover className="z-50 w-(--trigger-width) data-[entering]:animate-popover-in data-[exiting]:animate-popover-out">
           <ListBox
-            aria-label={`${label} suggestions`}
-            selectionMode="none"
-            onAction={(key) => addScope(String(key))}
             renderEmptyState={() => emptyState}
-            className="menu mt-1 max-h-56 w-full overflow-auto rounded-box border border-base-300 bg-base-100 p-1"
+            className="menu menu-sm max-h-56 w-full flex-nowrap overflow-auto rounded-box border border-base-300 bg-base-100 p-1 shadow-lg"
           >
-            {suggestionItems}
+            {showCustom ? (
+              <ListBoxItem
+                id={trimmed}
+                textValue={trimmed}
+                className="shrink-0 cursor-pointer rounded-field px-3 py-2 text-sm outline-none data-[focused]:bg-base-200"
+              >
+                Add “<span className="font-mono">{trimmed}</span>”
+              </ListBoxItem>
+            ) : null}
+            <Collection
+              items={filteredAvailable.map((s) => ({ ...s, id: s.value }))}
+            >
+              {(s) => (
+                <ListBoxItem
+                  id={s.value}
+                  textValue={s.value}
+                  className="shrink-0 cursor-pointer flex-col rounded-field px-3 py-2 text-sm outline-none data-[focused]:bg-base-200"
+                >
+                  <span className="font-mono text-base-content">{s.value}</span>
+                  {s.description ? (
+                    <span className="text-xs text-base-content/50">
+                      {s.description}
+                    </span>
+                  ) : null}
+                </ListBoxItem>
+              )}
+            </Collection>
           </ListBox>
-        </Autocomplete>
-      )}
+        </Popover>
+      </ComboBox>
 
       {error ? (
         <span role="alert" className="label-text-alt mt-1 text-error">

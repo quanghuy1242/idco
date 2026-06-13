@@ -9,7 +9,7 @@ const libSrc = fileURLToPath(
   new URL("../packages/lib/src/index.ts", import.meta.url),
 );
 const contentRendererSrc = fileURLToPath(
-  new URL("../packages/content-renderer/src/index.ts", import.meta.url),
+  new URL("../packages/content-renderer/src/index.tsx", import.meta.url),
 );
 const nextLinkMock = fileURLToPath(
   new URL("./mocks/next-link.tsx", import.meta.url),
@@ -44,6 +44,7 @@ export default defineConfig({
     ],
     alias: [
       { find: "@idco/ui", replacement: uiSrc },
+      { find: "@quanghuy1242/idco-ui", replacement: uiSrc },
       { find: "@idco/lib", replacement: libSrc },
       { find: "@idco/content-renderer", replacement: contentRendererSrc },
       {

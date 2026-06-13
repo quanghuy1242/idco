@@ -1,7 +1,7 @@
 // Pure Tailwind type scale — no DaisyUI component. Token values from globals.css via text-base-content.
 import type { ElementType, ReactNode } from "react";
 
-type TextVariant = "h1" | "h2" | "h3" | "body" | "caption";
+type TextVariant = "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "body" | "caption";
 
 type TextProps = {
   readonly variant?: TextVariant;
@@ -14,6 +14,9 @@ const textClasses: Record<TextVariant, string> = {
   h1: "text-2xl font-bold leading-tight text-base-content m-0",
   h2: "text-xl font-semibold leading-tight text-base-content m-0",
   h3: "text-lg font-semibold leading-tight text-base-content m-0",
+  h4: "text-base font-semibold leading-tight text-base-content m-0",
+  h5: "text-sm font-semibold leading-tight text-base-content m-0",
+  h6: "text-xs font-semibold uppercase leading-tight text-base-content/70 m-0",
   body: "text-base font-normal leading-relaxed text-base-content m-0",
   caption: "text-sm font-normal text-base-content/70 m-0",
 };
@@ -22,6 +25,9 @@ const defaultElement: Record<TextVariant, ElementType> = {
   h1: "h1",
   h2: "h2",
   h3: "h3",
+  h4: "h4",
+  h5: "h5",
+  h6: "h6",
   body: "p",
   caption: "p",
 };

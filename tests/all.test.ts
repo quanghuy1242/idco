@@ -48,3 +48,4 @@ await import("./ui/code-editor.test");
 await import("./ui/file-dropzone.test");
 await import("./ui/drawer.test");
 await import("./ui/rich-text-editor.test");
+await import("./ui/rich-text-content.test");

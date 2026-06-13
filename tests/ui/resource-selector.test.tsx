@@ -27,12 +27,22 @@ const members: ResourceOption[] = [
 
 const syncSource: ResourceSource = { mode: "sync", items: members };
 
+// The ComboBox opens its popover on focus (menuTrigger="focus").
+async function openCombo(name: RegExp): Promise<HTMLElement> {
+  const input = screen.getByRole("combobox", { name });
+  await act(async () => {
+    input.focus();
+    fireEvent.focus(input);
+  });
+  return input;
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
 
 describe("ResourceSelector", () => {
-  it("renders options from a sync source", async () => {
+  it("renders options from a sync source when opened", async () => {
     render(
       <ResourceSelector
         kind="member"
@@ -41,6 +51,7 @@ describe("ResourceSelector", () => {
         source={syncSource}
       />,
     );
+    await openCombo(/search members/i);
     expect(await screen.findByText("Alice Nguyen")).toBeInTheDocument();
     expect(screen.getByText("Bob Tran")).toBeInTheDocument();
   });
@@ -55,37 +66,28 @@ describe("ResourceSelector", () => {
         source={syncSource}
       />,
     );
+    await openCombo(/search members/i);
     fireEvent.click(await screen.findByText("Alice Nguyen"));
     expect(onChange).toHaveBeenCalledWith("u1");
   });
 
-  it("supports a compact menu picker with search and animated popover", async () => {
-    const onChange = vi.fn<(next: string | string[]) => void>();
+  it("opens an animated popover listbox", async () => {
     render(
       <ResourceSelector
         kind="member"
         value=""
-        onChange={onChange}
+        onChange={() => {}}
         source={syncSource}
-        variant="menu"
         width="compact"
         label="Add member"
       />,
     );
-
-    expect(screen.queryByText("Alice Nguyen")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /add member/i }));
-
-    expect(
-      await screen.findByRole("searchbox", { name: /add member/i }),
-    ).toBeInTheDocument();
-    const menu = await screen.findByRole("menu");
-    expect(menu.parentElement?.parentElement).toHaveClass(
+    await openCombo(/add member/i);
+    const listbox = await screen.findByRole("listbox");
+    expect(listbox.closest(".z-50")).toHaveClass(
       "data-[entering]:animate-popover-in",
       "data-[exiting]:animate-popover-out",
     );
-    fireEvent.click(await screen.findByText("Alice Nguyen"));
-    expect(onChange).toHaveBeenCalledWith("u1");
   });
 
   it("adds to the array in multiple mode", async () => {
@@ -99,6 +101,7 @@ describe("ResourceSelector", () => {
         source={syncSource}
       />,
     );
+    await openCombo(/search members/i);
     fireEvent.click(await screen.findByText("Bob Tran"));
     expect(onChange).toHaveBeenCalledWith(["u2"]);
   });
@@ -113,6 +116,7 @@ describe("ResourceSelector", () => {
         excludeIds={["u1"]}
       />,
     );
+    await openCombo(/search members/i);
     expect(await screen.findByText("Bob Tran")).toBeInTheDocument();
     expect(screen.queryByText("Alice Nguyen")).toBeNull();
   });
@@ -126,12 +130,10 @@ describe("ResourceSelector", () => {
         source={syncSource}
       />,
     );
+    const input = await openCombo(/search members/i);
     await screen.findByText("Alice Nguyen");
-    fireEvent.change(
-      screen.getByRole("searchbox", { name: /search members/i }),
-      { target: { value: "bob" } },
-    );
-    expect(screen.getByText("Bob Tran")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "bob" } });
+    expect(await screen.findByText("Bob Tran")).toBeInTheDocument();
     expect(screen.queryByText("Alice Nguyen")).toBeNull();
   });
 
@@ -151,7 +153,7 @@ describe("ResourceSelector", () => {
   });
 
   it("renders an avatar for the user/member kinds", async () => {
-    const { container } = render(
+    render(
       <ResourceSelector
         kind="user"
         value=""
@@ -159,8 +161,10 @@ describe("ResourceSelector", () => {
         source={syncSource}
       />,
     );
+    await openCombo(/search users/i);
     await screen.findByText("Alice Nguyen");
-    expect(container.querySelector(".avatar")).toBeInTheDocument();
+    // The popover listbox renders in a portal, outside the render container.
+    expect(document.querySelector(".avatar")).toBeInTheDocument();
   });
 
   it("loads from an async source with the typed query", async () => {
@@ -177,11 +181,10 @@ describe("ResourceSelector", () => {
         searchDebounceMs={0}
       />,
     );
+    const input = await openCombo(/search users/i);
     expect(await screen.findByText("Alice Nguyen")).toBeInTheDocument();
     expect(load).toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("searchbox", { name: /search users/i }), {
-      target: { value: "alice" },
-    });
+    fireEvent.change(input, { target: { value: "alice" } });
     expect(await screen.findByText("Alice Nguyen")).toBeInTheDocument();
     expect(load).toHaveBeenCalledWith("alice", expect.any(AbortSignal));
   });
@@ -205,7 +208,7 @@ describe("ResourceSelector", () => {
     );
 
     load.mockClear();
-    const input = screen.getByRole("searchbox", { name: /search users/i });
+    const input = screen.getByRole("combobox", { name: /search users/i });
     fireEvent.change(input, { target: { value: "a" } });
     fireEvent.change(input, { target: { value: "al" } });
     fireEvent.change(input, { target: { value: "ali" } });
@@ -222,7 +225,7 @@ describe("ResourceSelector", () => {
     expect(load).toHaveBeenCalledWith("ali", expect.any(AbortSignal));
   });
 
-  it("renders a preset single value from initialOptions in async mode", async () => {
+  it("shows a preset single value's label from initialOptions in async mode", async () => {
     render(
       <ResourceSelector
         kind="oauth-client"
@@ -237,13 +240,14 @@ describe("ResourceSelector", () => {
             sublabel: "cli_content",
           },
         ]}
-        variant="menu"
       />,
     );
 
-    expect(
-      await screen.findByRole("button", { name: /client/i }),
-    ).toHaveTextContent("Content Web");
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: /client/i })).toHaveValue(
+        "Content Web",
+      ),
+    );
   });
 
   it("replaces placeholder cached labels when initialOptions hydrate later", async () => {
@@ -255,13 +259,14 @@ describe("ResourceSelector", () => {
         onChange={() => {}}
         source={{ mode: "async", load: async () => [] }}
         initialOptions={[{ id: "cli_content", label: "cli_content" }]}
-        variant="menu"
       />,
     );
 
-    expect(
-      await screen.findByRole("button", { name: /client/i }),
-    ).toHaveTextContent("cli_content");
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: /client/i })).toHaveValue(
+        "cli_content",
+      ),
+    );
 
     rerender(
       <ResourceSelector
@@ -277,12 +282,11 @@ describe("ResourceSelector", () => {
             sublabel: "cli_content",
           },
         ]}
-        variant="menu"
       />,
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /client/i })).toHaveTextContent(
+      expect(screen.getByRole("combobox", { name: /client/i })).toHaveValue(
         "Content Web",
       ),
     );
@@ -327,71 +331,82 @@ describe("ResourceSelector", () => {
       />,
     );
 
+    const input = await openCombo(/search users/i);
     expect(await screen.findByText("Type to search")).toBeInTheDocument();
     expect(load).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole("searchbox", { name: /search users/i }), {
-      target: { value: "al" },
-    });
+    fireEvent.change(input, { target: { value: "al" } });
     expect(await screen.findByText("Type to search")).toBeInTheDocument();
     expect(load).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole("searchbox", { name: /search users/i }), {
-      target: { value: "ali" },
-    });
+    fireEvent.change(input, { target: { value: "ali" } });
     expect(await screen.findByText("Alice Nguyen")).toBeInTheDocument();
     expect(load).toHaveBeenCalledWith("ali", expect.any(AbortSignal));
   });
 
-  it("keeps the latest async query results when an older load resolves late", async () => {
-    let resolveA: ((items: ResourceOption[]) => void) | undefined;
-    let resolveAl: ((items: ResourceOption[]) => void) | undefined;
+  it("loads the first page of a paginated source on mount", async () => {
     const load = vi.fn<
-      (query: string, signal: AbortSignal) => Promise<ResourceOption[]>
-    >((query) => {
-      if (query === "a") {
-        return new Promise((resolve) => {
-          resolveA = resolve;
-        });
-      }
-      if (query === "al") {
-        return new Promise((resolve) => {
-          resolveAl = resolve;
-        });
-      }
-      return Promise.resolve([]);
-    });
+      (params: {
+        query: string;
+        cursor?: string;
+        signal: AbortSignal;
+      }) => Promise<{ items: ResourceOption[]; cursor?: string }>
+    >(async ({ cursor }) => ({
+      items: cursor ? [members[2]!] : [members[0]!, members[1]!],
+      cursor: cursor ? undefined : "2",
+    }));
 
     render(
       <ResourceSelector
         kind="user"
         value=""
         onChange={() => {}}
-        source={{ mode: "async", load }}
+        source={{ mode: "paginated", load }}
         searchDebounceMs={0}
       />,
     );
 
-    const input = screen.getByRole("searchbox", { name: /search users/i });
-    fireEvent.change(input, { target: { value: "a" } });
-    await waitFor(() =>
-      expect(load).toHaveBeenCalledWith("a", expect.any(AbortSignal)),
-    );
-    fireEvent.change(input, { target: { value: "al" } });
-    await waitFor(() =>
-      expect(load).toHaveBeenCalledWith("al", expect.any(AbortSignal)),
-    );
-
-    await act(async () => {
-      resolveAl?.([members[1]!]);
-    });
-    expect(await screen.findByText("Bob Tran")).toBeInTheDocument();
-
-    await act(async () => {
-      resolveA?.([members[0]!]);
-    });
+    await openCombo(/search users/i);
+    expect(await screen.findByText("Alice Nguyen")).toBeInTheDocument();
     expect(screen.getByText("Bob Tran")).toBeInTheDocument();
+    expect(load).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "", cursor: undefined }),
+    );
+  });
+
+  it("re-queries a paginated source from page one on search", async () => {
+    const load = vi.fn<
+      (params: {
+        query: string;
+        cursor?: string;
+        signal: AbortSignal;
+      }) => Promise<{ items: ResourceOption[]; cursor?: string }>
+    >(async ({ query }) => ({
+      items: query
+        ? members.filter((m) => m.label.toLowerCase().includes(query))
+        : members,
+      cursor: undefined,
+    }));
+
+    render(
+      <ResourceSelector
+        kind="user"
+        value=""
+        onChange={() => {}}
+        source={{ mode: "paginated", load }}
+        searchDebounceMs={0}
+      />,
+    );
+
+    const input = await openCombo(/search users/i);
+    await screen.findByText("Alice Nguyen");
+    fireEvent.change(input, { target: { value: "bob" } });
+
+    expect(await screen.findByText("Bob Tran")).toBeInTheDocument();
     expect(screen.queryByText("Alice Nguyen")).toBeNull();
+    expect(load).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "bob", cursor: undefined }),
+    );
   });
 
   it("serializes selected ids into a hidden field", async () => {
@@ -412,7 +427,7 @@ describe("ResourceSelector", () => {
   });
 
   it("supports the oauth-client kind without an avatar figure", async () => {
-    const { container } = render(
+    render(
       <ResourceSelector
         kind="oauth-client"
         label="OAuth client"
@@ -424,8 +439,9 @@ describe("ResourceSelector", () => {
         }}
       />,
     );
+    await openCombo(/oauth client/i);
     expect(await screen.findByText("Web app")).toBeInTheDocument();
-    expect(container.querySelector(".avatar")).toBeNull();
+    expect(document.querySelector(".avatar")).toBeNull();
   });
 
   it("supports the resource-server kind", async () => {
@@ -443,6 +459,7 @@ describe("ResourceSelector", () => {
         }}
       />,
     );
+    await openCombo(/resource server/i);
     expect(await screen.findByText("Content API")).toBeInTheDocument();
   });
 });

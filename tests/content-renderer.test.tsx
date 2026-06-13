@@ -17,6 +17,31 @@ describe("@idco/content-renderer", () => {
                 type: "paragraph",
               },
               {
+                children: [
+                  { format: 1, text: "Bold", type: "text" },
+                  { text: " and ", type: "text" },
+                  { format: 2 | 8, text: "underlined italic", type: "text" },
+                  { text: " with ", type: "text" },
+                  { format: 16, text: "inlineCode", type: "text" },
+                  { type: "linebreak" },
+                  { text: "after break", type: "text" },
+                ],
+                type: "paragraph",
+              },
+              {
+                children: [
+                  {
+                    children: [{ text: "First numbered item", type: "text" }],
+                    type: "listitem",
+                    value: 3,
+                  },
+                ],
+                listType: "number",
+                start: 3,
+                tag: "ol",
+                type: "list",
+              },
+              {
                 children: [{ text: "Heads up", type: "text" }],
                 tone: "warning",
                 type: "callout",
@@ -31,7 +56,11 @@ describe("@idco/content-renderer", () => {
         allowedEmbedDomains={["example.com"]}
         resolveMedia={(node) =>
           node.mediaId === "media-logo"
-            ? { alt: "Resolved logo", src: "/logo.png" }
+            ? {
+                alt: "Resolved logo",
+                caption: "Resolved caption",
+                src: "/logo.png",
+              }
             : null
         }
         resolvePost={(node) =>
@@ -43,10 +72,26 @@ describe("@idco/content-renderer", () => {
     );
 
     expect(screen.getByText("Hello").tagName.toLowerCase()).toBe("p");
-    expect(screen.getByText("Heads up").closest("aside")).toHaveAttribute(
-      "data-tone",
-      "warning",
-    );
+    expect(screen.getByText("Bold").tagName.toLowerCase()).toBe("strong");
+    expect(screen.getByText("underlined italic").closest("em")).not.toBeNull();
+    expect(screen.getByText("underlined italic").closest("u")).not.toBeNull();
+    expect(screen.getByText("inlineCode").tagName.toLowerCase()).toBe("code");
+    const formattedParagraph = screen.getByText("inlineCode").closest("p");
+    expect(formattedParagraph?.textContent).toContain("after break");
+    expect(
+      Array.from(formattedParagraph?.childNodes ?? []).some(
+        (node) => node.nodeName === "BR",
+      ),
+    ).toBe(true);
+    expect(
+      screen.getByText("First numbered item").closest("ol"),
+    ).toHaveAttribute("start", "3");
+    expect(
+      screen.getByText("Heads up").closest("[role='alert']"),
+    ).toHaveAttribute("data-tone", "warning");
+    expect(
+      screen.getByRole("textbox", { name: /code content/i }),
+    ).toHaveAttribute("readonly");
     expect(screen.getByText("const").closest("code")).toHaveTextContent(
       "const x = 1;",
     );
@@ -54,13 +99,17 @@ describe("@idco/content-renderer", () => {
       "src",
       "/logo.png",
     );
+    expect(screen.getByText("Resolved caption").tagName.toLowerCase()).toBe(
+      "figcaption",
+    );
     expect(screen.getByRole("link", { name: /read next/i })).toHaveAttribute(
       "href",
       "/posts/read-next",
     );
-    expect(
-      screen.getByRole("link", { name: "https://example.com/embed/demo" }),
-    ).toHaveAttribute("href", "https://example.com/embed/demo");
+    expect(screen.getByTitle("Embedded content")).toHaveAttribute(
+      "src",
+      "https://example.com/embed/demo",
+    );
   });
 
   it("falls back to children for unknown node types", () => {

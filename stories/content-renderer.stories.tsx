@@ -3,129 +3,272 @@ import {
   RichTextRenderer,
   type RichTextDocument,
 } from "@idco/content-renderer";
-import { CodeBlock, Columns, Panel, Stack, Text } from "@idco/ui";
+import {
+  Alert,
+  Badge,
+  CodeBlock,
+  Columns,
+  Container,
+  Stack,
+  Text,
+} from "@idco/ui";
 
 export default {
   title: "Packages Content Renderer / Rich Text Renderer",
 } satisfies StoryDefault;
 
-const richTextDocument: RichTextDocument = {
+const mediaSrc =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 960 540'%3E%3Crect width='960' height='540' fill='%23f3f4f6'/%3E%3Crect x='80' y='72' width='800' height='396' rx='32' fill='%23ffffff' stroke='%23d1d5db' stroke-width='8'/%3E%3Ccircle cx='214' cy='202' r='62' fill='%233b82f6'/%3E%3Cpath d='M140 406l186-172 132 124 88-72 274 120z' fill='%2310b981'/%3E%3Ctext x='480' y='128' text-anchor='middle' font-family='Arial' font-size='42' font-weight='700' fill='%23111827'%3EIDCO content image%3C/text%3E%3C/svg%3E";
+
+const blogDocument: RichTextDocument = {
   root: {
     children: [
       {
+        children: [
+          { text: "Shipping rich content without drift", type: "text" },
+        ],
+        tag: "h1",
         type: "heading",
-        tag: "h2",
-        children: [{ type: "text", text: "Composable rich text" }],
       },
       {
-        type: "paragraph",
         children: [
-          { type: "text", text: "The renderer supports " },
           {
-            type: "link",
-            url: "https://example.test/docs",
-            children: [{ type: "text", text: "links" }],
-          },
-          {
+            text: "A compact demo post showing every node shape emitted by the ",
             type: "text",
-            text: ", media, embeds, references, and code blocks.",
           },
+          {
+            format: 1,
+            text: "current Lexical editor",
+            type: "text",
+          },
+          { text: ".", type: "text" },
         ],
+        type: "paragraph",
       },
       {
-        type: "callout",
+        children: [
+          { text: "Inline text can be ", type: "text" },
+          { format: 1, text: "bold", type: "text" },
+          { text: ", ", type: "text" },
+          { format: 2, text: "italic", type: "text" },
+          { text: ", ", type: "text" },
+          { format: 8, text: "underlined", type: "text" },
+          { text: ", ", type: "text" },
+          { format: 4, text: "struck", type: "text" },
+          { text: ", and include ", type: "text" },
+          { format: 16, text: "inlineCode()", type: "text" },
+          { text: ".", type: "text" },
+          { type: "linebreak" },
+          {
+            text: "Linebreak nodes stay inline instead of creating a new paragraph.",
+            type: "text",
+          },
+        ],
+        type: "paragraph",
+      },
+      {
+        children: [
+          {
+            text: "Links render with the same theme tokens as the rest of the UI: ",
+            type: "text",
+          },
+          {
+            children: [{ text: "read the implementation notes", type: "text" }],
+            type: "link",
+            url: "https://example.test/docs/rich-content",
+          },
+          { text: ".", type: "text" },
+        ],
+        type: "paragraph",
+      },
+      {
+        children: [{ text: "Editor block nodes", type: "text" }],
+        tag: "h2",
+        type: "heading",
+      },
+      {
+        children: [
+          {
+            text: "Callout rendering mirrors the editor block and shared alert tones.",
+            type: "text",
+          },
+        ],
         tone: "info",
-        children: [
-          { type: "text", text: "Custom renderers can replace any node type." },
-        ],
+        type: "callout",
       },
       {
-        type: "list",
+        children: [
+          {
+            text: "Quotes keep the Lexical quote visual language: left rule, italic body, and muted content color.",
+            type: "text",
+          },
+        ],
+        type: "quote",
+      },
+      {
+        children: [{ text: "List coverage", type: "text" }],
+        tag: "h3",
+        type: "heading",
+      },
+      {
+        children: [
+          {
+            children: [
+              {
+                text: "Paragraphs, headings, quotes, and linebreaks",
+                type: "text",
+              },
+            ],
+            type: "listitem",
+          },
+          {
+            children: [
+              {
+                text: "Resolver-backed media and post references",
+                type: "text",
+              },
+            ],
+            type: "listitem",
+          },
+          {
+            children: [
+              {
+                text: "Embed allow-listing before iframe output",
+                type: "text",
+              },
+            ],
+            type: "listitem",
+          },
+        ],
+        listType: "bullet",
         tag: "ul",
+        type: "list",
+      },
+      {
         children: [
           {
+            children: [{ text: "Normalize the editor document", type: "text" }],
             type: "listitem",
-            children: [{ type: "text", text: "Paragraphs and headings" }],
+            value: 2,
           },
           {
+            children: [
+              { text: "Render without loading Lexical runtime", type: "text" },
+            ],
             type: "listitem",
-            children: [{ type: "text", text: "Ordered and unordered lists" }],
-          },
-          {
-            type: "listitem",
-            children: [{ type: "text", text: "Resolver-backed references" }],
+            value: 3,
           },
         ],
+        listType: "number",
+        start: 2,
+        tag: "ol",
+        type: "list",
       },
       {
+        language: "tsx",
+        text: "export function BlogPreview() {\n  return <RichTextRenderer value={document} />;\n}",
         type: "code-block",
-        language: "ts",
-        text: "export const packageName = '@idco/content-renderer';",
       },
       {
+        alt: "An IDCO content preview card",
+        caption: "Media nodes render as theme-aware figures with captions.",
+        mediaId: "media_article_preview",
         type: "media",
-        mediaId: "media_logo",
-        alt: "IDCO mark",
       },
       {
-        type: "post-ref",
-        postId: "post_shared_ui",
+        postId: "post_shared_ui_release",
         title: "Shared UI release notes",
+        type: "post-ref",
+        url: "/posts/shared-ui-release-notes",
       },
       {
+        title: "Example embed preview",
         type: "embed",
-        url: "https://example.test/embed/demo",
+        url: "https://example.test/embed/content-preview",
+      },
+      {
+        children: [
+          { text: "Small heading levels still map safely", type: "text" },
+        ],
+        tag: "h4",
+        type: "heading",
+      },
+      {
+        children: [
+          {
+            text: "The renderer also preserves unknown future nodes by rendering their children.",
+            type: "text",
+          },
+        ],
+        type: "paragraph",
       },
     ],
   },
 };
 
-export const Default: Story = () => (
-  <Columns>
-    <Panel>
-      <Stack>
-        <Text variant="h2">Rendered output</Text>
-        <RichTextRenderer
-          value={richTextDocument}
-          allowedEmbedDomains={["example.test"]}
-          resolveMedia={(node) =>
-            node.mediaId === "media_logo"
-              ? {
-                  src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 80'%3E%3Crect width='160' height='80' rx='12' fill='%233a5a6b'/%3E%3Ctext x='80' y='48' text-anchor='middle' font-family='Arial' font-size='26' fill='white'%3EIDCO%3C/text%3E%3C/svg%3E",
-                  alt: "IDCO mark",
-                }
-              : null
-          }
-          resolvePost={(node) =>
-            node.postId === "post_shared_ui"
-              ? { href: "/posts/shared-ui", label: "Shared UI release notes" }
-              : null
-          }
-        />
+export const BlogPost: Story = () => (
+  <Container width="wide">
+    <Stack>
+      <Stack gap="xs">
+        <Badge tone="primary">Content renderer</Badge>
+        <Text variant="h2">Blog post preview</Text>
+        <Text variant="caption">
+          Static rendering for the same rich text document shape produced by the
+          shared editor.
+        </Text>
       </Stack>
-    </Panel>
-    <CodeBlock
-      label="Input document"
-      value={JSON.stringify(richTextDocument, null, 2)}
-      maxHeight="lg"
-    />
-  </Columns>
+      <Columns>
+        <Container width="content">
+          <RichTextRenderer
+            value={blogDocument}
+            allowedEmbedDomains={["example.test"]}
+            resolveMedia={(node) =>
+              node.mediaId === "media_article_preview"
+                ? {
+                    alt: node.alt,
+                    caption: node.caption,
+                    src: mediaSrc,
+                  }
+                : null
+            }
+            resolvePost={(node) =>
+              node.postId === "post_shared_ui_release"
+                ? {
+                    href: "/posts/shared-ui-release-notes",
+                    label: "Shared UI release notes",
+                  }
+                : null
+            }
+          />
+        </Container>
+        <CodeBlock
+          label="Editor document"
+          value={JSON.stringify(blogDocument, null, 2)}
+          maxHeight="lg"
+        />
+      </Columns>
+    </Stack>
+  </Container>
 );
 
 export const CustomRenderer: Story = () => (
-  <Panel>
+  <Container width="content">
     <Stack>
       <Text variant="h2">Custom callout renderer</Text>
+      <Text variant="caption">
+        Consumers can still override individual node renderers without changing
+        the default editor-compatible output.
+      </Text>
       <RichTextRenderer
-        value={richTextDocument}
+        value={blogDocument}
         renderers={{
           callout: (_node, children, key) => (
-            <strong key={key} className="text-info">
+            <Alert key={key} tone="info">
               {children}
-            </strong>
+            </Alert>
           ),
         }}
       />
     </Stack>
-  </Panel>
+  </Container>
 );

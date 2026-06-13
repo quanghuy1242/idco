@@ -1,4 +1,5 @@
-// DaisyUI 5: https://daisyui.com/components/dropdown/
+// DaisyUI 5: https://daisyui.com/components/input/
+// React Aria: https://react-spectrum.adobe.com/react-aria/ComboBox.html
 "use client";
 
 import {
@@ -9,23 +10,20 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Autocomplete,
   Button as AriaButton,
+  Collection,
+  ComboBox,
+  Group,
   Input,
-  Label,
   ListBox,
   ListBoxItem,
-  Menu,
-  MenuItem,
-  MenuTrigger,
+  ListBoxLoadMoreItem,
   Popover,
-  SearchField,
   Tag,
   TagGroup,
   TagList,
   type Key,
 } from "react-aria-components";
-import { useFilter } from "react-aria";
 import { useAsyncList } from "react-stately";
 import { ChevronDown } from "lucide-react";
 import { Avatar } from "./avatar";
@@ -48,6 +46,12 @@ export type ResourceOption = {
   readonly badge?: string;
 };
 
+export type ResourcePage = {
+  readonly items: ResourceOption[];
+  /** Opaque cursor for the next page; omit/undefined when there are no more pages. */
+  readonly cursor?: string;
+};
+
 export type ResourceSource =
   | {
       readonly mode: "async";
@@ -55,6 +59,14 @@ export type ResourceSource =
         query: string,
         signal: AbortSignal,
       ) => Promise<ResourceOption[]>;
+    }
+  | {
+      readonly mode: "paginated";
+      readonly load: (params: {
+        readonly query: string;
+        readonly cursor?: string;
+        readonly signal: AbortSignal;
+      }) => Promise<ResourcePage>;
     }
   | { readonly mode: "sync"; readonly items: ReadonlyArray<ResourceOption> };
 
@@ -78,6 +90,11 @@ type ResourceSelectorProps = {
   readonly renderOption?: (option: ResourceOption) => ReactNode;
   readonly onSelectOption?: (option: ResourceOption) => void;
   readonly size?: "sm" | "md";
+  /**
+   * Retained for API compatibility. All variants now render the same React Aria
+   * `ComboBox` (search input + popover listbox); the prop no longer changes the
+   * structure.
+   */
   readonly variant?: "inline" | "menu";
   readonly width?: "full" | "compact";
 };
@@ -97,9 +114,11 @@ function defaultRenderOption(
         />
       ) : null}
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-base-content">{option.label}</span>
+        <span className="truncate text-base-content group-data-[selected]:text-primary-content">
+          {option.label}
+        </span>
         {option.sublabel ? (
-          <span className="truncate text-xs text-base-content/50">
+          <span className="truncate text-xs text-base-content/50 group-data-[selected]:text-primary-content/80">
             {option.sublabel}
           </span>
         ) : null}
@@ -169,17 +188,25 @@ export function ResourceSelector({
   renderOption,
   onSelectOption,
   size = "md",
-  variant = "inline",
   width = "full",
 }: ResourceSelectorProps) {
-  const { contains } = useFilter({ sensitivity: "base" });
   const [cache, setCache] = useState<Record<string, ResourceOption>>({});
-  const [menuOpen, setMenuOpen] = useState(false);
   const [rawQuery, setRawQuery] = useState("");
+  const [isFocused, setIsFocused] = useState(false);
   const fieldLabel = label ?? `Search ${kind}s`;
+  const multiple = selectionMode === "multiple";
+  const paginated = source.mode === "paginated";
 
-  const list = useAsyncList<ResourceOption>({
-    async load({ signal, filterText }) {
+  const list = useAsyncList<ResourceOption, string | undefined>({
+    async load({ signal, filterText, cursor }) {
+      if (source.mode === "paginated") {
+        const query = filterText ?? "";
+        // First page only is gated by minQueryLength; paginating keeps the query.
+        if (!cursor && query.trim().length < minQueryLength)
+          return { items: [] };
+        const page = await source.load({ query, cursor, signal });
+        return { items: page.items, cursor: page.cursor };
+      }
       if (source.mode === "async") {
         const query = filterText ?? "";
         if (query.trim().length < minQueryLength) return { items: [] };
@@ -189,6 +216,7 @@ export function ResourceSelector({
       return { items: [...source.items] };
     },
   });
+
   const setListFilterTextRef = useRef(list.setFilterText);
   setListFilterTextRef.current = list.setFilterText;
   const setListFilterText = useCallback(
@@ -197,30 +225,31 @@ export function ResourceSelector({
   );
   const debouncedSetFilterText = useDebouncedCallback(
     setListFilterText,
-    source.mode === "async" ? searchDebounceMs : 0,
+    source.mode === "sync" ? 0 : searchDebounceMs,
   );
 
   useEffect(() => {
+    if (source.mode === "sync") return;
     debouncedSetFilterText(rawQuery);
-  }, [debouncedSetFilterText, rawQuery]);
+  }, [debouncedSetFilterText, rawQuery, source.mode]);
 
   const selectedIds = Array.isArray(value) ? value : value ? [value] : [];
-  const selectedSet = new Set(selectedIds);
-  const hidden = new Set([
-    ...excludeIds,
-    ...(selectionMode === "multiple" ? selectedIds : []),
-  ]);
+  const hidden = new Set([...excludeIds, ...(multiple ? selectedIds : [])]);
   const sourceItems = source.mode === "sync" ? source.items : list.items;
   const query = rawQuery.trim();
+
+  // Sync sources filter client-side off the typed query; async/paginated are
+  // already filtered server-side by useAsyncList's filterText.
   const filteredItems =
     source.mode === "sync" && query !== ""
-      ? sourceItems.filter((o) =>
-          [o.label, o.sublabel, o.badge].some((text) =>
-            text ? contains(text, query) : false,
+      ? sourceItems.filter((option) =>
+          [option.label, option.sublabel, option.badge].some((text) =>
+            text ? text.toLowerCase().includes(query.toLowerCase()) : false,
           ),
         )
       : sourceItems;
-  const items = filteredItems.filter((o) => !hidden.has(o.id));
+  const items = filteredItems.filter((option) => !hidden.has(option.id));
+  const selectedId = selectedIds[0];
 
   useEffect(() => {
     if (sourceItems.length === 0) return;
@@ -252,44 +281,47 @@ export function ResourceSelector({
     });
   }, [initialOptions]);
 
-  function pick(id: string) {
+  function cacheOption(id: string) {
     const option = sourceItems.find((o) => o.id === id) ?? cache[id];
     if (option) {
       setCache((c) => ({ ...c, [id]: option }));
       onSelectOption?.(option);
     }
-    if (selectionMode === "multiple") {
-      const next = selectedSet.has(id)
-        ? selectedIds.filter((v) => v !== id)
-        : [...selectedIds, id];
-      onChange(next);
-    } else {
-      onChange(id);
-      list.setFilterText("");
-      setRawQuery("");
-      setMenuOpen(false);
+  }
+
+  function handleSingleChange(key: Key | null) {
+    if (key === null || key === undefined) {
+      onChange("");
+      return;
     }
+    const id = String(key);
+    cacheOption(id);
+    onChange(id);
+  }
+
+  function handleMultipleChange(keys: Key[]) {
+    const ids = keys.map(String);
+    for (const id of ids) cacheOption(id);
+    onChange(ids);
   }
 
   function removeKeys(keys: Set<Key>) {
     onChange(selectedIds.filter((v) => !keys.has(v)));
   }
 
-  const inputSize = size === "sm" ? "input-sm" : "";
-  const triggerSize = size === "sm" ? "select-sm" : "";
-  const widthClass = width === "compact" ? "w-64 max-w-full" : "w-full";
   const labelFor = (id: string) => cache[id]?.label ?? id;
-  const triggerLabel =
-    selectionMode === "multiple"
-      ? selectedIds.length > 0
-        ? `${selectedIds.length} selected`
-        : placeholder
-      : selectedIds[0]
-        ? labelFor(selectedIds[0])
-        : placeholder;
+  const inputSize = size === "sm" ? "input-sm" : "";
+  const widthClass = width === "compact" ? "w-64 max-w-full" : "w-full";
+
+  // Single select shows the chosen item's label while idle and switches to the
+  // live search text while focused (multiple select always shows the search
+  // text; the chosen items render as tags above the field).
+  const singleDisplayValue =
+    !isFocused && selectedId ? labelFor(selectedId) : rawQuery;
+
   const renderedEmptyState = (
     <div className="px-3 py-2 text-sm text-base-content/50">
-      {source.mode === "async" && query.length < minQueryLength
+      {(source.mode === "async" || paginated) && query.length < minQueryLength
         ? "Type to search"
         : list.loadingState === "loading"
           ? "Searching…"
@@ -297,14 +329,53 @@ export function ResourceSelector({
     </div>
   );
 
-  const searchField = (
-    <SearchField aria-label={fieldLabel} className="w-full">
-      <Label className="sr-only">Search</Label>
-      <Input
-        placeholder={placeholder}
-        className={`input input-bordered ${inputSize} w-full bg-base-100 text-base-content focus:input-primary`.trim()}
-      />
-    </SearchField>
+  const renderItem = (option: ResourceOption) => (
+    <ListBoxItem
+      id={option.id}
+      textValue={option.label}
+      className="group shrink-0 cursor-pointer rounded-field px-3 py-2 text-sm outline-none data-[focused]:bg-base-200 data-[selected]:bg-primary data-[selected]:text-primary-content"
+    >
+      {renderOption ? renderOption(option) : defaultRenderOption(kind, option)}
+    </ListBoxItem>
+  );
+
+  // Shared ComboBox children — identical for single and multiple selection.
+  const comboChildren = (
+    <>
+      <Group className="relative w-full">
+        <Input
+          aria-label={fieldLabel}
+          placeholder={placeholder}
+          className={`input input-bordered ${inputSize} w-full bg-base-100 pr-9 text-base-content focus:input-primary`.trim()}
+        />
+        <AriaButton
+          aria-label={`Toggle ${fieldLabel}`}
+          className="absolute inset-y-0 right-0 flex items-center px-2 text-base-content/50 outline-none"
+        >
+          <ChevronDown className="h-4 w-4" aria-hidden="true" />
+        </AriaButton>
+      </Group>
+      <Popover className="z-50 w-(--trigger-width) data-[entering]:animate-popover-in data-[exiting]:animate-popover-out">
+        <ListBox
+          renderEmptyState={() => renderedEmptyState}
+          className="menu menu-sm max-h-64 w-full flex-nowrap overflow-auto rounded-box border border-base-300 bg-base-100 p-1 shadow-lg"
+        >
+          <Collection items={items}>{renderItem}</Collection>
+          {paginated ? (
+            <ListBoxLoadMoreItem
+              onLoadMore={list.loadMore}
+              isLoading={list.loadingState === "loadingMore"}
+              className="flex shrink-0 items-center justify-center py-2"
+            >
+              <span
+                className="loading loading-spinner loading-sm text-base-content/50"
+                aria-label="Loading more"
+              />
+            </ListBoxLoadMoreItem>
+          ) : null}
+        </ListBox>
+      </Popover>
+    </>
   );
 
   return (
@@ -316,7 +387,8 @@ export function ResourceSelector({
           </span>
         </label>
       ) : null}
-      {selectionMode === "multiple" && selectedIds.length > 0 ? (
+
+      {multiple && selectedIds.length > 0 ? (
         <TagGroup
           aria-label={`Selected ${fieldLabel}`}
           onRemove={removeKeys}
@@ -346,84 +418,41 @@ export function ResourceSelector({
         </TagGroup>
       ) : null}
 
-      {variant === "menu" ? (
-        <MenuTrigger isOpen={menuOpen} onOpenChange={setMenuOpen}>
-          <AriaButton
-            aria-label={fieldLabel}
-            className={`select select-bordered ${triggerSize} flex w-full items-center justify-between gap-2 bg-none text-left`.trim()}
-          >
-            <span className="truncate">{triggerLabel}</span>
-            <ChevronDown
-              className="h-3 w-3 shrink-0 text-base-content/50"
-              aria-hidden="true"
-            />
-          </AriaButton>
-          <Popover className="z-50 w-(--trigger-width) data-[entering]:animate-popover-in data-[exiting]:animate-popover-out">
-            <div className="flex max-h-80 w-full flex-col gap-2 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
-              <Autocomplete
-                inputValue={rawQuery}
-                onInputChange={setRawQuery}
-                filter={source.mode === "sync" ? contains : undefined}
-              >
-                {searchField}
-                <Menu
-                  aria-label={`${fieldLabel} results`}
-                  items={items}
-                  onAction={(key) => pick(String(key))}
-                  renderEmptyState={() => renderedEmptyState}
-                  className="menu menu-sm max-h-64 w-full overflow-auto p-1"
-                >
-                  {(option: ResourceOption) => (
-                    <MenuItem
-                      id={option.id}
-                      textValue={option.label}
-                      className="rounded-field px-3 py-2 text-sm outline-none data-[focused]:bg-base-200"
-                    >
-                      {renderOption
-                        ? renderOption(option)
-                        : defaultRenderOption(kind, option)}
-                    </MenuItem>
-                  )}
-                </Menu>
-              </Autocomplete>
-            </div>
-          </Popover>
-        </MenuTrigger>
-      ) : (
-        <Autocomplete
+      {multiple ? (
+        <ComboBox
+          aria-label={fieldLabel}
+          selectionMode="multiple"
+          value={selectedIds}
+          onChange={handleMultipleChange}
           inputValue={rawQuery}
           onInputChange={setRawQuery}
-          filter={source.mode === "sync" ? contains : undefined}
+          menuTrigger="focus"
+          allowsEmptyCollection
+          className="w-full"
         >
-          {searchField}
-          <ListBox
-            aria-label={`${fieldLabel} results`}
-            items={items}
-            selectionMode="none"
-            onAction={(key) => pick(String(key))}
-            renderEmptyState={() => renderedEmptyState}
-            className="menu mt-1 max-h-64 w-full overflow-auto rounded-box border border-base-300 bg-base-100 p-1"
-          >
-            {(option: ResourceOption) => (
-              <ListBoxItem
-                id={option.id}
-                textValue={option.label}
-                className="rounded-field px-3 py-2 text-sm data-[focused]:bg-base-200"
-              >
-                {renderOption
-                  ? renderOption(option)
-                  : defaultRenderOption(kind, option)}
-              </ListBoxItem>
-            )}
-          </ListBox>
-        </Autocomplete>
+          {comboChildren}
+        </ComboBox>
+      ) : (
+        <ComboBox
+          aria-label={fieldLabel}
+          selectedKey={selectedId ?? null}
+          onSelectionChange={handleSingleChange}
+          inputValue={singleDisplayValue}
+          onInputChange={setRawQuery}
+          onFocusChange={(focused) => {
+            setIsFocused(focused);
+            // Reset the search text on blur so the field re-shows the label and
+            // the next open starts from a clean browse.
+            if (!focused) setRawQuery("");
+          }}
+          menuTrigger="focus"
+          allowsEmptyCollection
+          className="w-full"
+        >
+          {comboChildren}
+        </ComboBox>
       )}
 
-      {variant === "inline" && selectionMode === "single" && selectedIds[0] ? (
-        <span className="mt-1 text-xs text-base-content/60">
-          Selected: {labelFor(selectedIds[0])}
-        </span>
-      ) : null}
       {name ? (
         <input type="hidden" name={name} value={selectedIds.join(",")} />
       ) : null}

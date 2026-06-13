@@ -8,4 +8,5 @@ const viteConfigPath = fileURLToPath(
 export default {
   stories: ["stories/**/*.stories.{js,jsx,ts,tsx,mdx}"],
   viteConfig: viteConfigPath,
+  base: process.env.LADLE_BASE,
 };

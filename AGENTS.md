@@ -1,5 +1,7 @@
 Before touching shared UI code, load the `idco-ui` skill from `.agents/skills/idco-ui/SKILL.md`.
 
+**Non-negotiable UI philosophy:** every interactive primitive in `@idco/ui` is **React Aria behavior + DaisyUI styling**. Use React Aria (`react-aria` / `react-aria-components` / `react-stately`) for all behavior — focus, keyboard, ARIA, overlays, selection, dismissal — and DaisyUI 5 semantic classes for all appearance. Hand-rolling a dialog, dropdown, tooltip, tabs, toggle, listbox, date picker, etc. is forbidden, or a documented last resort only after confirming neither covers the need. Do not guess APIs: use the **`react-aria` MCP tool** (`list_react_aria_pages` / `get_react_aria_page`) for React Aria, and **context7** for DaisyUI class names and DOM structure. The skill carries the full hooks-vs-components rule, the DaisyUI convention rules, and the docs contract.
+
 ## Commands
 
 - `pnpm check` — full gate: format check → lint → duplicate gate → typecheck → test → build

@@ -8,3 +8,17 @@ globalThis.ResizeObserver = class ResizeObserver {
   unobserve() {}
   disconnect() {}
 };
+
+// React Aria's load-more sentinel (ListBoxLoadMoreItem) constructs an
+// IntersectionObserver, which jsdom does not implement.
+globalThis.IntersectionObserver = class IntersectionObserver {
+  readonly root = null;
+  readonly rootMargin = "";
+  readonly thresholds = [];
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+} as unknown as typeof IntersectionObserver;

@@ -118,6 +118,39 @@ async function searchOauthClients(query: string): Promise<ResourceOption[]> {
   return filterByQuery(oauthClients, query);
 }
 
+// A large mock directory to demonstrate cursor-based pagination + infinite scroll.
+const directory: ResourceOption[] = Array.from({ length: 137 }, (_, index) => {
+  const n = index + 1;
+  return {
+    id: `usr_dir_${n}`,
+    label: `Directory User ${n}`,
+    sublabel: `user${n}@directory.test`,
+    badge: n % 7 === 0 ? "Service" : undefined,
+  };
+});
+
+const PAGE_SIZE = 20;
+
+// Simulated paginated server endpoint: returns one page plus an opaque cursor
+// (the next offset) until the filtered result set is exhausted.
+async function searchDirectoryPaginated({
+  query,
+  cursor,
+}: {
+  query: string;
+  cursor?: string;
+}): Promise<{ items: ResourceOption[]; cursor?: string }> {
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const matches = filterByQuery(directory, query);
+  const start = cursor ? Number(cursor) : 0;
+  const items = matches.slice(start, start + PAGE_SIZE);
+  const nextStart = start + PAGE_SIZE;
+  return {
+    items,
+    cursor: nextStart < matches.length ? String(nextStart) : undefined,
+  };
+}
+
 const initialDocument: RichTextEditorDocument = {
   root: {
     children: [
@@ -175,6 +208,7 @@ export const Builders: Story = () => {
   ]);
   const [clientId, setClientId] = useState("cli_content_web");
   const [reviewerId, setReviewerId] = useState("");
+  const [directoryId, setDirectoryId] = useState("");
 
   return (
     <Stack>
@@ -228,6 +262,21 @@ export const Builders: Story = () => {
           onChange={(next) => setReviewerId(String(next))}
           source={{ mode: "async", load: (query) => searchUsers(query) }}
           minQueryLength={1}
+          variant="menu"
+          showLabel
+        />
+        {/*
+          Async paginated: opens with the first page already loaded, then keeps
+          appending pages as you scroll the list (React Aria load-more sentinel).
+          Typing filters server-side and resets to page 1.
+        */}
+        <ResourceSelector
+          kind="user"
+          label="Directory user (async paginated)"
+          placeholder="Scroll to load more…"
+          value={directoryId}
+          onChange={(next) => setDirectoryId(String(next))}
+          source={{ mode: "paginated", load: searchDirectoryPaginated }}
           variant="menu"
           showLabel
         />
