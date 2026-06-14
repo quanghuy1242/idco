@@ -1,0 +1,238 @@
+import {
+  alignmentValue,
+  calloutToneValue,
+  codeLanguageValue,
+  headingTag,
+  isNode,
+  isRecord,
+  listTypeValue,
+  numberValue,
+  stringValue,
+  type RichTextEditorNode,
+  type RichTextEditorDocument,
+} from "./schema";
+
+/**
+ * Coerce untrusted / legacy JSON into the canonical document shape. This is the
+ * inverse boundary to `serialize.ts`: anything stored or pasted is squeezed
+ * through here before it reaches Lexical.
+ */
+export function normalizeDocument(value: unknown): RichTextEditorDocument {
+  if (isRecord(value) && isRecord(value.root)) {
+    const children = Array.isArray(value.root.children)
+      ? value.root.children.flatMap(normalizeNode)
+      : [];
+    return { root: { children } };
+  }
+  if (typeof value === "string" && value.trim()) {
+    try {
+      return normalizeDocument(JSON.parse(value) as unknown);
+    } catch {
+      return { root: { children: [paragraphNode(value)] } };
+    }
+  }
+  return { root: { children: [] } };
+}
+
+export function normalizeNode(value: unknown): RichTextEditorNode[] {
+  if (!isNode(value)) {
+    return [];
+  }
+  const align = alignmentValue(value.format);
+  const aligned = align ? { format: align } : {};
+  if (value.type === "paragraph") {
+    return [
+      {
+        children: normalizeChildren(value.children),
+        type: "paragraph",
+        ...aligned,
+      },
+    ];
+  }
+  if (value.type === "heading") {
+    return [
+      {
+        children: normalizeChildren(value.children),
+        tag: headingTag(value.tag),
+        type: "heading",
+        ...aligned,
+      },
+    ];
+  }
+  if (value.type === "quote") {
+    return [
+      {
+        children: normalizeChildren(value.children),
+        type: "quote",
+        ...aligned,
+      },
+    ];
+  }
+  if (value.type === "list") {
+    const listType = listTypeValue(value.listType, value.tag);
+    return [
+      {
+        children: normalizeChildren(value.children),
+        listType,
+        start: numberValue(value.start) ?? 1,
+        tag: listType === "number" ? "ol" : "ul",
+        type: "list",
+      },
+    ];
+  }
+  if (value.type === "listitem") {
+    return [
+      {
+        children: normalizeChildren(value.children),
+        type: "listitem",
+        value: numberValue(value.value) ?? 1,
+        ...(typeof value.checked === "boolean"
+          ? { checked: value.checked }
+          : {}),
+      },
+    ];
+  }
+  if (value.type === "text") {
+    return [
+      {
+        detail: numberValue(value.detail) ?? 0,
+        format: numberValue(value.format) ?? 0,
+        mode: stringValue(value.mode) ?? "normal",
+        style: stringValue(value.style) ?? "",
+        text: stringValue(value.text) ?? "",
+        type: "text",
+      },
+    ];
+  }
+  if (value.type === "linebreak") {
+    return [{ type: "linebreak" }];
+  }
+  if (value.type === "callout") {
+    return [normalizeCalloutNode(value)];
+  }
+  if (value.type === "code-block" || value.type === "code") {
+    return [normalizeCodeBlockNode(value)];
+  }
+  if (value.type === "embed") {
+    return [normalizeEmbedNode(value)];
+  }
+  if (value.type === "media") {
+    return [normalizeMediaNode(value)];
+  }
+  if (value.type === "post-ref") {
+    return [normalizePostRefNode(value)];
+  }
+  if (value.type === "glossary") {
+    return [
+      {
+        definition: stringValue(value.definition) ?? "",
+        term: stringValue(value.term) ?? "",
+        type: "glossary",
+      },
+    ];
+  }
+  // Links, comment marks, and tables carry structure (and properties such as
+  // url / ids / colWidths) that must survive the doc round-trip verbatim, with
+  // children recursively normalized. This keeps the model the single source of
+  // truth without hand-maintaining a field list for every Lexical node.
+  if (PASSTHROUGH_ELEMENT_TYPES.has(value.type)) {
+    return [{ ...value, children: normalizeChildren(value.children) }];
+  }
+  return value.children ? [...normalizeChildren(value.children)] : [];
+}
+
+export const PASSTHROUGH_ELEMENT_TYPES: ReadonlySet<string> = new Set([
+  "link",
+  "autolink",
+  "mark",
+  "table",
+  "tablerow",
+  "tablecell",
+]);
+
+export function normalizeChildren(
+  children: readonly RichTextEditorNode[] | undefined,
+  fallbackText?: string,
+): readonly RichTextEditorNode[] {
+  const normalized = Array.isArray(children)
+    ? children.flatMap(normalizeNode)
+    : [];
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return fallbackText !== undefined
+    ? [{ text: fallbackText, type: "text" }]
+    : [];
+}
+
+export function paragraphNode(text: string): RichTextEditorNode {
+  return {
+    children: [{ text, type: "text" }],
+    type: "paragraph",
+  };
+}
+
+export function normalizeCalloutNode(
+  node: RichTextEditorNode,
+): RichTextEditorNode {
+  return {
+    children: [{ text: childText(node) || "Callout", type: "text" }],
+    tone: calloutToneValue(node.tone),
+    type: "callout",
+  };
+}
+
+export function normalizeCodeBlockNode(
+  node: RichTextEditorNode,
+): RichTextEditorNode {
+  return {
+    language: codeLanguageValue(node.language),
+    text: stringValue(node.text) ?? "",
+    type: "code-block",
+  };
+}
+
+export function normalizeEmbedNode(
+  node: RichTextEditorNode,
+): RichTextEditorNode {
+  return {
+    type: "embed",
+    url: stringValue(node.url) ?? "",
+  };
+}
+
+export function normalizeMediaNode(
+  node: RichTextEditorNode,
+): RichTextEditorNode {
+  return {
+    alt: stringValue(node.alt) ?? "",
+    caption: stringValue(node.caption) ?? "",
+    mediaId: stringValue(node.mediaId) ?? "",
+    type: "media",
+  };
+}
+
+export function normalizePostRefNode(
+  node: RichTextEditorNode,
+): RichTextEditorNode {
+  return {
+    postId: stringValue(node.postId) ?? "",
+    title: stringValue(node.title) ?? "",
+    type: "post-ref",
+    url: stringValue(node.url) ?? "",
+  };
+}
+
+export function textFromChildren(
+  children: readonly RichTextEditorNode[] | undefined,
+  fallback = "",
+): string[] {
+  const text = children
+    ?.map((child) => stringValue(child.text))
+    .filter((value): value is string => value !== undefined);
+  return text && text.length > 0 ? text : [fallback];
+}
+
+export function childText(node: RichTextEditorNode): string {
+  return textFromChildren(node.children, stringValue(node.text)).join("");
+}

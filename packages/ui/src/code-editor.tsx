@@ -10,7 +10,7 @@ import "prismjs/components/prism-jsx";
 import "prismjs/components/prism-tsx";
 import "prismjs/components/prism-python";
 /* eslint-enable import/no-unassigned-import */
-import { useRef, type KeyboardEvent } from "react";
+import { useMemo, useRef, type KeyboardEvent } from "react";
 
 export type CodeEditorLanguage =
   | "json"
@@ -29,6 +29,8 @@ type CodeEditorProps = {
   readonly engine?: "plain" | "prism";
   readonly error?: string;
   readonly label?: string;
+  /** Keep `label` as the field's accessible name but hide it visually. */
+  readonly srOnlyLabel?: boolean;
   readonly placeholder?: string;
   readonly readOnly?: boolean;
   /** Show the line-number gutter. Default true. */
@@ -56,19 +58,26 @@ export function CodeEditor(props: CodeEditorProps) {
     engine = "prism",
     error,
     label,
+    srOnlyLabel,
     placeholder,
     readOnly,
     lineNumbers = true,
     maxHeight,
   } = props;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const grammar = grammarFor(language);
-  // A trailing newline collapses in <pre>; pad it so the overlay height matches the textarea.
-  const highlighted =
-    engine === "prism"
-      ? Prism.highlight(value, grammar, prismLanguage(language))
-      : escapeHtml(value);
-  const lineCount = value.split("\n").length;
+  // Tokenizing is the expensive part; memoize it so re-renders that don't change
+  // the text (e.g. a parent re-rendering on every keystroke) don't re-highlight.
+  const highlighted = useMemo(
+    () =>
+      engine === "prism"
+        ? Prism.highlight(value, grammarFor(language), prismLanguage(language))
+        : escapeHtml(value),
+    [value, engine, language],
+  );
+  const gutterRows = useMemo(() => {
+    const count = value.split("\n").length;
+    return Array.from({ length: count }, (_, index) => index + 1);
+  }, [value]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Tab" || readOnly) return;
@@ -92,7 +101,13 @@ export function CodeEditor(props: CodeEditorProps) {
   return (
     <div className="form-control w-full">
       {label ? (
-        <span className="label-text mb-1 text-base font-medium text-base-content">
+        <span
+          className={
+            srOnlyLabel
+              ? "sr-only"
+              : "label-text mb-1 text-base font-medium text-base-content"
+          }
+        >
           {label}
         </span>
       ) : null}
@@ -107,8 +122,8 @@ export function CodeEditor(props: CodeEditorProps) {
               aria-hidden="true"
               className="sticky left-0 z-10 select-none border-r border-base-300 bg-base-200 px-3 py-3 text-right text-base-content/40 tabular-nums"
             >
-              {Array.from({ length: lineCount }, (_, index) => (
-                <div key={index}>{index + 1}</div>
+              {gutterRows.map((line) => (
+                <div key={line}>{line}</div>
               ))}
             </div>
           ) : null}

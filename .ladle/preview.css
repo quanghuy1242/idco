@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @source "../packages/ui/src/**/*.{tsx,ts}";
+@source "../packages/editor/src/**/*.{tsx,ts}";
+@source "../packages/content-renderer/src/**/*.{tsx,ts}";
 @source "../stories/**/*.{tsx,ts}";
 @plugin "daisyui";
 
@@ -221,6 +223,96 @@
     content: attr(data-label);
     @apply text-xs font-semibold text-base-content/60 mb-0.5;
   }
+}
+
+/* Lexical check lists: the `checklist` theme class neutralizes the shared `ul`
+   bullet/indent styling so a check list is visually distinct from a bullet list. */
+.rt-checklist {
+  margin-left: 0;
+  list-style: none;
+  padding-left: 0;
+}
+
+/* Lexical check-list items (theme classes rt-checklist-item / rt-checklist-checked).
+   The line-height is 1.5rem (leading-6); a 1rem box is centered on the first
+   line at top = (1.5rem - 1rem) / 2 = 0.25rem so it aligns with its text. */
+.rt-checklist-item {
+  position: relative;
+  list-style: none;
+  margin-left: 0;
+  padding-left: 1.75rem;
+  outline: none;
+}
+.rt-checklist-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.25rem;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--color-base-300);
+  border-radius: 0.25rem;
+  background: var(--color-base-100);
+  cursor: pointer;
+}
+.rt-checklist-checked::before {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.rt-checklist-checked::after {
+  content: "";
+  position: absolute;
+  left: 0.36rem;
+  top: 0.45rem;
+  width: 0.3rem;
+  height: 0.55rem;
+  border: solid var(--color-primary-content);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  cursor: pointer;
+}
+.rt-checklist-checked {
+  text-decoration: line-through;
+  color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+}
+
+/* Lexical tables. The scroll wrapper (theme.tableScrollableWrapper) owns the
+   outer frame: a rounded border that clips the table's square corners so the
+   table reads like the other bordered blocks (cards, media, callouts). It also
+   carries the horizontal scroll for wide tables. */
+.rt-table-wrap {
+  margin-block: 0.75rem;
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-box);
+  /* overflow-x auto scrolls wide tables; with a radius this also clips the
+     table's corners to the rounded frame (overflow-y stays clipped so no
+     stray scrollbar appears). */
+  overflow: auto hidden;
+}
+/* Fixed layout so the column widths set by the resize handles are honoured;
+   no `width` here — the table sizes to the sum of its column widths (seeded on
+   create by TableControlsPlugin) so dragging a boundary is WYSIWYG both ways. */
+.rt-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+/* Interior grid only: each cell draws its right/bottom edge; the wrapper draws
+   the outer frame. Padding lives here (not only on the theme utility classes)
+   so every cell — seeded from JSON or freshly inserted — has the same
+   comfortable breathing room regardless of utility generation timing. */
+.rt-table td,
+.rt-table th {
+  position: relative;
+  padding: 0.625rem 1.25rem;
+  border-right: 1px solid var(--color-base-300);
+  border-bottom: 1px solid var(--color-base-300);
+}
+.rt-table tr > *:last-child {
+  border-right: none;
+}
+.rt-table tr:last-child > * {
+  border-bottom: none;
 }
 
 /* Prism syntax highlighting — theme-aware token palette for the CodeEditor / code-block nodes. */

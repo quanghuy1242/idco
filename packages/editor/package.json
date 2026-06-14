@@ -1,6 +1,6 @@
 {
   "name": "@quanghuy1242/idco-editor",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "type": "module",
   "sideEffects": false,
   "publishConfig": {
@@ -15,6 +15,19 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsgo -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@quanghuy1242/idco-ui": "workspace:^",
+    "@lexical/link": "0.45.0",
+    "@lexical/list": "0.45.0",
+    "@lexical/mark": "0.45.0",
+    "@lexical/markdown": "0.45.0",
+    "@lexical/react": "0.45.0",
+    "@lexical/rich-text": "0.45.0",
+    "@lexical/selection": "0.45.0",
+    "@lexical/table": "0.45.0",
+    "@lexical/utils": "0.45.0",
+    "lexical": "0.45.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",

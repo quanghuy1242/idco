@@ -31,6 +31,18 @@ export default defineConfig({
         ),
       },
       {
+        find: "@idco/editor",
+        replacement: fileURLToPath(
+          new URL("./packages/editor/src/index.ts", import.meta.url),
+        ),
+      },
+      {
+        find: "@quanghuy1242/idco-editor",
+        replacement: fileURLToPath(
+          new URL("./packages/editor/src/index.ts", import.meta.url),
+        ),
+      },
+      {
         find: "next/link",
         replacement: fileURLToPath(
           new URL("./.ladle/mocks/next-link.tsx", import.meta.url),

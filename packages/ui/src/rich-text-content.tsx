@@ -12,9 +12,17 @@ import { Text } from "./typography";
 
 export type RichTextHeadingLevel = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 export type RichTextListKind = "bullet" | "number";
+export type RichTextAlign = "left" | "center" | "right" | "justify";
 
 type RichTextChildrenProps = {
   readonly children?: ReactNode;
+};
+
+const alignClass: Record<RichTextAlign, string> = {
+  center: "text-center",
+  justify: "text-justify",
+  left: "text-left",
+  right: "text-right",
 };
 
 export function RichTextArticle({ children }: RichTextChildrenProps) {
@@ -25,20 +33,35 @@ export function RichTextArticle({ children }: RichTextChildrenProps) {
   );
 }
 
-export function RichTextParagraph({ children }: RichTextChildrenProps) {
+export function RichTextParagraph({
+  align,
+  children,
+}: RichTextChildrenProps & {
+  readonly align?: RichTextAlign;
+}) {
   return (
-    <p className="m-0 text-base leading-6 text-base-content">{children}</p>
+    <p
+      className={`m-0 text-base leading-6 text-base-content ${align ? alignClass[align] : ""}`.trim()}
+    >
+      {children}
+    </p>
   );
 }
 
 export function RichTextHeading({
   level,
+  align,
   children,
 }: RichTextChildrenProps & {
   readonly level: RichTextHeadingLevel;
+  readonly align?: RichTextAlign;
 }) {
   return (
-    <Text variant={level} as={level}>
+    <Text
+      variant={level}
+      as={level}
+      className={align ? alignClass[align] : undefined}
+    >
       {children}
     </Text>
   );
@@ -226,4 +249,95 @@ export function RichTextCodeBlock({
       onChange={() => {}}
     />
   );
+}
+
+export function RichTextMark({ children }: RichTextChildrenProps) {
+  return (
+    <mark className="rounded bg-warning/30 px-0.5 text-base-content">
+      {children}
+    </mark>
+  );
+}
+
+export function RichTextGlossary({
+  term,
+  definition,
+}: {
+  readonly term: string;
+  readonly definition: string;
+}) {
+  return (
+    <abbr
+      title={definition}
+      className="cursor-help font-medium text-base-content underline decoration-dotted decoration-base-content/40 underline-offset-2"
+    >
+      {term}
+    </abbr>
+  );
+}
+
+export function RichTextCheckList({ children }: RichTextChildrenProps) {
+  return (
+    <ul className="m-0 ml-1 list-none space-y-1 text-base leading-6 text-base-content">
+      {children}
+    </ul>
+  );
+}
+
+export function RichTextCheckListItem({
+  checked,
+  children,
+}: RichTextChildrenProps & {
+  readonly checked?: boolean;
+}) {
+  return (
+    <li className="flex items-start gap-2">
+      <input
+        type="checkbox"
+        checked={Boolean(checked)}
+        readOnly
+        className="checkbox checkbox-sm mt-0.5"
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+      <span className={checked ? "text-base-content/60 line-through" : ""}>
+        {children}
+      </span>
+    </li>
+  );
+}
+
+export function RichTextTable({ children }: RichTextChildrenProps) {
+  // The wrapper owns the rounded outer frame (matching the editor and the other
+  // bordered blocks); cells draw only the interior grid. overflow-x scrolls wide
+  // tables while the radius still clips the table's square corners.
+  return (
+    <div className="my-3 overflow-x-auto overflow-y-hidden rounded-box border border-base-300">
+      <table className="w-full border-separate border-spacing-0 text-sm [&_tr:last-child>*]:border-b-0 [&_tr>*:last-child]:border-r-0">
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+export function RichTextTableRow({ children }: RichTextChildrenProps) {
+  return <tr>{children}</tr>;
+}
+
+export function RichTextTableCell({
+  header,
+  children,
+}: RichTextChildrenProps & {
+  readonly header?: boolean;
+}) {
+  const className =
+    "border-b border-r border-base-300 px-5 py-2.5 align-top text-base-content";
+  if (header) {
+    return (
+      <th className={`${className} bg-base-200 text-left font-semibold`}>
+        {children}
+      </th>
+    );
+  }
+  return <td className={className}>{children}</td>;
 }

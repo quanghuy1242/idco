@@ -17,10 +17,18 @@ import {
   RichTextParagraph,
   RichTextPostReference,
   RichTextStrikethrough,
+  RichTextCheckList,
+  RichTextCheckListItem,
+  RichTextGlossary,
+  RichTextMark,
   RichTextStrong,
+  RichTextTable,
+  RichTextTableCell,
+  RichTextTableRow,
   RichTextUnderline,
   type AlertTone,
   type CodeEditorLanguage,
+  type RichTextAlign,
   type RichTextHeadingLevel,
   type RichTextListKind,
 } from "@quanghuy1242/idco-ui";
@@ -38,7 +46,7 @@ export type RichTextNode = {
   readonly alt?: string;
   readonly caption?: string;
   readonly detail?: number;
-  readonly format?: number;
+  readonly format?: number | string;
   readonly listType?: string;
   readonly mode?: string;
   readonly postId?: string;
@@ -114,7 +122,11 @@ const defaultRenderers: Readonly<Record<string, RichTextNodeRenderer>> = {
     );
   },
   heading: (node, children, key) => (
-    <RichTextHeading key={key} level={headingLevel(node.tag)}>
+    <RichTextHeading
+      key={key}
+      level={headingLevel(node.tag)}
+      align={elementAlign(node.format)}
+    >
       {children}
     </RichTextHeading>
   ),
@@ -127,17 +139,37 @@ const defaultRenderers: Readonly<Record<string, RichTextNodeRenderer>> = {
       </RichTextInlineLink>
     );
   },
-  list: (node, children, key) => (
-    <RichTextList
+  glossary: (node, _children, key) => (
+    <RichTextGlossary
       key={key}
-      kind={listKind(node.listType, node.tag)}
-      start={numberValue(node.start)}
-    >
-      {children}
-    </RichTextList>
+      term={stringValue(node.term) ?? ""}
+      definition={stringValue(node.definition) ?? ""}
+    />
   ),
-  listitem: (_node, children, key) => (
-    <RichTextListItem key={key}>{children}</RichTextListItem>
+  list: (node, children, key) => {
+    if (node.listType === "check") {
+      return <RichTextCheckList key={key}>{children}</RichTextCheckList>;
+    }
+    return (
+      <RichTextList
+        key={key}
+        kind={listKind(node.listType, node.tag)}
+        start={numberValue(node.start)}
+      >
+        {children}
+      </RichTextList>
+    );
+  },
+  listitem: (node, children, key) =>
+    typeof node.checked === "boolean" ? (
+      <RichTextCheckListItem key={key} checked={node.checked}>
+        {children}
+      </RichTextCheckListItem>
+    ) : (
+      <RichTextListItem key={key}>{children}</RichTextListItem>
+    ),
+  mark: (_node, children, key) => (
+    <RichTextMark key={key}>{children}</RichTextMark>
   ),
   media: (node, _children, key) => {
     const src = stringValue(node.src);
@@ -151,8 +183,10 @@ const defaultRenderers: Readonly<Record<string, RichTextNodeRenderer>> = {
       />
     );
   },
-  paragraph: (_node, children, key) => (
-    <RichTextParagraph key={key}>{children}</RichTextParagraph>
+  paragraph: (node, children, key) => (
+    <RichTextParagraph key={key} align={elementAlign(node.format)}>
+      {children}
+    </RichTextParagraph>
   ),
   "post-ref": (node, _children, key) => renderPostRef(node, key),
   quote: (_node, children, key) => (
@@ -160,6 +194,20 @@ const defaultRenderers: Readonly<Record<string, RichTextNodeRenderer>> = {
   ),
   root: (_node, children, key) => (
     <RichTextArticle key={key}>{children}</RichTextArticle>
+  ),
+  table: (_node, children, key) => (
+    <RichTextTable key={key}>{children}</RichTextTable>
+  ),
+  tablecell: (node, children, key) => (
+    <RichTextTableCell
+      key={key}
+      header={(numberValue(node.headerState) ?? 0) > 0}
+    >
+      {children}
+    </RichTextTableCell>
+  ),
+  tablerow: (_node, children, key) => (
+    <RichTextTableRow key={key}>{children}</RichTextTableRow>
   ),
   text: (node, _children, key) => (
     <Fragment key={key}>{renderTextNode(node)}</Fragment>
@@ -302,6 +350,12 @@ function headingLevel(value: unknown): RichTextHeadingLevel {
     value === "h6"
     ? value
     : "h2";
+}
+
+function elementAlign(value: unknown): RichTextAlign | undefined {
+  return value === "center" || value === "right" || value === "justify"
+    ? value
+    : undefined;
 }
 
 function calloutTone(value: unknown): AlertTone {

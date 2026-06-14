@@ -126,6 +126,39 @@ importers:
 
   packages/editor:
     dependencies:
+      '@lexical/link':
+        specifier: 0.45.0
+        version: 0.45.0
+      '@lexical/list':
+        specifier: 0.45.0
+        version: 0.45.0
+      '@lexical/mark':
+        specifier: 0.45.0
+        version: 0.45.0
+      '@lexical/markdown':
+        specifier: 0.45.0
+        version: 0.45.0
+      '@lexical/react':
+        specifier: 0.45.0
+        version: 0.45.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(yjs@13.6.31)
+      '@lexical/rich-text':
+        specifier: 0.45.0
+        version: 0.45.0
+      '@lexical/selection':
+        specifier: 0.45.0
+        version: 0.45.0
+      '@lexical/table':
+        specifier: 0.45.0
+        version: 0.45.0
+      '@lexical/utils':
+        specifier: 0.45.0
+        version: 0.45.0
+      '@quanghuy1242/idco-ui':
+        specifier: workspace:^
+        version: link:../ui
+      lexical:
+        specifier: 0.45.0
+        version: 0.45.0
       react:
         specifier: ^19.0.0
         version: 19.2.6
@@ -144,24 +177,6 @@ importers:
       '@internationalized/date':
         specifier: 3.12.2
         version: 3.12.2
-      '@lexical/list':
-        specifier: 0.45.0
-        version: 0.45.0
-      '@lexical/react':
-        specifier: 0.45.0
-        version: 0.45.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(yjs@13.6.31)
-      '@lexical/rich-text':
-        specifier: 0.45.0
-        version: 0.45.0
-      '@lexical/selection':
-        specifier: 0.45.0
-        version: 0.45.0
-      '@lexical/utils':
-        specifier: 0.45.0
-        version: 0.45.0
-      lexical:
-        specifier: 0.45.0
-        version: 0.45.0
       lucide-react:
         specifier: 1.16.0
         version: 1.16.0(react@19.2.6)

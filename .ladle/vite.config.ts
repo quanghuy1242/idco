@@ -11,6 +11,9 @@ const libSrc = fileURLToPath(
 const contentRendererSrc = fileURLToPath(
   new URL("../packages/content-renderer/src/index.tsx", import.meta.url),
 );
+const editorSrc = fileURLToPath(
+  new URL("../packages/editor/src/index.ts", import.meta.url),
+);
 const nextLinkMock = fileURLToPath(
   new URL("./mocks/next-link.tsx", import.meta.url),
 );
@@ -47,6 +50,8 @@ export default defineConfig({
       { find: "@quanghuy1242/idco-ui", replacement: uiSrc },
       { find: "@idco/lib", replacement: libSrc },
       { find: "@idco/content-renderer", replacement: contentRendererSrc },
+      { find: "@idco/editor", replacement: editorSrc },
+      { find: "@quanghuy1242/idco-editor", replacement: editorSrc },
       {
         find: /^lucide-react$/,
         replacement: `${nodeModules}/lucide-react/dist/cjs/lucide-react.js`,

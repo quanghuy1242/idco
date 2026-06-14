@@ -19,8 +19,17 @@ function isLibPackageSource(filename) {
   return filename.includes("/packages/lib/src/");
 }
 
+function isEditorPackageSource(filename) {
+  filename = normalizeFilename(filename);
+  return filename.includes("/packages/editor/src/");
+}
+
 function isIdcoPackageSource(filename) {
-  return isUiPackageSource(filename) || isLibPackageSource(filename);
+  return (
+    isUiPackageSource(filename) ||
+    isLibPackageSource(filename) ||
+    isEditorPackageSource(filename)
+  );
 }
 
 var PRODUCT_IMPORT_PATTERNS = [

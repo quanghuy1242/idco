@@ -20,7 +20,7 @@ async function pickFromCombo(name: RegExp, option: RegExp): Promise<void> {
 }
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { RichTextEditor, type RichTextEditorDocument } from "@idco/ui";
+import { RichTextEditor, type RichTextEditorDocument } from "@idco/editor";
 
 function ControlledMediaEditor() {
   const [value, setValue] = useState<RichTextEditorDocument>({
