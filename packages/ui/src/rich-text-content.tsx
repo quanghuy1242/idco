@@ -307,13 +307,62 @@ export function RichTextCheckListItem({
   );
 }
 
-export function RichTextTable({ children }: RichTextChildrenProps) {
+/** CSS for the rendered numbered-column gutter — mirrors the editor's counter
+ *  technique so the published table matches what the author saw. Self-contained
+ *  (`@idco/ui` ships no stylesheet) and scoped to `.rt-table-numbered`. */
+const NUMBERED_TABLE_CSS = `
+.rt-table-numbered{counter-reset:rt-row}
+.rt-table-numbered tr{counter-increment:rt-row}
+.rt-table-numbered tr>*:first-child{padding-left:3rem}
+.rt-table-numbered tr>*:first-child::before{content:counter(rt-row);position:absolute;left:0;top:0;bottom:0;width:2.25rem;display:grid;place-items:center;font-size:0.7rem;font-variant-numeric:tabular-nums;color:var(--color-base-content);opacity:0.45;background:var(--color-base-200);border-right:1px solid var(--color-base-300)}
+`;
+
+export function RichTextTable({
+  children,
+  colWidths,
+  layout = "fixed",
+  numbered = false,
+}: RichTextChildrenProps & {
+  readonly colWidths?: readonly number[];
+  readonly layout?: string;
+  readonly numbered?: boolean;
+}) {
   // The wrapper owns the rounded outer frame (matching the editor and the other
   // bordered blocks); cells draw only the interior grid. overflow-x scrolls wide
   // tables while the radius still clips the table's square corners.
+  const responsive = layout === "responsive" || layout === "full-width";
+  const total = colWidths?.reduce((sum, width) => sum + width, 0) ?? 0;
+  // Responsive tables emit `%` widths so the page reflows natively (no JS);
+  // fixed tables emit the authored `px` and scroll when wider than the frame.
+  const colGroup =
+    colWidths && colWidths.length > 0 ? (
+      <colgroup>
+        {colWidths.map((width, index) => (
+          <col
+            // eslint-disable-next-line react/no-array-index-key -- columns are positional
+            key={index}
+            style={{
+              width:
+                responsive && total > 0
+                  ? `${((width / total) * 100).toFixed(4)}%`
+                  : `${width}px`,
+            }}
+          />
+        ))}
+      </colgroup>
+    ) : null;
   return (
     <div className="my-3 overflow-x-auto overflow-y-hidden rounded-box border border-base-300">
-      <table className="w-full border-separate border-spacing-0 text-sm [&_tr:last-child>*]:border-b-0 [&_tr>*:last-child]:border-r-0">
+      {numbered ? <style>{NUMBERED_TABLE_CSS}</style> : null}
+      <table
+        data-table-layout={layout}
+        className={`border-separate border-spacing-0 text-sm [&_tr:last-child>*]:border-b-0 [&_tr>*:last-child]:border-r-0 ${
+          responsive || !colGroup ? "w-full" : ""
+        } ${colGroup ? "table-fixed" : ""} ${
+          numbered ? "rt-table-numbered [&_td]:relative [&_th]:relative" : ""
+        }`.trim()}
+      >
+        {colGroup}
         <tbody>{children}</tbody>
       </table>
     </div>

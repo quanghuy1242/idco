@@ -1,100 +1,238 @@
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   $getNodeByKey,
+  $getRoot,
   $getSelection,
-  $isDecoratorNode,
-  $isElementNode,
+  $isNodeSelection,
   $isRangeSelection,
   $isRootNode,
-  $setSelection,
-  type BaseSelection,
+  KEY_ARROW_DOWN_COMMAND,
+  KEY_ARROW_LEFT_COMMAND,
+  KEY_ARROW_RIGHT_COMMAND,
+  KEY_ARROW_UP_COMMAND,
+  COMMAND_PRIORITY_LOW,
+  type ElementNode,
+  type LexicalEditor,
   type LexicalNode,
+  type PointType,
 } from "lexical";
 import { useEffect, useRef } from "react";
+import {
+  $selectBoundaryOrGap,
+  $isGapContainerNode,
+  canHoldRealCaret,
+  isAtomicGapNode,
+} from "./gap-cursor-plugin";
 
-type Action =
-  | {
-      readonly kind: "redirect";
-      readonly key: string;
-      readonly edge: "start" | "end";
-    }
-  | { readonly kind: "restore" };
+type BoundaryAction = {
+  readonly containerKey: string | null;
+  readonly offset: number;
+  readonly preferredEdge: "backward" | "forward" | "nearest";
+};
 
 /**
- * Keeps the caret visible during arrow navigation. Lexical has no caret slot in
- * the space around atomic blocks (decorator blocks and tables), so arrowing past
- * the last block — or above the first — lands a collapsed `RangeSelection`
- * anchored on the `RootNode`, which has no on-screen position and renders no
- * caret at all (the "cursor disappears" bug). This plugin watches for that
- * root-anchored selection and redirects it to the nearest text-bearing block
- * edge; if neither side can hold a caret it restores the last good selection so
- * the arrow is a harmless no-op instead of a vanish.
- *
- * A future gap cursor (docs/002 Part B) will let the caret actually *rest* in
- * those gaps; this is the Part A safety net so it is never invisible.
+ * Keeps arrow navigation visible at root and table-cell block boundaries.
+ * Lexical can represent text carets and table-cell carets, but not a caret in
+ * the outer gap around decorator blocks or tables. When default Lexical
+ * navigation lands on a NodeSelection or a root/table-cell boundary selection,
+ * resolve it to a real text edge or hand it to the gap cursor.
  */
 export function BlockNavigationPlugin() {
   const [editor] = useLexicalComposerContext();
-  const lastGood = useRef<BaseSelection | null>(null);
+  const handledBoundary = useRef<string | null>(null);
 
   useEffect(
     () =>
       editor.registerUpdateListener(({ editorState }) => {
-        const resolved = editorState.read((): Action | null => {
+        const action = editorState.read((): BoundaryAction | null => {
           const selection = $getSelection();
-          if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
+          if ($isNodeSelection(selection)) {
+            const node = selection.getNodes()[0];
+            if (!node || !isAtomicGapNode(node)) return null;
+            const parent = node.getParent();
+            if (!$isGapContainerNode(parent)) return null;
+            return {
+              containerKey: $gapContainerKey(parent),
+              offset: node.getIndexWithinParent() + 1,
+              preferredEdge: "forward",
+            };
+          }
+          if (
+            !$isRangeSelection(selection) ||
+            !selection.isCollapsed() ||
+            !$isGapContainerNode(selection.anchor.getNode())
+          ) {
+            handledBoundary.current = null;
             return null;
           }
-          const anchorNode = selection.anchor.getNode();
-          if (!$isRootNode(anchorNode)) {
-            // A normal text caret — remember it so we can fall back to it.
-            lastGood.current = selection.clone();
+          const container = selection.anchor.getNode();
+          const boundaryKey = `${$gapContainerKey(container) ?? "root"}:${
+            selection.anchor.offset
+          }`;
+          if (handledBoundary.current === boundaryKey) {
             return null;
           }
-          // Collapsed on the root = the invisible boundary slot. Prefer the
-          // block just before the boundary (arrowed down past it), else the one
-          // after (arrowed up above it).
-          const before = anchorNode.getChildAtIndex(
-            selection.anchor.offset - 1,
-          );
-          const after = anchorNode.getChildAtIndex(selection.anchor.offset);
-          if (before && canHoldCaret(before)) {
-            return { edge: "end", key: before.getKey(), kind: "redirect" };
-          }
-          if (after && canHoldCaret(after)) {
-            return { edge: "start", key: after.getKey(), kind: "redirect" };
-          }
-          return { kind: "restore" };
+          return {
+            containerKey: $gapContainerKey(container),
+            offset: selection.anchor.offset,
+            preferredEdge: "nearest",
+          };
         });
-        if (!resolved) return;
+        if (!action) return;
+        handledBoundary.current = `${action.containerKey ?? "root"}:${
+          action.offset
+        }`;
         editor.update(() => {
-          if (resolved.kind === "restore") {
-            const saved = lastGood.current;
-            if (!saved) return;
-            try {
-              $setSelection(saved.clone());
-            } catch {
-              // The saved selection can reference nodes that no longer exist.
-            }
-            return;
+          const container = $gapContainerFromKey(action.containerKey);
+          if (container) {
+            $selectBoundaryOrGap(
+              editor,
+              action.offset,
+              action.preferredEdge,
+              container,
+            );
           }
-          const node = $getNodeByKey(resolved.key);
-          if (!$isElementNode(node)) return;
-          if (resolved.edge === "end") node.selectEnd();
-          else node.selectStart();
         });
       }),
     [editor],
   );
 
+  useEffect(() => {
+    const backward = (event: KeyboardEvent) => {
+      const handled = $handleRangeBoundaryArrow(editor, "backward");
+      if (handled) event.preventDefault();
+      return handled;
+    };
+    const forward = (event: KeyboardEvent) => {
+      const handled = $handleRangeBoundaryArrow(editor, "forward");
+      if (handled) event.preventDefault();
+      return handled;
+    };
+    return mergeCleanups(
+      editor.registerCommand(
+        KEY_ARROW_UP_COMMAND,
+        backward,
+        COMMAND_PRIORITY_LOW,
+      ),
+      editor.registerCommand(
+        KEY_ARROW_LEFT_COMMAND,
+        backward,
+        COMMAND_PRIORITY_LOW,
+      ),
+      editor.registerCommand(
+        KEY_ARROW_DOWN_COMMAND,
+        forward,
+        COMMAND_PRIORITY_LOW,
+      ),
+      editor.registerCommand(
+        KEY_ARROW_RIGHT_COMMAND,
+        forward,
+        COMMAND_PRIORITY_LOW,
+      ),
+    );
+  }, [editor]);
+
   return null;
 }
 
-/**
- * Element blocks (paragraph/heading/quote/list, and tables via their cells) have
- * a text caret slot; decorator blocks (callout/code/media/embed/post-ref) do
- * not, so the caret can't rest on them.
- */
-function canHoldCaret(node: LexicalNode): boolean {
-  return $isElementNode(node) && !$isDecoratorNode(node);
+function $handleRangeBoundaryArrow(
+  editor: LexicalEditor,
+  direction: "backward" | "forward",
+): boolean {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) return false;
+  const anchorNode = selection.anchor.getNode();
+  if ($isGapContainerNode(anchorNode)) {
+    return $selectBoundaryOrGap(
+      editor,
+      selection.anchor.offset,
+      direction,
+      anchorNode,
+    );
+  }
+  const block = $nearestGapContainerChild(anchorNode);
+  if (!block || isAtomicGapNode(block)) return false;
+  const container = block.getParent();
+  if (!$isGapContainerNode(container)) return false;
+  const atBoundary =
+    direction === "backward"
+      ? isPointAtBlockStart(selection.anchor, block)
+      : isPointAtBlockEnd(selection.anchor, block);
+  if (!atBoundary) return false;
+  const adjacent =
+    direction === "backward"
+      ? block.getPreviousSibling()
+      : block.getNextSibling();
+  if (!adjacent || !isAtomicGapNode(adjacent)) return false;
+  const farSide =
+    direction === "backward"
+      ? adjacent.getPreviousSibling()
+      : adjacent.getNextSibling();
+  if (farSide && canHoldRealCaret(farSide)) {
+    if (direction === "backward") farSide.selectEnd();
+    else farSide.selectStart();
+    return true;
+  }
+  return $selectBoundaryOrGap(
+    editor,
+    adjacent.getIndexWithinParent() + (direction === "backward" ? 0 : 1),
+    direction,
+    container,
+  );
+}
+
+function $nearestGapContainerChild(node: LexicalNode): LexicalNode | null {
+  let current: LexicalNode | null = node;
+  while (current) {
+    const parent: LexicalNode | null = current.getParent();
+    if ($isGapContainerNode(parent)) return current;
+    current = parent;
+  }
+  return null;
+}
+
+function $gapContainerFromKey(key: string | null): ElementNode | null {
+  if (key === null) return $getRoot();
+  const node = $getNodeByKey(key);
+  return $isGapContainerNode(node) ? node : null;
+}
+
+function $gapContainerKey(container: LexicalNode): string | null {
+  return $isRootNode(container) ? null : container.getKey();
+}
+
+function isPointAtBlockStart(point: PointType, block: LexicalNode): boolean {
+  let node = point.getNode();
+  if (point.offset !== 0) return false;
+  while (!node.is(block)) {
+    if (node.getPreviousSibling()) return false;
+    const parent = node.getParent();
+    if (!parent) return false;
+    node = parent;
+  }
+  return true;
+}
+
+function isPointAtBlockEnd(point: PointType, block: LexicalNode): boolean {
+  let node: LexicalNode;
+  if (point.type === "text") {
+    const textNode = point.getNode();
+    if (point.offset !== textNode.getTextContentSize()) return false;
+    node = textNode;
+  } else {
+    const elementNode = point.getNode();
+    if (point.offset !== elementNode.getChildrenSize()) return false;
+    node = elementNode;
+  }
+  while (!node.is(block)) {
+    if (node.getNextSibling()) return false;
+    const parent = node.getParent();
+    if (!parent) return false;
+    node = parent;
+  }
+  return true;
+}
+
+function mergeCleanups(...cleanups: Array<() => void>): () => void {
+  return () => cleanups.forEach((cleanup) => cleanup());
 }

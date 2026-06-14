@@ -11,6 +11,7 @@ import {
   $getSelection,
   $isRangeSelection,
   $isRootNode,
+  KEY_ENTER_COMMAND,
   type LexicalEditor,
 } from "lexical";
 import {
@@ -18,6 +19,7 @@ import {
   RICH_TEXT_DECORATOR_NODES,
 } from "../../packages/editor/src/nodes";
 import { BlockNavigationPlugin } from "../../packages/editor/src/plugins/block-navigation-plugin";
+import { GapCursorPlugin } from "../../packages/editor/src/plugins/gap-cursor-plugin";
 
 function Capture({ onReady }: { onReady: (editor: LexicalEditor) => void }) {
   const [editor] = useLexicalComposerContext();
@@ -37,6 +39,7 @@ function mountEditor(): LexicalEditor {
         },
       }}
     >
+      <GapCursorPlugin />
       <BlockNavigationPlugin />
       <Capture onReady={(value) => (editor = value)} />
     </LexicalComposer>,
@@ -76,9 +79,8 @@ describe("block navigation (caret never invisible)", () => {
     });
   });
 
-  it("restores the last good caret when no adjacent block can hold one", async () => {
+  it("uses the gap cursor when no adjacent block can hold a real caret", async () => {
     const editor = mountEditor();
-    // Seat a real caret first so the plugin records it as the fallback.
     editor.update(
       () => {
         const root = $getRoot();
@@ -109,13 +111,15 @@ describe("block navigation (caret never invisible)", () => {
     await flush();
     await flush();
 
+    editor.dispatchCommand(KEY_ENTER_COMMAND, null);
+    await flush();
+
     editor.getEditorState().read(() => {
-      const selection = $getSelection();
-      if (!$isRangeSelection(selection)) throw new Error("expected range");
-      // The decorator can't hold a caret, so the caret falls back into the
-      // paragraph rather than vanishing on the root.
-      expect($isRootNode(selection.anchor.getNode())).toBe(false);
-      expect(selection.anchor.getNode().getTextContent()).toBe("Body");
+      expect(
+        $getRoot()
+          .getChildren()
+          .map((node) => node.getType()),
+      ).toEqual(["paragraph", "code-block", "paragraph"]);
     });
   });
 });

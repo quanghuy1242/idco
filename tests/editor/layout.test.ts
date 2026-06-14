@@ -3,6 +3,7 @@ import {
   blockHandleDropOffset,
   resizeColumnWidths,
   splitColumnWidths,
+  tableSeedAvailableWidth,
 } from "../../packages/editor/src/model/layout";
 
 const sum = (widths: readonly number[]) => widths.reduce((a, b) => a + b, 0);
@@ -20,6 +21,28 @@ describe("splitColumnWidths (table seeding)", () => {
 
   it("returns nothing for non-positive column counts", () => {
     expect(splitColumnWidths(500, 0)).toEqual([]);
+  });
+
+  it("uses the editor width instead of tiny intrinsic empty-table width", () => {
+    expect(
+      tableSeedAvailableWidth({
+        columns: 3,
+        editorWidth: 900,
+        tableWidth: 122,
+        wrapperWidth: 0,
+      }),
+    ).toBe(900);
+  });
+
+  it("falls back to a usable minimum when no layout width is available", () => {
+    expect(
+      tableSeedAvailableWidth({
+        columns: 3,
+        editorWidth: 0,
+        tableWidth: 122,
+        wrapperWidth: 0,
+      }),
+    ).toBe(360);
   });
 });
 

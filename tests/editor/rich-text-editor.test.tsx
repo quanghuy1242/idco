@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 
 // The shared ResourceSelector picker is a React Aria ComboBox: focus opens the
@@ -161,6 +162,44 @@ describe("RichTextEditor", () => {
         },
       }),
     );
+  });
+
+  it("seeds column widths when inserting a table from the toolbar", async () => {
+    const onChange = vi.fn<(value: unknown) => void>();
+    render(
+      <RichTextEditor
+        label="Body"
+        value={{ root: { children: [] } }}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("textbox", { name: /^body$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^table$/i }));
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          root: {
+            children: expect.arrayContaining([
+              expect.objectContaining({
+                colWidths: [120, 120, 120],
+                layout: "responsive",
+                type: "editor-table",
+              }),
+            ]),
+          },
+        }),
+      ),
+    );
+    const toolbar = screen.getByRole("toolbar", { name: /body formatting/i });
+    expect(
+      within(toolbar).queryByRole("button", { name: /delete row/i }),
+    ).toBeNull();
+    expect(
+      within(toolbar).queryByRole("button", { name: /delete column/i }),
+    ).toBeNull();
   });
 
   it("hides node actions that are not allowed", () => {

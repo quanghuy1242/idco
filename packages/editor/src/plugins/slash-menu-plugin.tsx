@@ -111,8 +111,8 @@ export function SlashMenuPlugin({
     ) => {
       editor.update(() => {
         nodeToRemove?.remove();
+        option.run(editor);
       });
-      option.run(editor);
       closeMenu();
       requestAnimationFrame(() => editor.focus());
     },

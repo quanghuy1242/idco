@@ -1,3 +1,4 @@
+import { $isTableCellNode } from "@lexical/table";
 import { $createHeadingNode } from "@lexical/rich-text";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
@@ -9,7 +10,10 @@ import {
   $isElementNode,
   $isParagraphNode,
   $isRangeSelection,
+  $isRootNode,
   COMMAND_PRIORITY_EDITOR,
+  type BaseSelection,
+  type ElementNode,
   type LexicalNode,
 } from "lexical";
 import { useEffect } from "react";
@@ -102,18 +106,16 @@ export function RichTextNodePlugin() {
             return false;
           }
           const selection = $getSelection();
-          const anchorBlock = $isRangeSelection(selection)
-            ? selection.anchor.getNode().getTopLevelElement()
-            : null;
-          if (
-            anchorBlock &&
-            $isParagraphNode(anchorBlock) &&
-            anchorBlock.getTextContent() === ""
-          ) {
+          const anchorBlock = $insertionBlockFromSelection(selection);
+          const emptyParagraph =
+            anchorBlock && $isEmptyParagraph(anchorBlock)
+              ? anchorBlock
+              : $singleEmptyRootParagraph();
+          if (emptyParagraph) {
             // The caret sits on an empty paragraph (e.g. the line where "/" was
             // typed). Replace it in place rather than splitting it, which would
             // leave an empty line before and after the inserted block.
-            anchorBlock.replace(lexicalNode);
+            emptyParagraph.replace(lexicalNode);
           } else if (anchorBlock) {
             anchorBlock.insertAfter(lexicalNode);
           } else {
@@ -141,4 +143,49 @@ export function RichTextNodePlugin() {
   );
 
   return null;
+}
+
+function $insertionBlockFromSelection(
+  selection: BaseSelection | null,
+): LexicalNode | null {
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) return null;
+  const anchorNode = selection.anchor.getNode();
+  if ($isInsertionContainer(anchorNode)) {
+    return (
+      anchorNode.getChildAtIndex(selection.anchor.offset - 1) ??
+      anchorNode.getChildAtIndex(selection.anchor.offset)
+    );
+  }
+  return $nearestInsertionContainerChild(anchorNode);
+}
+
+function $nearestInsertionContainerChild(
+  node: LexicalNode,
+): LexicalNode | null {
+  let current: LexicalNode | null = node;
+  while (current) {
+    const parent: LexicalNode | null = current.getParent();
+    if ($isInsertionContainer(parent)) return current;
+    current = parent;
+  }
+  return null;
+}
+
+function $singleEmptyRootParagraph(): ElementNode | null {
+  const root = $getRoot();
+  if (root.getChildrenSize() !== 1) return null;
+  const first = root.getFirstChild();
+  return $isEmptyParagraph(first) ? first : null;
+}
+
+function $isEmptyParagraph(
+  node: LexicalNode | null | undefined,
+): node is ElementNode {
+  return $isParagraphNode(node) && node.getTextContent() === "";
+}
+
+function $isInsertionContainer(
+  node: LexicalNode | null | undefined,
+): node is ElementNode {
+  return $isRootNode(node) || $isTableCellNode(node);
 }

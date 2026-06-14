@@ -12,12 +12,7 @@ import {
   INSERT_UNORDERED_LIST_COMMAND,
   REMOVE_LIST_COMMAND,
 } from "@lexical/list";
-import {
-  $deleteTableColumnAtSelection,
-  $deleteTableRowAtSelection,
-  $getTableCellNodeFromLexicalNode,
-  INSERT_TABLE_COMMAND,
-} from "@lexical/table";
+import { INSERT_TABLE_COMMAND } from "@lexical/table";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   $createHeadingNode,
@@ -245,14 +240,10 @@ export const LexicalToolbar = memo(function LexicalToolbar({
   const [styleOpen, setStyleOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [inTable, setInTable] = useState(false);
 
   const refreshToolbar = useCallback(() => {
     const selection = $getSelection();
     if (!$isRangeSelection(selection)) return;
-    setInTable(
-      $getTableCellNodeFromLexicalNode(selection.anchor.getNode()) !== null,
-    );
     // Refreshed on every editor update (including each keystroke), so bail out
     // when the active formats are unchanged — a fresh Set would otherwise be a
     // new reference and re-render the whole toolbar on every edit.
@@ -424,11 +415,6 @@ export const LexicalToolbar = memo(function LexicalToolbar({
     focusEditorAfterMenu();
   };
 
-  const runTableAction = (action: () => void) => {
-    editor.update(action);
-    focusEditor();
-  };
-
   const capability = capabilityFor(blockKind);
   const textAllowed = canUse("text", allowedNodes);
   const styleChoices = blockStyleOptions.filter(
@@ -577,26 +563,6 @@ export const LexicalToolbar = memo(function LexicalToolbar({
             <LinkButton isDisabled={!canFormat} />
             <GlossaryButton isDisabled={!canFormat} />
             <CommentButton isDisabled={!canFormat} />
-          </div>
-        </>
-      ) : null}
-
-      {inTable ? (
-        <>
-          <ToolbarDivider />
-          {/* Row/column inserts are hover affordances on the table itself
-              (TableControlsPlugin); the toolbar keeps only the deletes. */}
-          <div className="flex items-center gap-1">
-            <ToolbarButton
-              icon="Minus"
-              label="Delete row"
-              onPress={() => runTableAction($deleteTableRowAtSelection)}
-            />
-            <ToolbarButton
-              icon="Trash2"
-              label="Delete column"
-              onPress={() => runTableAction($deleteTableColumnAtSelection)}
-            />
           </div>
         </>
       ) : null}

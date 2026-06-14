@@ -15,12 +15,12 @@ import { useEffect, useRef } from "react";
 import { childText, normalizeCalloutNode } from "../model/normalize";
 import { calloutToneValue, type RichTextEditorNode } from "../model/schema";
 import {
-  BlockChromeButton,
   BlockShell,
   RichTextDecoratorBlockNode,
   useDecoratorNodeUpdater,
   type SerializedRichTextDecoratorNode,
 } from "./base";
+import { ChromeButton } from "./chrome";
 
 const calloutTones: readonly {
   readonly value: AlertTone;
@@ -90,7 +90,7 @@ function CalloutEditor({
     <BlockShell
       actions={
         <MenuTrigger>
-          <BlockChromeButton icon="Settings" label="Callout tone" />
+          <ChromeButton icon="Settings" label="Callout tone" />
           <Menu aria-label="Callout tone" className="w-40">
             {calloutTones.map((option) => (
               <MenuItem

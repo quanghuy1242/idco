@@ -5,6 +5,36 @@ import {
   renderRichTextDocument,
 } from "@idco/content-renderer";
 
+/** A one-row, two-column table document wrapping the given table-node fields. */
+function tableDoc(table: Record<string, unknown>) {
+  return {
+    root: {
+      children: [
+        {
+          ...table,
+          children: [
+            {
+              type: "tablerow",
+              children: [
+                {
+                  type: "tablecell",
+                  headerState: 0,
+                  children: [{ text: "A", type: "text" }],
+                },
+                {
+                  type: "tablecell",
+                  headerState: 0,
+                  children: [{ text: "B", type: "text" }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 describe("@idco/content-renderer", () => {
   it("renders known rich text nodes without Lexical runtime", () => {
     render(
@@ -148,5 +178,56 @@ describe("@idco/content-renderer", () => {
     );
 
     expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("renders a responsive table with percentage column widths (renderer parity)", () => {
+    const { container } = render(
+      <RichTextRenderer
+        value={tableDoc({
+          type: "editor-table",
+          layout: "responsive",
+          colWidths: [100, 300],
+        })}
+      />,
+    );
+    const table = container.querySelector("table")!;
+    expect(table.getAttribute("data-table-layout")).toBe("responsive");
+    const cols = [...table.querySelectorAll("col")];
+    // 100 / 400 and 300 / 400 → 25% / 75%.
+    expect(cols[0]?.getAttribute("style")).toContain("25");
+    expect(cols[1]?.getAttribute("style")).toContain("75");
+  });
+
+  it("renders a fixed table with pixel column widths", () => {
+    const { container } = render(
+      <RichTextRenderer
+        value={tableDoc({
+          type: "table",
+          layout: "fixed",
+          colWidths: [220, 140],
+        })}
+      />,
+    );
+    const cols = [...container.querySelectorAll("col")];
+    expect(cols[0]?.getAttribute("style")).toContain("220px");
+    expect(cols[1]?.getAttribute("style")).toContain("140px");
+  });
+
+  it("renders the numbered-column gutter when showRowNumbers is set", () => {
+    const { container } = render(
+      <RichTextRenderer
+        value={tableDoc({
+          type: "editor-table",
+          layout: "responsive",
+          colWidths: [100, 100],
+          showRowNumbers: true,
+        })}
+      />,
+    );
+    const table = container.querySelector("table")!;
+    expect(table.classList.contains("rt-table-numbered")).toBe(true);
+    expect(container.querySelector("style")?.textContent).toContain(
+      "counter(rt-row)",
+    );
   });
 });

@@ -202,8 +202,8 @@ const richDocument: RichTextEditorDocument = {
 };
 
 // A document whose first and last children are atomic blocks. Use the gutter
-// handle's "+" to insert between/around them, or click the empty area below the
-// last block to drop a caret there — no persistent empty paragraphs are kept.
+// handle's "+" or click/arrow into the gaps above, between, and below the
+// blocks; empty paragraphs are only created after real input.
 const blockBoundedDocument: RichTextEditorDocument = {
   root: {
     children: [
@@ -217,6 +217,41 @@ const blockBoundedDocument: RichTextEditorDocument = {
         mediaId: "media_city",
         alt: "Evening skyline",
         caption: "",
+      },
+    ],
+  },
+};
+
+// A document that exercises gap placement inside a table-cell block scope, not
+// only around root-level blocks.
+const tableCellBlockDocument: RichTextEditorDocument = {
+  root: {
+    children: [
+      {
+        type: "table",
+        children: [
+          {
+            type: "tablerow",
+            children: [
+              {
+                type: "tablecell",
+                headerState: 0,
+                children: [
+                  {
+                    type: "code-block",
+                    language: "ts",
+                    text: "const value = true;",
+                  },
+                  {
+                    type: "callout",
+                    tone: "info",
+                    children: [{ type: "text", text: "Callout" }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
       },
     ],
   },
@@ -294,8 +329,8 @@ export const CaretAroundBlocks: Story = () => {
     <Stack>
       <Text variant="body">
         This document starts and ends with a block. Hover the gutter handle to
-        insert a line between them, or click the empty area below the image to
-        start a new paragraph — nothing empty is kept around otherwise.
+        insert a line, or click/arrow into the empty spaces above, between, and
+        below the blocks to place the gap cursor.
       </Text>
       <RichTextEditor
         label="Block-bounded document"
@@ -305,6 +340,40 @@ export const CaretAroundBlocks: Story = () => {
         mediaLibrary={mediaLibrary}
       />
     </Stack>
+  );
+};
+
+export const TableCellBlockGaps: Story = () => {
+  const [doc, setDoc] = useState<RichTextEditorDocument>(
+    tableCellBlockDocument,
+  );
+  return (
+    <Stack>
+      <Text variant="body">
+        This table cell starts with adjacent atomic blocks. Click before,
+        between, or after them inside the cell, then type or press Enter.
+      </Text>
+      <RichTextEditor
+        label="Table-cell block scope"
+        name="table-cell-blocks"
+        value={doc}
+        onChange={setDoc}
+      />
+    </Stack>
+  );
+};
+
+export const SlashMenuInsertion: Story = () => {
+  const [doc, setDoc] = useState<RichTextEditorDocument>({
+    root: { children: [] },
+  });
+  return (
+    <RichTextEditor
+      label="Slash menu insertion"
+      name="slash-menu"
+      value={doc}
+      onChange={setDoc}
+    />
   );
 };
 

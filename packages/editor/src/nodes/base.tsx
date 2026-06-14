@@ -1,7 +1,6 @@
 // DaisyUI 5: https://daisyui.com/components/card/
 /* eslint-disable no-underscore-dangle -- Lexical node subclasses use __ fields by convention. */
 
-import { NavIcon } from "@quanghuy1242/idco-ui";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   DecoratorBlockNode,
@@ -15,12 +14,12 @@ import {
   type NodeKey,
 } from "lexical";
 import { createContext, useCallback, type ReactNode } from "react";
-import { Button as AriaButton } from "react-aria-components";
 import type {
   RichTextEditorMediaOption,
   RichTextEditorNode,
   RichTextEditorPostOption,
 } from "../model/schema";
+import { ChromeBadge, ChromeButton } from "./chrome";
 
 export const INSERT_RICH_TEXT_NODE_COMMAND: LexicalCommand<RichTextEditorNode> =
   createCommand("INSERT_RICH_TEXT_NODE_COMMAND");
@@ -193,22 +192,19 @@ export function BlockShell({
   const remove = useRemoveNode(nodeKey);
   return (
     <div className="group/block relative rounded-box border border-base-300 bg-base-100">
-      <span className="pointer-events-none absolute -top-2.5 left-3 z-10 flex items-center gap-1 rounded-full border border-base-300 bg-base-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-base-content/60 opacity-0 transition-opacity group-hover/block:opacity-100 group-focus-within/block:opacity-100">
-        <NavIcon name={icon} variant="timeline" />
-        {label}
-      </span>
+      <div className="pointer-events-none absolute -top-2.5 left-3 z-10 opacity-0 transition-opacity group-hover/block:opacity-100 group-focus-within/block:opacity-100">
+        <ChromeBadge icon={icon} label={label} />
+      </div>
       <div className="absolute -top-2.5 right-2 z-10 flex items-center gap-1">
         {persistentActions}
         <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover/block:opacity-100 group-focus-within/block:opacity-100">
           {actions}
-          <AriaButton
-            type="button"
-            aria-label={`Remove ${label}`}
+          <ChromeButton
+            icon="X"
+            label={`Remove ${label}`}
+            intent="danger"
             onPress={remove}
-            className="grid size-6 place-items-center rounded-full border border-base-300 bg-base-200 text-base-content/60 transition hover:text-error"
-          >
-            <NavIcon name="X" variant="timeline" />
-          </AriaButton>
+          />
         </div>
       </div>
       <div className={padded ? "p-3" : ""}>{children}</div>
@@ -216,23 +212,8 @@ export function BlockShell({
   );
 }
 
-export function BlockChromeButton({
-  icon,
-  label,
-}: {
-  readonly icon: string;
-  readonly label: string;
-}) {
-  return (
-    <AriaButton
-      type="button"
-      aria-label={label}
-      className="grid size-6 place-items-center rounded-full border border-base-300 bg-base-200 text-base-content/60 transition hover:text-base-content"
-    >
-      <NavIcon name={icon} variant="timeline" />
-    </AriaButton>
-  );
-}
+/** @deprecated Use `ChromeButton` from `./chrome` directly. */
+export const BlockChromeButton = ChromeButton;
 
 export function FieldLabel({ children }: { readonly children: ReactNode }) {
   return (

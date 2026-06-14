@@ -145,7 +145,11 @@ export const PASSTHROUGH_ELEMENT_TYPES: ReadonlySet<string> = new Set([
   "link",
   "autolink",
   "mark",
+  // New tables serialize as "editor-table" (EditorTableNode carries `layout` /
+  // `showRowNumbers`); legacy documents use "table" and still hydrate into the
+  // same node via Lexical's node replacement. Both pass through verbatim.
   "table",
+  "editor-table",
   "tablerow",
   "tablecell",
 ]);

@@ -24,6 +24,7 @@ import {
 } from "./model/schema";
 import { lexicalEditorState } from "./model/serialize";
 import { GlossaryNode } from "./nodes/glossary-node";
+import { EditorTableNode } from "./nodes/table-node";
 import {
   RICH_TEXT_DECORATOR_NODES,
   RichTextEditorBindingsContext,
@@ -36,6 +37,7 @@ import { CommentEditorPlugin } from "./plugins/comment-plugin";
 import { ContextMenuPlugin } from "./plugins/context-menu-plugin";
 import { EditorDocumentSyncPlugin } from "./plugins/document-sync-plugin";
 import { DraggableBlockPlugin } from "./plugins/draggable-block-plugin";
+import { GapCursorPlugin } from "./plugins/gap-cursor-plugin";
 import { RichTextLinkPlugin } from "./plugins/link-plugin";
 import { RichTextMarkdownShortcutPlugin } from "./plugins/markdown-shortcut-plugin";
 import { SlashMenuPlugin } from "./plugins/slash-menu-plugin";
@@ -156,7 +158,17 @@ export function RichTextEditor({
                 LinkNode,
                 AutoLinkNode,
                 MarkNode,
-                TableNode,
+                // Replace the stock TableNode with our EditorTableNode (which
+                // carries `layout` / `showRowNumbers`) for every table the
+                // editor creates, pastes, or imports. `withKlass` routes
+                // @lexical/table's transforms and mutation listeners to the
+                // subclass while the `"table"` type stays serialization-stable.
+                EditorTableNode,
+                {
+                  replace: TableNode,
+                  with: () => new EditorTableNode(),
+                  withKlass: EditorTableNode,
+                },
                 TableRowNode,
                 TableCellNode,
                 GlossaryNode,
@@ -225,6 +237,7 @@ export function RichTextEditor({
                 }
                 ErrorBoundary={LexicalErrorBoundary}
               />
+              <GapCursorPlugin />
               <BlockControlsPlugin />
               <DraggableBlockPlugin />
               <TableControlsPlugin />

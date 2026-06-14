@@ -7,6 +7,7 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import {
   $createParagraphNode,
   $createTextNode,
+  $getNodeByKey,
   $getRoot,
   type LexicalEditor,
 } from "lexical";
@@ -102,6 +103,66 @@ describe("rich-text node insertion", () => {
         .getChildren()
         .map((node) => node.getType());
       expect(types).toEqual(["code-block", "paragraph"]);
+    });
+  });
+
+  it("replaces the singleton empty root paragraph when insertion has no selection", async () => {
+    const editor = mountEditor();
+    editor.update(
+      () => {
+        const root = $getRoot();
+        root.clear();
+        root.append($createParagraphNode());
+      },
+      { discrete: true },
+    );
+
+    editor.dispatchCommand(INSERT_RICH_TEXT_NODE_COMMAND, codeBlock);
+    await flush();
+
+    editor.getEditorState().read(() => {
+      expect(
+        $getRoot()
+          .getChildren()
+          .map((node) => node.getType()),
+      ).toEqual(["code-block", "paragraph"]);
+    });
+  });
+
+  it("replaces the slash trigger paragraph when insertion runs in the cleanup update", async () => {
+    const editor = mountEditor();
+    let triggerKey = "";
+    editor.update(
+      () => {
+        const root = $getRoot();
+        root.clear();
+        const paragraph = $createParagraphNode();
+        const trigger = $createTextNode("/");
+        triggerKey = trigger.getKey();
+        paragraph.append(trigger);
+        root.append(paragraph);
+        trigger.select(1, 1);
+      },
+      { discrete: true },
+    );
+
+    editor.update(
+      () => {
+        $getNodeByKey(triggerKey)?.remove();
+        editor.dispatchCommand(INSERT_RICH_TEXT_NODE_COMMAND, codeBlock);
+      },
+      { discrete: true },
+    );
+    await flush();
+
+    editor.getEditorState().read(() => {
+      const children = $getRoot().getChildren();
+      expect(children.map((node) => node.getType())).toEqual([
+        "code-block",
+        "paragraph",
+      ]);
+      expect(children[0]?.getType()).toBe("code-block");
+      expect(children[1]?.getTextContent()).toBe("");
     });
   });
 });

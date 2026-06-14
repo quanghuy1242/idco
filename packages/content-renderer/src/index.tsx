@@ -195,9 +195,10 @@ const defaultRenderers: Readonly<Record<string, RichTextNodeRenderer>> = {
   root: (_node, children, key) => (
     <RichTextArticle key={key}>{children}</RichTextArticle>
   ),
-  table: (_node, children, key) => (
-    <RichTextTable key={key}>{children}</RichTextTable>
-  ),
+  table: renderTable,
+  // New tables serialize as "editor-table" (carrying layout / row numbers);
+  // legacy documents use "table". Both render identically.
+  "editor-table": renderTable,
   tablecell: (node, children, key) => (
     <RichTextTableCell
       key={key}
@@ -341,6 +342,12 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
+function numberArray(value: unknown): number[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "number")
+    ? (value as number[])
+    : undefined;
+}
+
 function headingLevel(value: unknown): RichTextHeadingLevel {
   return value === "h1" ||
     value === "h2" ||
@@ -374,6 +381,19 @@ function listKind(listType: unknown, tag: unknown): RichTextListKind {
 
 function isPreviewableEmbed(url: string): boolean {
   return /^https?:\/\//i.test(url);
+}
+
+function renderTable(node: RichTextNode, children: ReactNode, key: string) {
+  return (
+    <RichTextTable
+      key={key}
+      colWidths={numberArray(node.colWidths)}
+      layout={stringValue(node.layout)}
+      numbered={node.showRowNumbers === true}
+    >
+      {children}
+    </RichTextTable>
+  );
 }
 
 function renderCodeBlock(

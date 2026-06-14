@@ -1,6 +1,6 @@
 # 002 — Gap Cursor and docx-style Block Flow
 
-> Status: implementation-grade proposal (approved for full build)
+> Status: implemented
 >
 > Date: 2026-06-14
 >
@@ -12,7 +12,7 @@
 >
 > Related docs:
 >
-> - `docs/001_lexical_editor_architecture.md` — §7.1 *Caret Around Block Nodes* lists "a true gap-cursor (Lexical has none natively)" as backlog; this doc delivers it.
+> - `docs/001_lexical_editor_architecture.md` — §7.1 _Caret Around Block Nodes_ lists "a true gap-cursor (Lexical has none natively)" as backlog; this doc delivers it.
 >
 > Related memory: `lexical-editor-package`, `rich-text-live-editor`
 >
@@ -20,6 +20,14 @@
 >
 > - **Build the full gap cursor** (Parts A + B + C below), not just the arrow fix.
 > - **Keep both block-handle affordances** (the `+` insert and the grip) alongside the new caret flow. The handle and the caret are complementary; the priority is a strong content-authoring + publishing experience.
+>
+> Implementation status (2026-06-14):
+>
+> - Parts A, B, and C are implemented in `packages/editor`.
+> - The gap cursor is ephemeral React state in `plugins/gap-cursor-plugin.tsx`; it is not serialized into the document.
+> - Gap scopes cover the document root and table cells, so adjacent atomic blocks inside a cell can be inserted before, between, and after without escaping the cell.
+> - Click placement now covers above-first, between-block, and after-last gaps via `plugins/block-controls-plugin.tsx`.
+> - Coverage lives in `tests/editor/gap-cursor-model.test.ts`, `tests/editor/gap-cursor.test.tsx`, and `tests/editor/block-navigation.test.tsx`.
 >
 > Assumptions:
 >
@@ -52,15 +60,15 @@ Let an author place the caret **anywhere** — including the empty space before 
 
 Two reported issues share one root cause — **Lexical has no caret position in the space around atomic blocks.**
 
-1. **#2 — can't insert blocks around a table.** The block handle (`DraggableBlockPlugin`) is currently the only way to insert around an atomic block. It reveals only in the thin left gutter, cannot insert *above* the first block, and there is no caret slot between two adjacent atomic blocks (e.g. `code-block` → `table`).
-2. **#3 — caret disappears / docx-style free cursor wanted.** Arrowing into a `DecoratorBlockNode` produces a Lexical **NodeSelection** (the block is selected as a unit). Our `decorate()` renders the block UI directly with no selection ring, so nothing is drawn and the caret appears to vanish. The owner wants a free-flowing caret that can rest *beside* a table/atomic block and start new content there.
+1. **#2 — can't insert blocks around a table.** The block handle (`DraggableBlockPlugin`) is currently the only way to insert around an atomic block. It reveals only in the thin left gutter, cannot insert _above_ the first block, and there is no caret slot between two adjacent atomic blocks (e.g. `code-block` → `table`).
+2. **#3 — caret disappears / docx-style free cursor wanted.** Arrowing into a `DecoratorBlockNode` produces a Lexical **NodeSelection** (the block is selected as a unit). Our `decorate()` renders the block UI directly with no selection ring, so nothing is drawn and the caret appears to vanish. The owner wants a free-flowing caret that can rest _beside_ a table/atomic block and start new content there.
 
 ## 3. Current-State Findings
 
 Relevant files:
 
 - `plugins/draggable-block-plugin.tsx` — Lexical `DraggableBlockPlugin_EXPERIMENTAL`; renders the gutter `+`/grip. The `+` inserts a paragraph after the hovered block.
-- `plugins/block-controls-plugin.tsx` — click handler that, **only** when clicking below the *last* block and that block is atomic, appends a trailing paragraph and drops the caret in.
+- `plugins/block-controls-plugin.tsx` — click handler that, **only** when clicking below the _last_ block and that block is atomic, appends a trailing paragraph and drops the caret in.
 - `nodes/base.tsx` — `RichTextDecoratorBlockNode extends DecoratorBlockNode` (`selectNext/selectPrevious/selectStart/selectEnd` available). `decorate()` returns the block UI directly (no `BlockWithAlignableContents`, so **no selection ring**).
 - `nodes/index.tsx` — `INSERT_RICH_TEXT_NODE_COMMAND` replaces an empty caret paragraph in place; the canonical "insert without wrapping blank lines" logic to reuse.
 - Tables come from `@lexical/table` (`RichTextTablePlugin`) and own their internal keyboard model (tab nav, cell selection).
@@ -87,7 +95,7 @@ New `plugins/block-navigation-plugin.tsx`, registering `KEY_ARROW_UP/DOWN/LEFT/R
 
 Behaviour:
 
-- On a vertical arrow (`UP`/`DOWN`) from a `RangeSelection` at the first/last line of a block whose neighbour is atomic (`$isDecoratorNode` or a `TableNode`): move to the nearest real text caret slot on the far side of that block (using the 0.45 caret API — `$getAdjacentSiblingOrParentSiblingCaret`, `$getChildCaret`, `$caretFromPoint` — to find the next valid `RangeSelection` slot) instead of letting Lexical form a NodeSelection. If the far side is *also* atomic or absent, hand off to the **gap cursor** (Part B) at that boundary.
+- On a vertical arrow (`UP`/`DOWN`) from a `RangeSelection` at the first/last line of a block whose neighbour is atomic (`$isDecoratorNode` or a `TableNode`) in the current root/table-cell block scope: move to the nearest real text caret slot on the far side of that block instead of letting Lexical form a NodeSelection. If the far side is _also_ atomic or absent, hand off to the **gap cursor** (Part B) at that boundary.
 - On a `NodeSelection` of a decorator block, an arrow resolves to the adjacent text slot or the gap cursor rather than leaving the invisible selection.
 - Horizontal arrows (`LEFT`/`RIGHT`) at a text boundary behave the same when the next sibling is atomic.
 
@@ -105,7 +113,8 @@ type GapTarget = { anchorKey: NodeKey; side: "before" | "after" } | null;
 
 Rendering:
 
-- A thin blinking caret element, portaled to `document.body` and `fixed`-positioned (same pattern as `TableControlsPlugin`), drawn in the gap computed from the anchor block's rect (`top` for `before`, `bottom` for `after`) and the editor's left text inset.
+- A thin blinking horizontal insertion marker, portaled to `document.body` and `fixed`-positioned (same pattern as `TableControlsPlugin`), drawn inside the visible gap between the neighboring block rects and inset to the editor content width.
+- The anchor's parent defines the block scope; currently that is either the document root or a table cell.
 - Pure geometry in `model/` (e.g. `gapCursorRect(blockRect, side, inset)`) so it is unit-testable without a browser, like `model/layout.ts`.
 
 Interactions (commands registered at appropriate priority):
@@ -124,7 +133,7 @@ Priorities of the two hardest slots are first-class:
 
 Generalise `plugins/block-controls-plugin.tsx`:
 
-- Hit-test the click `Y` against the vertical gaps between **all** top-level blocks (not just below the last).
+- Hit-test the click `Y` against the vertical gaps between **all** blocks in the active block scope (document root or table cell), not just below the last root block.
 - If a real text block borders the gap, drop a real caret there (`selectEnd`/`selectStart`). If both sides are atomic (or it's the top-of-document gap above an atomic first block), set the **gap cursor** (Part B) at that boundary.
 - Covers the docx "click in the whitespace and a caret appears" behaviour, including a caret resting beside a table.
 
@@ -162,6 +171,7 @@ Touched:
   - Arrow from a paragraph across a code block keeps a `RangeSelection` (no NodeSelection / no vanishing caret).
   - Enter at a gap between two atomic blocks inserts exactly one paragraph there.
   - Click between two blocks lands a caret / sets the gap target.
+  - Table-cell code/callout blocks support before, between, and after insertion inside the cell.
   - Abandoning a gap cursor leaves the document JSON unchanged (no empty paragraph persisted).
 - **Manual/CDP**: pixel-level caret rendering and blink, as with prior layout work (jsdom has no layout).
 
@@ -177,7 +187,7 @@ Each phase ships behind passing `pnpm check` (format, lint, dup, typecheck, test
 
 - **Command-priority interplay** with `@lexical/table` and the slash menu is the main implementation risk; needs careful ordering and live testing at table edges.
 - **Touch** caret placement is out of v1 scope.
-- **Open question**: should a gap cursor also accept *paste* (materialise a paragraph from clipboard) in v1, or only typed input + Enter + slash? (Default plan: accept paste too, since it's the same materialisation path.)
+- **Open question**: should a gap cursor also accept _paste_ (materialise a paragraph from clipboard) in v1, or only typed input + Enter + slash? (Default plan: accept paste too, since it's the same materialisation path.)
 
 ## 14. Definition of Done
 
