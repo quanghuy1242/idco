@@ -19,3 +19,27 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+
+  editor-perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e:editor
+        env:
+          EDITOR_PERF_REPORT_DIR: test-results/editor-perf
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: editor-perf-${{ github.run_id }}
+          path: |
+            test-results/editor-perf
+            test-results/playwright

@@ -16,6 +16,7 @@ import {
   $isEditorHeadingNode,
   type EditorHeadingNode,
 } from "../nodes/heading-node";
+import { registerEditorUpdateListener } from "./editor-performance";
 
 /**
  * Keeps heading anchors on by default. Anchors track the heading text: ids are
@@ -30,9 +31,21 @@ export function HeadingAnchorPlugin() {
 
   useEffect(() => {
     repairHeadingAnchors(editor);
-    return editor.registerUpdateListener(() => {
-      repairHeadingAnchors(editor);
-    });
+    return registerEditorUpdateListener(
+      editor,
+      {
+        budgetMs: 4,
+        cost: "walks heading nodes and writes only changed anchor ids",
+        frequency:
+          "every editor update so serialized heading anchors stay current",
+        label: "heading anchor repair",
+        lane: "sync",
+        priority: "critical",
+      },
+      () => {
+        repairHeadingAnchors(editor);
+      },
+    );
   }, [editor]);
 
   return null;

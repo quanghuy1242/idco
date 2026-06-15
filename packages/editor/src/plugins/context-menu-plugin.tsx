@@ -35,6 +35,10 @@ import {
 } from "../model/commands";
 import { moveArrayItem } from "../model/layout";
 import { RichTextEditorBindingsContext } from "../nodes";
+import {
+  hasNonCollapsedDomSelection,
+  registerEditorUpdateListener,
+} from "./editor-performance";
 import { EditorTableNode } from "../nodes/table-node";
 import {
   pointIntersectsSelectedText,
@@ -142,12 +146,20 @@ export function ContextMenuPlugin({
     const cacheSelectionMenu = () => {
       const root = editor.getRootElement();
       if (!root) return;
+      if (!hasNonCollapsedDomSelection(root)) {
+        cachedSelectionMenuRef.current = null;
+        return;
+      }
       const rects = selectedRangeRects(root).map((rect) => ({
         bottom: rect.bottom,
         left: rect.left,
         right: rect.right,
         top: rect.top,
       }));
+      if (rects.length === 0) {
+        cachedSelectionMenuRef.current = null;
+        return;
+      }
       const { commands, ctx, selection } = editor.getEditorState().read(() => ({
         ...$readSelectionMenuCommands({ allowedNodes, bindings, editor }),
         selection: $getSelection()?.clone() ?? null,
@@ -171,7 +183,19 @@ export function ContextMenuPlugin({
     };
 
     return mergeRegister(
-      editor.registerUpdateListener(scheduleCacheSelectionMenu),
+      registerEditorUpdateListener(
+        editor,
+        {
+          budgetMs: 5,
+          cost: "caches selected-text context commands only when a non-collapsed DOM selection exists",
+          frequency:
+            "after editor updates while context menu plugin is mounted",
+          label: "context menu selected-text cache",
+          lane: "frame",
+          priority: "normal",
+        },
+        cacheSelectionMenu,
+      ),
       editor.registerCommand(
         SELECTION_CHANGE_COMMAND,
         () => {

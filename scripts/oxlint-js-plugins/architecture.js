@@ -24,12 +24,24 @@ function isEditorPackageSource(filename) {
   return filename.includes("/packages/editor/src/");
 }
 
+function isEditorPerformanceSource(filename) {
+  filename = normalizeFilename(filename);
+  return filename.endsWith("/packages/editor/src/plugins/editor-performance.ts");
+}
+
 function isIdcoPackageSource(filename) {
   return (
     isUiPackageSource(filename) ||
     isLibPackageSource(filename) ||
     isEditorPackageSource(filename)
   );
+}
+
+function memberPropertyName(property) {
+  if (!property) return null;
+  if (property.type === "Identifier") return property.name;
+  if (property.type === "Literal") return property.value;
+  return null;
 }
 
 var PRODUCT_IMPORT_PATTERNS = [
@@ -151,9 +163,31 @@ var uiNoNeutralButtonClassRule = {
   },
 };
 
+var editorNoDirectUpdateListenerRule = {
+  meta: { type: "problem", docs: { description: "Lexical editor update listeners must use the editor performance scheduler contract" } },
+  create: function (context) {
+    var filename = context.filename || context.physicalFilename || "";
+    if (!isEditorPackageSource(filename) || isEditorPerformanceSource(filename)) return {};
+
+    return {
+      CallExpression: function (node) {
+        var callee = node.callee;
+        if (!callee || callee.type !== "MemberExpression") return;
+        if (memberPropertyName(callee.property) !== "registerUpdateListener") return;
+        context.report({
+          node: callee.property,
+          message:
+            "Use registerEditorUpdateListener/registerCoalescedEditorUpdateListener from editor-performance.ts so every editor update listener declares frequency, cost, scheduling lane, and budget.",
+        });
+      },
+    };
+  },
+};
+
 var plugin = {
   meta: { name: "architecture" },
   rules: {
+    "editor-no-direct-update-listener": editorNoDirectUpdateListenerRule,
     "idco-package-boundary": idcoPackageBoundaryRule,
     "ui-no-side-effect-css": uiNoSideEffectCssRule,
     "ui-no-native-dialog": uiNoNativeDialogRule,

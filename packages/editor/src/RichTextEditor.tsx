@@ -53,6 +53,10 @@ import { SelectionFlyoutPlugin } from "./plugins/selection-flyout-plugin";
 import { SlashMenuPlugin } from "./plugins/slash-menu-plugin";
 import { RichTextTablePlugin } from "./plugins/table-plugin";
 import {
+  useDebouncedEditorStatePublisher,
+  useDerivedStatePublisher,
+} from "./plugins/editor-performance";
+import {
   TableOfContentsRailPlugin,
   type TocRailState,
 } from "./plugins/toc-rail-plugin";
@@ -104,6 +108,7 @@ export function RichTextEditor({
   // editor already holds it, so we skip the document round-trip and the sync
   // plugin's full re-serialize. Only a genuinely external value gets reapplied.
   const lastEmittedValue = useRef<RichTextEditorDocument | null>(null);
+  const onChangeRef = useRef(onChange);
   const isEcho = value === lastEmittedValue.current;
   const document = useMemo(
     () =>
@@ -144,18 +149,44 @@ export function RichTextEditor({
   // (e.g. held backspace) janky, so it trails the live value by a beat — it is
   // informational, so a small lag is invisible.
   const [source, setSource] = useState(() => JSON.stringify(document, null, 2));
+
   useEffect(() => {
-    const handle = setTimeout(
-      () => setSource(JSON.stringify(document, null, 2)),
-      200,
-    );
-    return () => clearTimeout(handle);
-  }, [document]);
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  const { schedule: scheduleEditorStatePublish } =
+    useDebouncedEditorStatePublisher<RichTextEditorDocument>({
+      budgetMs: 12,
+      cost: "serializes Lexical state and normalizes the host document value",
+      delayMs: 80,
+      derive: (editorState) => normalizeDocument(editorState.toJSON()),
+      label: "controlled rich-text document emission",
+      publish: (next) => {
+        lastEmittedValue.current = next;
+        onChangeRef.current(next);
+      },
+    });
+
+  const { schedule: scheduleSourcePublish } = useDerivedStatePublisher<
+    RichTextEditorDocument,
+    string
+  >({
+    budgetMs: 8,
+    cost: "stringifies the current document for the read-only source preview",
+    derive: (next) => JSON.stringify(next, null, 2),
+    label: "read-only JSON source preview",
+    lane: "debounced",
+    publish: setSource,
+    priority: "low",
+    timeoutMs: 200,
+  });
+
+  useEffect(() => {
+    scheduleSourcePublish(document);
+  }, [document, scheduleSourcePublish]);
 
   function applyEditorState(editorState: EditorState) {
-    const next = normalizeDocument(editorState.toJSON());
-    lastEmittedValue.current = next;
-    onChange(next);
+    scheduleEditorStatePublish(editorState);
   }
 
   return (

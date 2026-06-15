@@ -31,6 +31,10 @@ import { GlossaryButton } from "../toolbar/glossary-button";
 import { LinkButton } from "../toolbar/link-button";
 import { MoreMenu } from "../toolbar/more-menu";
 import { ToolbarButton, ToolbarDivider } from "../toolbar/toolbar-button";
+import {
+  hasNonCollapsedDomSelection,
+  registerEditorUpdateListener,
+} from "./editor-performance";
 import { selectedTextAnchorPoint } from "./selection-geometry";
 
 type FlyoutState = {
@@ -109,6 +113,27 @@ export function SelectionFlyoutPlugin({
       setFlyout(null);
       return;
     }
+    if (!hasNonCollapsedDomSelection(root)) {
+      if (
+        !isApplyingDirectActionRef.current &&
+        !isInteractingRef.current &&
+        !childOverlayOpenRef.current
+      ) {
+        setFlyout(null);
+      }
+      return;
+    }
+    const point = selectedTextAnchorPoint(root);
+    if (!point) {
+      if (
+        !isApplyingDirectActionRef.current &&
+        !isInteractingRef.current &&
+        !childOverlayOpenRef.current
+      ) {
+        setFlyout(null);
+      }
+      return;
+    }
     const { ctx, selection } = editor.getEditorState().read(() => {
       const live = $getSelection();
       // Clamp element endpoints to text so a triple-click that spills to a block
@@ -123,7 +148,6 @@ export function SelectionFlyoutPlugin({
         selection: snapshot,
       };
     });
-    const point = selectedTextAnchorPoint(root);
     const hasAction =
       ctx.hasSelectedText &&
       (enabledFlyoutFormats(ctx).length > 0 ||
@@ -192,7 +216,19 @@ export function SelectionFlyoutPlugin({
   useEffect(
     () =>
       mergeRegister(
-        editor.registerUpdateListener(scheduleRefresh),
+        registerEditorUpdateListener(
+          editor,
+          {
+            budgetMs: 5,
+            cost: "updates selected-text flyout position and command context only for non-collapsed selections",
+            frequency:
+              "after editor updates while selection flyout plugin is mounted",
+            label: "selection flyout refresh",
+            lane: "frame",
+            priority: "high",
+          },
+          refresh,
+        ),
         editor.registerCommand(
           SELECTION_CHANGE_COMMAND,
           () => {
@@ -202,7 +238,7 @@ export function SelectionFlyoutPlugin({
           COMMAND_PRIORITY_LOW,
         ),
       ),
-    [editor, scheduleRefresh],
+    [editor, refresh, scheduleRefresh],
   );
 
   useEffect(

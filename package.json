@@ -16,6 +16,8 @@
     "typecheck": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:editor": "playwright test tests/e2e/editor-backspace.perf.spec.ts",
     "check": "pnpm format:check && pnpm lint && pnpm check:dup && pnpm typecheck && pnpm test && pnpm build",
     "advise": "aislop scan --exclude node_modules,dist,coverage,.wrangler && fallow dupes --mode semantic --min-tokens 150 --min-lines 10 --skip-local --ignore-imports --format compact --quiet",
     "advise:aislop": "aislop scan --exclude node_modules,dist,coverage,.wrangler",
@@ -38,6 +40,7 @@
   },
   "devDependencies": {
     "@ladle/react": "^5.1.1",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.3.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

@@ -49,6 +49,7 @@ await import("./ui/code-editor.test");
 await import("./ui/file-dropzone.test");
 await import("./ui/drawer.test");
 await import("./editor/rich-text-editor.test");
+await import("./editor/editor-performance.test");
 await import("./editor/editor-foundation.test");
 await import("./editor/heading-anchor-model.test");
 await import("./editor/insertion.test");

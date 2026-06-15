@@ -23,6 +23,7 @@ import {
   canHoldRealCaret,
   isAtomicGapNode,
 } from "./gap-cursor-plugin";
+import { registerEditorUpdateListener } from "./editor-performance";
 
 type BoundaryAction = {
   readonly containerKey: string | null;
@@ -43,57 +44,69 @@ export function BlockNavigationPlugin() {
 
   useEffect(
     () =>
-      editor.registerUpdateListener(({ editorState }) => {
-        const action = editorState.read((): BoundaryAction | null => {
-          const selection = $getSelection();
-          if ($isNodeSelection(selection)) {
-            const node = selection.getNodes()[0];
-            if (!node || !isAtomicGapNode(node)) return null;
-            const parent = node.getParent();
-            if (!$isGapContainerNode(parent)) return null;
+      registerEditorUpdateListener(
+        editor,
+        {
+          budgetMs: 4,
+          cost: "reads selection boundary state and repairs only unsupported block-gap carets",
+          frequency:
+            "every editor update because Lexical can land on unsupported boundaries",
+          label: "block boundary navigation reconciliation",
+          lane: "sync",
+          priority: "critical",
+        },
+        ({ editorState }) => {
+          const action = editorState.read((): BoundaryAction | null => {
+            const selection = $getSelection();
+            if ($isNodeSelection(selection)) {
+              const node = selection.getNodes()[0];
+              if (!node || !isAtomicGapNode(node)) return null;
+              const parent = node.getParent();
+              if (!$isGapContainerNode(parent)) return null;
+              return {
+                containerKey: $gapContainerKey(parent),
+                offset: node.getIndexWithinParent() + 1,
+                preferredEdge: "forward",
+              };
+            }
+            if (
+              !$isRangeSelection(selection) ||
+              !selection.isCollapsed() ||
+              !$isGapContainerNode(selection.anchor.getNode())
+            ) {
+              handledBoundary.current = null;
+              return null;
+            }
+            const container = selection.anchor.getNode();
+            const boundaryKey = `${$gapContainerKey(container) ?? "root"}:${
+              selection.anchor.offset
+            }`;
+            if (handledBoundary.current === boundaryKey) {
+              return null;
+            }
             return {
-              containerKey: $gapContainerKey(parent),
-              offset: node.getIndexWithinParent() + 1,
-              preferredEdge: "forward",
+              containerKey: $gapContainerKey(container),
+              offset: selection.anchor.offset,
+              preferredEdge: "nearest",
             };
-          }
-          if (
-            !$isRangeSelection(selection) ||
-            !selection.isCollapsed() ||
-            !$isGapContainerNode(selection.anchor.getNode())
-          ) {
-            handledBoundary.current = null;
-            return null;
-          }
-          const container = selection.anchor.getNode();
-          const boundaryKey = `${$gapContainerKey(container) ?? "root"}:${
-            selection.anchor.offset
+          });
+          if (!action) return;
+          handledBoundary.current = `${action.containerKey ?? "root"}:${
+            action.offset
           }`;
-          if (handledBoundary.current === boundaryKey) {
-            return null;
-          }
-          return {
-            containerKey: $gapContainerKey(container),
-            offset: selection.anchor.offset,
-            preferredEdge: "nearest",
-          };
-        });
-        if (!action) return;
-        handledBoundary.current = `${action.containerKey ?? "root"}:${
-          action.offset
-        }`;
-        editor.update(() => {
-          const container = $gapContainerFromKey(action.containerKey);
-          if (container) {
-            $selectBoundaryOrGap(
-              editor,
-              action.offset,
-              action.preferredEdge,
-              container,
-            );
-          }
-        });
-      }),
+          editor.update(() => {
+            const container = $gapContainerFromKey(action.containerKey);
+            if (container) {
+              $selectBoundaryOrGap(
+                editor,
+                action.offset,
+                action.preferredEdge,
+                container,
+              );
+            }
+          });
+        },
+      ),
     [editor],
   );
 

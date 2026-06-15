@@ -28,6 +28,7 @@ import {
   type TableLayout,
   type TableMeta,
 } from "../nodes/table-node";
+import { registerEditorUpdateListener } from "./editor-performance";
 
 const CTRL_ATTR = "data-idco-table-controls";
 const MIN_WIDTH = 48;
@@ -170,7 +171,19 @@ export function TableControlsPlugin() {
       );
     }
     refresh();
-    return editor.registerUpdateListener(refresh);
+    return registerEditorUpdateListener(
+      editor,
+      {
+        budgetMs: 5,
+        cost: "reads metadata for the currently hovered table only",
+        frequency:
+          "after editor updates while a table control surface is active",
+        label: "table controls metadata",
+        lane: "frame",
+        priority: "normal",
+      },
+      refresh,
+    );
   }, [editor, tableEl]);
 
   useEffect(() => {

@@ -34,6 +34,7 @@ import {
   type GapCursorRect,
   type GapTarget,
 } from "../model/gap-cursor";
+import { registerEditorUpdateListener } from "./editor-performance";
 
 export type { GapTarget } from "../model/gap-cursor";
 
@@ -138,20 +139,32 @@ export function GapCursorPlugin() {
 
   useEffect(
     () =>
-      editor.registerUpdateListener(({ editorState }) => {
-        const shouldClear = editorState.read(() => {
-          const current = targetRef.current;
-          if (!current) return false;
-          const selection = $getSelection();
-          if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
-            return true;
-          }
-          if ($selectionMatchesGapTarget(selection, current)) return false;
-          return !$isGapContainerNode(selection.anchor.getNode());
-        });
-        if (shouldClear) setTarget(null);
-        else requestAnimationFrame(updateRect);
-      }),
+      registerEditorUpdateListener(
+        editor,
+        {
+          budgetMs: 4,
+          cost: "reads the current selection and schedules a visual gap rect update",
+          frequency:
+            "every editor update while the gap cursor plugin is mounted",
+          label: "gap cursor selection reconciliation",
+          lane: "sync",
+          priority: "critical",
+        },
+        ({ editorState }) => {
+          const shouldClear = editorState.read(() => {
+            const current = targetRef.current;
+            if (!current) return false;
+            const selection = $getSelection();
+            if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
+              return true;
+            }
+            if ($selectionMatchesGapTarget(selection, current)) return false;
+            return !$isGapContainerNode(selection.anchor.getNode());
+          });
+          if (shouldClear) setTarget(null);
+          else requestAnimationFrame(updateRect);
+        },
+      ),
     [editor, setTarget, updateRect],
   );
 

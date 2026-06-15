@@ -182,18 +182,20 @@ describe("RichTextEditor", () => {
     expect(
       screen.getByRole("button", { name: /code language/i }),
     ).toBeVisible();
-    expect(onChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        root: {
-          children: expect.arrayContaining([
-            {
-              language: "ts",
-              text: "const value = true;",
-              type: "code-block",
-            },
-          ]),
-        },
-      }),
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          root: {
+            children: expect.arrayContaining([
+              {
+                language: "ts",
+                text: "const value = true;",
+                type: "code-block",
+              },
+            ]),
+          },
+        }),
+      ),
     );
   });
 

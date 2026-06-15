@@ -6,15 +6,13 @@ import {
   type RichTextTableOfContentsStyle,
 } from "@quanghuy1242/idco-ui";
 import {
-  collectRichTextTocEntries,
   normalizeTocSettings,
-  type RichTextDocument,
   type RichTextTocNumbering,
   type RichTextTocPlacement,
   type RichTextTocSide,
   type RichTextTocStyle,
 } from "@quanghuy1242/idco-lib";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button as AriaButton,
   Dialog as AriaDialog,
@@ -28,11 +26,19 @@ import {
   SelectValue as AriaSelectValue,
   TextField as AriaTextField,
 } from "react-aria-components";
-import {
-  normalizeTableOfContentsNode,
-  normalizeDocument,
-} from "../model/normalize";
+import { normalizeTableOfContentsNode } from "../model/normalize";
 import type { RichTextEditorNode } from "../model/schema";
+import {
+  $collectEditorTocEntries,
+  $hasTocRelevantUpdate,
+  $snapshotEditorTocHeadings,
+  createChunkedEditorTocEntriesTask,
+  sameTocEntries,
+} from "../plugins/toc-entries";
+import {
+  registerEditorUpdateListener,
+  setStateIfChanged,
+} from "../plugins/editor-performance";
 import { BlockShell } from "./base";
 import { ChromeButton } from "./chrome";
 import {
@@ -92,22 +98,64 @@ function TableOfContentsEditor({
 }: DecoratorBlockProps) {
   const [editor] = useLexicalComposerContext();
   const settings = normalizeTocSettings(node);
-  const [document, setDocument] = useState<RichTextDocument>(() =>
-    normalizeDocument(editor.getEditorState().toJSON()),
+  const [entries, setEntries] = useState(() =>
+    editor.getEditorState().read(() => $collectEditorTocEntries(settings)),
   );
 
-  useEffect(
-    () =>
-      editor.registerUpdateListener(({ editorState }) => {
-        setDocument(normalizeDocument(editorState.toJSON()));
-      }),
-    [editor],
-  );
+  useEffect(() => {
+    const chunkedTocTask = createChunkedEditorTocEntriesTask({
+      label: "inline table-of-contents chunked entries",
+    });
 
-  const entries = useMemo(
-    () => collectRichTextTocEntries(document, settings),
-    [document, settings],
-  );
+    function publishSnapshot() {
+      const headings = editor.getEditorState().read($snapshotEditorTocHeadings);
+      chunkedTocTask.schedule({
+        headings,
+        publish: (next) => setStateIfChanged(setEntries, next, sameTocEntries),
+        settings,
+      });
+    }
+
+    publishSnapshot();
+    const unregister = registerEditorUpdateListener(
+      editor,
+      {
+        budgetMs: 3,
+        cost: "checks TOC-relevant dirty nodes and snapshots heading metadata",
+        debounceMs: 80,
+        frequency:
+          "after editor updates settle; schedules chunked TOC rebuilds only when headings or TOC settings change",
+        label: "inline table-of-contents invalidation",
+        lane: "debounced",
+        priority: "low",
+      },
+      (payload) => {
+        const headings = payload.editorState.read(() =>
+          $hasTocRelevantUpdate(payload) ? $snapshotEditorTocHeadings() : null,
+        );
+        if (!headings) return;
+        chunkedTocTask.schedule({
+          headings,
+          publish: (next) =>
+            setStateIfChanged(setEntries, next, sameTocEntries),
+          settings,
+        });
+      },
+    );
+    return () => {
+      unregister();
+      chunkedTocTask.cancel();
+    };
+  }, [
+    editor,
+    settings.maxLevel,
+    settings.minLevel,
+    settings.numbering,
+    settings.placement,
+    settings.side,
+    settings.style,
+    settings.title,
+  ]);
 
   function updateMinLevel(value: TocLevelValue) {
     const minLevel = Number(value);

@@ -41,6 +41,7 @@ import { GlossaryButton } from "../toolbar/glossary-button";
 import { LinkButton } from "../toolbar/link-button";
 import { MoreMenu } from "../toolbar/more-menu";
 import { ToolbarDivider } from "../toolbar/toolbar-button";
+import { registerEditorUpdateListener } from "./editor-performance";
 
 const editorControlSurfaceSelector = [
   "[data-editor-selection-flyout]",
@@ -117,8 +118,17 @@ export const LexicalToolbar = memo(function LexicalToolbar({
   useEffect(
     () =>
       mergeRegister(
-        editor.registerUpdateListener(({ editorState }) =>
-          editorState.read(refreshToolbar),
+        registerEditorUpdateListener(
+          editor,
+          {
+            budgetMs: 5,
+            cost: "reads selection state and updates toolbar active/disabled affordances",
+            frequency: "after editor updates while toolbar is mounted",
+            label: "toolbar selection state",
+            lane: "frame",
+            priority: "high",
+          },
+          ({ editorState }) => editorState.read(refreshToolbar),
         ),
         editor.registerCommand(
           FOCUS_COMMAND,
