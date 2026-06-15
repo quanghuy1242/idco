@@ -9,6 +9,7 @@ import type { HeadingTagType } from "@lexical/rich-text";
  */
 
 export type RichTextEditorNode = {
+  readonly id?: string;
   readonly type: string;
   readonly text?: string;
   readonly children?: readonly RichTextEditorNode[];

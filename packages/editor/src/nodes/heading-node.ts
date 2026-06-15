@@ -11,6 +11,7 @@ import { slugifyHeadingAnchor } from "@quanghuy1242/idco-lib";
 export type SerializedEditorHeadingNode = Spread<
   {
     anchorId?: string;
+    id?: string;
   },
   SerializedHeadingNode
 >;
@@ -22,10 +23,17 @@ export type SerializedEditorHeadingNode = Spread<
  */
 export class EditorHeadingNode extends HeadingNode {
   __anchorId: string | undefined;
+  __idcoId: string | undefined;
 
-  constructor(tag: HeadingTagType = "h2", anchorId?: string, key?: NodeKey) {
+  constructor(
+    tag: HeadingTagType = "h2",
+    anchorId?: string,
+    id?: string,
+    key?: NodeKey,
+  ) {
     super(tag, key);
     this.__anchorId = anchorId ? slugifyHeadingAnchor(anchorId) : undefined;
+    this.__idcoId = cleanNodeId(id);
   }
 
   static getType(): string {
@@ -33,12 +41,18 @@ export class EditorHeadingNode extends HeadingNode {
   }
 
   static clone(node: EditorHeadingNode): EditorHeadingNode {
-    return new EditorHeadingNode(node.__tag, node.__anchorId, node.__key);
+    return new EditorHeadingNode(
+      node.__tag,
+      node.__anchorId,
+      node.__idcoId,
+      node.__key,
+    );
   }
 
   afterCloneFrom(prevNode: this): void {
     super.afterCloneFrom(prevNode);
     this.__anchorId = prevNode.__anchorId;
+    this.__idcoId = prevNode.__idcoId;
   }
 
   static importJSON(serializedNode: SerializedEditorHeadingNode) {
@@ -49,17 +63,20 @@ export class EditorHeadingNode extends HeadingNode {
     serializedNode: LexicalUpdateJSON<SerializedEditorHeadingNode>,
   ): this {
     const self = super.updateFromJSON(serializedNode);
-    return self.setAnchorId(
-      typeof serializedNode.anchorId === "string"
-        ? serializedNode.anchorId
-        : undefined,
-    );
+    return self
+      .setAnchorId(
+        typeof serializedNode.anchorId === "string"
+          ? serializedNode.anchorId
+          : undefined,
+      )
+      .setId(serializedNode.id);
   }
 
   exportJSON(): SerializedEditorHeadingNode {
     return {
       ...super.exportJSON(),
       ...(this.getAnchorId() ? { anchorId: this.getAnchorId() } : {}),
+      ...(this.getId() ? { id: this.getId() } : {}),
       type: this.getType(),
     };
   }
@@ -85,13 +102,24 @@ export class EditorHeadingNode extends HeadingNode {
     self.__anchorId = anchorId ? slugifyHeadingAnchor(anchorId) : undefined;
     return self;
   }
+
+  getId(): string | undefined {
+    return this.getLatest().__idcoId;
+  }
+
+  setId(id: string | undefined): this {
+    const self = this.getWritable();
+    self.__idcoId = cleanNodeId(id);
+    return self;
+  }
 }
 
 export function $createEditorHeadingNode(
   tag: HeadingTagType = "h2",
   anchorId?: string,
+  id?: string,
 ): EditorHeadingNode {
-  return new EditorHeadingNode(tag, anchorId);
+  return new EditorHeadingNode(tag, anchorId, id);
 }
 
 export function $isEditorHeadingNode(node: unknown): node is EditorHeadingNode {
@@ -109,4 +137,8 @@ function applyHeadingAnchorDom(
   }
   dom.id = anchorId;
   dom.setAttribute("data-idco-heading-anchor", anchorId);
+}
+
+function cleanNodeId(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

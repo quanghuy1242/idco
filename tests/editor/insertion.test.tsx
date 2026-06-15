@@ -9,6 +9,7 @@ import {
   $createTextNode,
   $getNodeByKey,
   $getRoot,
+  ParagraphNode,
   type LexicalEditor,
 } from "lexical";
 import {
@@ -16,6 +17,7 @@ import {
   RICH_TEXT_DECORATOR_NODES,
   RichTextNodePlugin,
 } from "../../packages/editor/src/nodes";
+import { EditorParagraphNode } from "../../packages/editor/src/nodes/identified-block-nodes";
 
 function Capture({ onReady }: { onReady: (editor: LexicalEditor) => void }) {
   const [editor] = useLexicalComposerContext();
@@ -29,7 +31,15 @@ function mountEditor(): LexicalEditor {
     <LexicalComposer
       initialConfig={{
         namespace: "test",
-        nodes: [...RICH_TEXT_DECORATOR_NODES],
+        nodes: [
+          EditorParagraphNode,
+          {
+            replace: ParagraphNode,
+            with: () => new EditorParagraphNode(),
+            withKlass: EditorParagraphNode,
+          },
+          ...RICH_TEXT_DECORATOR_NODES,
+        ],
         onError(error) {
           throw error;
         },
@@ -75,7 +85,7 @@ describe("rich-text node insertion", () => {
       // Old behavior left a blank paragraph before AND after (3 children).
       // The block now replaces the empty paragraph; one trailing paragraph
       // remains as the caret home for the trailing decorator block.
-      expect(types).toEqual(["code-block", "paragraph"]);
+      expect(types).toEqual(["code-block", "editor-paragraph"]);
     });
   });
 
@@ -102,7 +112,7 @@ describe("rich-text node insertion", () => {
       const types = $getRoot()
         .getChildren()
         .map((node) => node.getType());
-      expect(types).toEqual(["code-block", "paragraph"]);
+      expect(types).toEqual(["code-block", "editor-paragraph"]);
     });
   });
 
@@ -125,7 +135,7 @@ describe("rich-text node insertion", () => {
         $getRoot()
           .getChildren()
           .map((node) => node.getType()),
-      ).toEqual(["code-block", "paragraph"]);
+      ).toEqual(["code-block", "editor-paragraph"]);
     });
   });
 
@@ -159,7 +169,7 @@ describe("rich-text node insertion", () => {
       const children = $getRoot().getChildren();
       expect(children.map((node) => node.getType())).toEqual([
         "code-block",
-        "paragraph",
+        "editor-paragraph",
       ]);
       expect(children[0]?.getType()).toBe("code-block");
       expect(children[1]?.getTextContent()).toBe("");

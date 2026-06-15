@@ -17,7 +17,7 @@
     "typecheck:tsc": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test",
-    "test:e2e:editor": "playwright test tests/e2e/editor-backspace.perf.spec.ts",
+    "test:e2e:editor": "playwright test tests/e2e/editor-backspace.perf.spec.ts tests/e2e/editor-decorator-virtualization.perf.spec.ts tests/e2e/editor-large-document.perf.spec.ts",
     "check": "pnpm format:check && pnpm lint && pnpm check:dup && pnpm typecheck && pnpm test && pnpm build",
     "advise": "aislop scan --exclude node_modules,dist,coverage,.wrangler && fallow dupes --mode semantic --min-tokens 150 --min-lines 10 --skip-local --ignore-imports --format compact --quiet",
     "advise:aislop": "aislop scan --exclude node_modules,dist,coverage,.wrangler",

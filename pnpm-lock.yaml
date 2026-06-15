@@ -162,6 +162,9 @@ importers:
       '@lexical/utils':
         specifier: 0.45.0
         version: 0.45.0
+      '@quanghuy1242/idco-content-renderer':
+        specifier: workspace:^
+        version: link:../content-renderer
       '@quanghuy1242/idco-lib':
         specifier: workspace:^
         version: link:../lib

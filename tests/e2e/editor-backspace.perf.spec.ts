@@ -118,6 +118,17 @@ for (const scenario of scenarios) {
       }
     });
 
+    // Regression guard: holding a key used to crash the editor once ~100
+    // consecutive edits accumulated Lexical's cascade counter (the markdown
+    // shortcut listener enqueues a no-op update per edit). See
+    // markdown-shortcut-plugin's cascade guard.
+    const cascadeErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      if (/endlessly enqueueing|infinite recursion/i.test(error.message)) {
+        cascadeErrors.push(error.message.split("\n")[0]);
+      }
+    });
+
     const baseline = await measurePlainContentEditable(
       page,
       scenario.action,
@@ -183,6 +194,7 @@ for (const scenario of scenarios) {
       Number(process.env.EDITOR_PERF_MAX_OVER_BUDGET_RUNS ?? 0),
     );
     expect(slowWarnings, slowWarnings.join("\n")).toHaveLength(0);
+    expect(cascadeErrors, cascadeErrors.join("\n")).toHaveLength(0);
   });
 }
 

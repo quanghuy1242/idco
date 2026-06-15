@@ -37,6 +37,12 @@ export default defineConfig({
         ),
       },
       {
+        find: "@quanghuy1242/idco-content-renderer",
+        replacement: fileURLToPath(
+          new URL("./packages/content-renderer/src/index.tsx", import.meta.url),
+        ),
+      },
+      {
         find: "@idco/editor",
         replacement: fileURLToPath(
           new URL("./packages/editor/src/index.ts", import.meta.url),

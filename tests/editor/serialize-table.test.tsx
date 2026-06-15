@@ -46,7 +46,7 @@ describe("table serialization", () => {
     const state = lexicalEditorState(doc) as { root: LexNode };
     // Missing indent makes Lexical write `padding-inline-start: calc(undefined
     // * …)`, which overrides cell padding. Every table element node must be 0.
-    for (const type of ["table", "tablerow", "tablecell"]) {
+    for (const type of ["editor-table", "tablerow", "tablecell"]) {
       const nodes = collect(state.root, type, []);
       expect(nodes.length).toBeGreaterThan(0);
       for (const node of nodes) expect(node.indent).toBe(0);
@@ -95,7 +95,7 @@ describe("table serialization", () => {
       },
     });
     const state = lexicalEditorState(doc) as { root: LexNode };
-    const [table] = collect(state.root, "table", []);
+    const [table] = collect(state.root, "editor-table", []);
     expect(table?.colWidths).toEqual([220, 140]);
   });
 });

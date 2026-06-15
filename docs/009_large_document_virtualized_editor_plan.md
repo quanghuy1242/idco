@@ -1,6 +1,6 @@
 # 009 - Large Document Virtualized Editor Plan
 
-> Status: implementation-grade research and proposal
+> Status: implemented through R1-G
 >
 > Date: 2026-06-15
 >
@@ -1240,11 +1240,11 @@ Scope:
 
 Tasks:
 
-- [ ] Add a shared viewport tracker (`IntersectionObserver`) for decorator hosts.
-- [ ] Render measured placeholders for offscreen decorator bodies; restore real bodies near the viewport.
-- [ ] Cache decorator height by node ID and content signature to prevent layout jump.
-- [ ] Verify selection, undo, and native find are unchanged (single root, unchanged node tree).
-- [ ] Add a 1000-decorator-block perf scenario and measure before deciding on the section shell.
+- [x] Add a shared viewport tracker (`IntersectionObserver`) for decorator hosts.
+- [x] Render measured placeholders for offscreen decorator bodies; restore real bodies near the viewport.
+- [x] Cache decorator height by node ID and content signature to prevent layout jump.
+- [x] Verify selection, undo, and native find are unchanged (single root, unchanged node tree).
+- [x] Add a 1000-decorator-block perf scenario and measure before deciding on the section shell.
 
 Acceptance criteria:
 
@@ -1268,11 +1268,11 @@ Scope:
 
 Tasks:
 
-- [ ] Add optional `id` to `RichTextEditorNode`.
-- [ ] Preserve IDs through normalize/serialize.
-- [ ] Generate missing top-level IDs.
-- [ ] Repair duplicate IDs.
-- [ ] Add round-trip tests.
+- [x] Add optional `id` to `RichTextEditorNode`.
+- [x] Preserve IDs through normalize/serialize.
+- [x] Generate missing top-level IDs.
+- [x] Repair duplicate IDs.
+- [x] Add round-trip tests.
 
 Acceptance criteria:
 
@@ -1294,11 +1294,11 @@ Scope:
 
 Tasks:
 
-- [ ] Define `RichTextDocumentSection`.
-- [ ] Implement heading-based sections.
-- [ ] Implement fallback block-count sections.
-- [ ] Implement section replacement.
-- [ ] Implement stale/missing section result.
+- [x] Define `RichTextDocumentSection`.
+- [x] Implement heading-based sections.
+- [x] Implement fallback block-count sections.
+- [x] Implement section replacement.
+- [x] Implement stale/missing section result.
 
 Acceptance criteria:
 
@@ -1321,11 +1321,11 @@ Scope:
 
 Tasks:
 
-- [ ] Render visible sections only.
-- [ ] Render placeholders for offscreen sections.
-- [ ] Measure visible section height.
-- [ ] Preserve scroll anchoring after measurement.
-- [ ] Add diagnostics for rendered/total sections.
+- [x] Render visible sections only.
+- [x] Render placeholders for offscreen sections.
+- [x] Measure visible section height.
+- [x] Preserve scroll anchoring after measurement.
+- [x] Add diagnostics for rendered/total sections.
 
 Acceptance criteria:
 
@@ -1346,11 +1346,11 @@ Scope:
 
 Tasks:
 
-- [ ] Extract reusable composer internals from `RichTextEditor`.
-- [ ] Mount section-scoped Lexical editor.
-- [ ] Emit section document changes.
-- [ ] Commit section draft into full document.
-- [ ] Flush active section on switch/unmount.
+- [x] Extract reusable composer internals from `RichTextEditor`.
+- [x] Mount section-scoped Lexical editor.
+- [x] Emit section document changes.
+- [x] Commit section draft into full document.
+- [x] Flush active section on switch/unmount.
 
 Acceptance criteria:
 
@@ -1370,10 +1370,10 @@ Scope:
 
 Tasks:
 
-- [ ] Export `VirtualRichTextEditor`.
-- [ ] Add optional `largeDocument` policy to `RichTextEditor`.
-- [ ] Support explicit `mode: "large-document"`.
-- [ ] Keep default standard mode until auto thresholds are ready.
+- [x] Export `VirtualRichTextEditor`.
+- [x] Add optional `largeDocument` policy to `RichTextEditor`.
+- [x] Support explicit `mode: "large-document"`.
+- [x] Keep default standard mode until auto thresholds are ready.
 
 Acceptance criteria:
 
@@ -1393,10 +1393,10 @@ Scope:
 
 Tasks:
 
-- [ ] Build heading/text/comment indexes from JSON.
-- [ ] Wire TOC to section scroll.
-- [ ] Add shell search over text index.
-- [ ] Activate target section from search result.
+- [x] Build heading/text/comment indexes from JSON.
+- [x] Wire TOC to section scroll.
+- [x] Add shell search over text index.
+- [x] Activate target section from search result.
 
 Acceptance criteria:
 
@@ -1416,11 +1416,11 @@ Scope:
 
 Tasks:
 
-- [ ] Add generated fixtures.
-- [ ] Add 1000/5000 block stories.
-- [ ] Add mixed decorator-heavy story.
-- [ ] Add diagnostics panel.
-- [ ] Add Playwright smoke.
+- [x] Add generated fixtures.
+- [x] Add 1000/5000 block stories.
+- [x] Add mixed decorator-heavy story.
+- [x] Add diagnostics panel.
+- [x] Add Playwright smoke.
 
 Acceptance criteria:
 

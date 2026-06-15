@@ -1,7 +1,6 @@
 import { $isTableCellNode } from "@lexical/table";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
-  $createParagraphNode,
   $createTextNode,
   $getRoot,
   $getSelection,
@@ -24,6 +23,7 @@ import {
 } from "../model/schema";
 import { INSERT_RICH_TEXT_NODE_COMMAND } from "./base";
 import { $createEditorHeadingNode } from "./heading-node";
+import { $createEditorParagraphNode } from "./identified-block-nodes";
 import { decoratorNodeDefinition } from "./registry";
 
 export {
@@ -50,7 +50,7 @@ export function richTextNodeToLexicalNode(
   node: RichTextEditorNode,
 ): LexicalNode | null {
   if (node.type === "paragraph") {
-    const paragraph = $createParagraphNode();
+    const paragraph = $createEditorParagraphNode(node.id);
     paragraph.append(
       ...textFromChildren(node.children, stringValue(node.text)).map((text) =>
         $createTextNode(text),
@@ -62,6 +62,7 @@ export function richTextNodeToLexicalNode(
     const heading = $createEditorHeadingNode(
       headingTag(node.tag),
       node.anchorId,
+      node.id,
     );
     heading.append(
       ...textFromChildren(node.children, stringValue(node.text)).map((text) =>
@@ -112,7 +113,7 @@ export function RichTextNodePlugin() {
             if ($isElementNode(next)) {
               next.selectStart();
             } else {
-              const paragraph = $createParagraphNode();
+              const paragraph = $createEditorParagraphNode();
               lexicalNode.insertAfter(paragraph);
               paragraph.select();
             }

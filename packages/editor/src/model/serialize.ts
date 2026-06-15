@@ -36,7 +36,7 @@ export function emptyLexicalParagraph() {
     indent: 0,
     textFormat: 0,
     textStyle: "",
-    type: "paragraph",
+    type: "editor-paragraph",
     version: 1,
   };
 }
@@ -50,9 +50,10 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
         direction: null,
         format,
         indent: 0,
+        ...(stringValue(node.id) ? { id: node.id } : {}),
         textFormat: 0,
         textStyle: "",
-        type: "paragraph",
+        type: "editor-paragraph",
         version: 1,
       },
     ];
@@ -65,6 +66,7 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
         direction: null,
         format,
         indent: 0,
+        ...(stringValue(node.id) ? { id: node.id } : {}),
         tag: headingTag(node.tag),
         type: "editor-heading",
         version: 1,
@@ -78,7 +80,8 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
         direction: null,
         format,
         indent: 0,
-        type: "quote",
+        ...(stringValue(node.id) ? { id: node.id } : {}),
+        type: "editor-quote",
         version: 1,
       },
     ];
@@ -91,10 +94,11 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
         direction: null,
         format: "",
         indent: 0,
+        ...(stringValue(node.id) ? { id: node.id } : {}),
         listType,
         start: numberValue(node.start) ?? 1,
         tag: listType === "number" ? "ol" : "ul",
-        type: "list",
+        type: "editor-list",
         version: 1,
       },
     ];
@@ -106,7 +110,8 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
         direction: null,
         format: "",
         indent: 0,
-        type: "listitem",
+        ...(stringValue(node.id) ? { id: node.id } : {}),
+        type: "editor-listitem",
         value: numberValue(node.value) ?? 1,
         version: 1,
         ...(typeof node.checked === "boolean" ? { checked: node.checked } : {}),
@@ -118,6 +123,7 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
       {
         detail: numberValue(node.detail) ?? 0,
         format: numberValue(node.format) ?? 0,
+        ...(stringValue(node.id) ? { id: node.id } : {}),
         mode: stringValue(node.mode) ?? "normal",
         style: stringValue(node.style) ?? "",
         text: typeof node.text === "string" ? node.text : "",
@@ -127,7 +133,13 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
     ];
   }
   if (node.type === "linebreak") {
-    return [{ type: "linebreak", version: 1 }];
+    return [
+      {
+        ...(stringValue(node.id) ? { id: node.id } : {}),
+        type: "linebreak",
+        version: 1,
+      },
+    ];
   }
   if (
     node.type === "callout" ||
@@ -150,6 +162,7 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
     return [
       {
         definition: stringValue(node.definition) ?? "",
+        ...(stringValue(node.id) ? { id: node.id } : {}),
         term: stringValue(node.term) ?? "",
         type: "glossary",
         version: 1,
@@ -169,6 +182,10 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
         indent: 0,
         ...node,
         children: (node.children ?? []).flatMap(lexicalNode),
+        type:
+          node.type === "table" || node.type === "editor-table"
+            ? "editor-table"
+            : node.type,
         version: 1,
       },
     ];

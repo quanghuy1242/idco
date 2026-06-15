@@ -1,7 +1,13 @@
-import { RichTextEditor, type RichTextEditorDocument } from "@idco/editor";
+import {
+  RichTextEditor,
+  VirtualRichTextEditor,
+  type RichTextEditorDocument,
+} from "@idco/editor";
 import { Stack, Text } from "@idco/ui";
 import type { Story, StoryDefault } from "@ladle/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+type DocumentChild = RichTextEditorDocument["root"]["children"][number];
 
 export default {
   title: "Packages Editor / Rich Text Editor",
@@ -556,3 +562,284 @@ export const SideTableOfContents: Story = () => {
     </Stack>
   );
 };
+
+// docs/009 §6.1.1 — decorator-heavy fixture for the Phase 0 benchmark. Each
+// iteration contributes two decorator blocks (a Prism code editor and a live
+// callout), interleaved with a heading and a paragraph so the document is
+// realistic, not just a wall of widgets. Kept fully local (no external media or
+// embeds) so the perf numbers reflect decorator React/DOM cost, not network.
+const DECORATOR_PAIRS = 130;
+
+const codeSample = [
+  "export function reconcile(prev, next) {",
+  "  const dirty = diff(prev, next);",
+  "  for (const key of dirty) {",
+  "    patch(key, next.get(key));",
+  "  }",
+  "  return next;",
+  "}",
+].join("\n");
+
+function decoratorHeavyDocument(pairs: number): RichTextEditorDocument {
+  const children: DocumentChild[] = [
+    {
+      type: "heading",
+      tag: "h1",
+      children: [{ type: "text", text: "Decorator-heavy document" }],
+    },
+  ];
+  for (let index = 0; index < pairs; index += 1) {
+    children.push(
+      {
+        type: "heading",
+        tag: "h2",
+        children: [{ type: "text", text: `Section ${index + 1}` }],
+      },
+      {
+        type: "paragraph",
+        children: [
+          {
+            type: "text",
+            text: `Prose ahead of the widgets in section ${index + 1}. Each section carries a live code editor and a callout — the bodies Phase 0 virtualizes.`,
+          },
+        ],
+      },
+      {
+        type: "code-block",
+        language: "ts",
+        text: codeSample,
+      },
+      {
+        type: "callout",
+        tone: index % 2 === 0 ? "info" : "success",
+        children: [
+          {
+            type: "text",
+            text: `Callout ${index + 1}: callouts render their body live; offscreen they collapse to a placeholder when virtualization is on.`,
+          },
+        ],
+      },
+    );
+  }
+  return { root: { children } };
+}
+
+const decoratorHeavyValue = decoratorHeavyDocument(DECORATOR_PAIRS);
+
+// Reads the global the virtualization module publishes so reviewers can watch
+// mounted-vs-total decorator bodies change live while scrolling.
+function VirtualizationDiagnostics() {
+  const [snapshot, setSnapshot] = useState<{
+    mountedBodies: number;
+    totalBodies: number;
+  } | null>(null);
+  useEffect(() => {
+    const read = () =>
+      setSnapshot(
+        (
+          window as {
+            __IDCO_DECORATOR_VIRT__?: {
+              mountedBodies: number;
+              totalBodies: number;
+            };
+          }
+        )["__IDCO_DECORATOR_VIRT__"] ?? null,
+      );
+    read();
+    const id = window.setInterval(read, 250);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <Text variant="caption">
+      Mounted decorator bodies: {snapshot?.mountedBodies ?? "—"} /{" "}
+      {snapshot?.totalBodies ?? "—"} total
+    </Text>
+  );
+}
+
+function DecoratorHeavyEditor({
+  virtualized,
+}: {
+  readonly virtualized: boolean;
+}) {
+  const [doc, setDoc] = useState<RichTextEditorDocument>(decoratorHeavyValue);
+  return (
+    <Stack>
+      <Text variant="body">
+        {DECORATOR_PAIRS * 2} decorator blocks (live code editors + callouts).
+        Virtualization is <strong>{virtualized ? "on" : "off"}</strong>. With it
+        on, offscreen bodies collapse to placeholders; scroll and watch the
+        mounted count stay bounded.
+      </Text>
+      <VirtualizationDiagnostics />
+      <RichTextEditor
+        label="Book section"
+        name={virtualized ? "decorator-virtualized" : "decorator-standard"}
+        value={doc}
+        onChange={setDoc}
+        decoratorVirtualization={virtualized}
+      />
+    </Stack>
+  );
+}
+
+export const DecoratorHeavyStandard: Story = () => (
+  <DecoratorHeavyEditor virtualized={false} />
+);
+
+export const DecoratorHeavyVirtualized: Story = () => (
+  <DecoratorHeavyEditor virtualized />
+);
+
+export const DecoratorHeavySectionShell: Story = () => {
+  const [doc, setDoc] = useState<RichTextEditorDocument>(decoratorHeavyValue);
+  return (
+    <Stack>
+      <Text variant="body">
+        The same {DECORATOR_PAIRS * 2} decorator-block fixture rendered through
+        the full large-document section shell. Inactive sections are read
+        chunks; clicking a section mounts one focused Lexical editor.
+      </Text>
+      <VirtualRichTextEditor
+        label="Book section"
+        largeDocument={{
+          fallbackBlocksPerSection: 20,
+          mode: "large-document",
+          overscanSections: 2,
+        }}
+        name="decorator-section-shell"
+        value={doc}
+        onChange={setDoc}
+      />
+    </Stack>
+  );
+};
+
+function paragraphDocument(count: number): RichTextEditorDocument {
+  return {
+    root: {
+      children: Array.from({ length: count }, (_, index) => ({
+        type: "paragraph",
+        children: [
+          {
+            type: "text",
+            text: `Paragraph ${index + 1}: generated long-form body text for the virtual shell benchmark.`,
+          },
+        ],
+      })),
+    },
+  };
+}
+
+function mixedBookDocument(sections: number): RichTextEditorDocument {
+  const children: DocumentChild[] = [
+    {
+      type: "table-of-contents",
+      placement: "inline",
+      style: "compact",
+      title: "Book outline",
+    },
+  ];
+  for (let index = 0; index < sections; index += 1) {
+    children.push(
+      {
+        type: index % 8 === 0 ? "heading" : "paragraph",
+        tag: "h2",
+        children: [
+          {
+            type: "text",
+            text:
+              index % 8 === 0
+                ? `Chapter ${index / 8 + 1}`
+                : `Narrative paragraph ${index + 1}`,
+          },
+        ],
+      },
+      {
+        type: "paragraph",
+        children: [
+          {
+            type: "text",
+            text: `Search marker ${index + 1}: this text is indexed from JSON even when the section is offscreen.`,
+          },
+        ],
+      },
+    );
+    if (index % 10 === 0) {
+      children.push({
+        type: "code-block",
+        language: "ts",
+        text: codeSample,
+      });
+    }
+    if (index % 12 === 0) {
+      children.push({
+        type: "callout",
+        tone: "info",
+        children: [
+          { type: "text", text: `Author note for section ${index + 1}` },
+        ],
+      });
+    }
+  }
+  return { root: { children } };
+}
+
+function LargeDocumentStory({
+  value,
+  label,
+}: {
+  readonly value: RichTextEditorDocument;
+  readonly label: string;
+}) {
+  const [doc, setDoc] = useState(value);
+  return (
+    <Stack>
+      <VirtualRichTextEditor
+        label={label}
+        largeDocument={{
+          fallbackBlocksPerSection: 40,
+          mode: "large-document",
+          overscanSections: 2,
+        }}
+        value={doc}
+        onChange={setDoc}
+      />
+    </Stack>
+  );
+}
+
+export const LargeDocumentParagraphs1000: Story = () => (
+  <LargeDocumentStory
+    label="Large document 1000 paragraphs"
+    value={paragraphDocument(1000)}
+  />
+);
+
+export const LargeDocumentParagraphs5000: Story = () => (
+  <LargeDocumentStory
+    label="Large document 5000 paragraphs"
+    value={paragraphDocument(5000)}
+  />
+);
+
+export const LargeDocumentDecorators1000: Story = () => (
+  <LargeDocumentStory
+    label="Large document decorator mix"
+    value={decoratorHeavyDocument(500)}
+  />
+);
+
+export const LargeDocumentMixedBook: Story = () => (
+  <LargeDocumentStory
+    label="Large document mixed book"
+    value={mixedBookDocument(260)}
+  />
+);
+
+export const LargeDocumentSearchAndToc: Story = () => (
+  <LargeDocumentStory
+    label="Large document search and TOC"
+    value={mixedBookDocument(160)}
+  />
+);

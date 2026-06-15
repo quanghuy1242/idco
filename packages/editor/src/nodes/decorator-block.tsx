@@ -9,6 +9,8 @@ import {
   useRemoveNode,
   type SerializedRichTextDecoratorNode,
 } from "./base";
+import { VirtualizedDecoratorBody } from "./decorator-virtualization";
+import { richTextNodeSignature } from "../large-document/signatures";
 
 /**
  * A decorator-block class as produced by `defineDecoratorBlock`: a Lexical
@@ -90,12 +92,20 @@ export function defineDecoratorBlock(
     }
 
     decorate() {
+      const data = this.getData();
+      // Phase 0 (docs/009 §6.1.1): an offscreen body collapses to a placeholder
+      // when the host editor enables virtualization. The Lexical node, its data,
+      // and serialization are unchanged — only the rendered body is gated.
       return (
-        <DecoratorBlockHost
-          Editor={spec.Editor}
-          node={this.getData()}
-          nodeKey={this.__key}
-        />
+        <VirtualizedDecoratorBody
+          cacheKey={decoratorHeightCacheKey(this.__key, data)}
+        >
+          <DecoratorBlockHost
+            Editor={spec.Editor}
+            node={data}
+            nodeKey={this.__key}
+          />
+        </VirtualizedDecoratorBody>
       );
     }
   }
@@ -104,6 +114,14 @@ export function defineDecoratorBlock(
     value: classNameFromType(spec.type),
   });
   return DecoratorBlock;
+}
+
+function decoratorHeightCacheKey(
+  nodeKey: string,
+  node: RichTextEditorNode,
+): string {
+  const id = typeof node.id === "string" && node.id.trim() ? node.id : nodeKey;
+  return `${id}:${richTextNodeSignature(node)}`;
 }
 
 function classNameFromType(type: string): string {

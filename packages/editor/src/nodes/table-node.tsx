@@ -12,6 +12,7 @@ import type {
   EditorConfig,
   LexicalEditor,
   LexicalUpdateJSON,
+  NodeKey,
   Spread,
 } from "lexical";
 
@@ -66,6 +67,7 @@ export function isResponsiveLayout(layout: TableLayout): boolean {
 
 export type SerializedEditorTableNode = Spread<
   {
+    id?: string;
     layout?: TableLayout;
     showRowNumbers?: boolean;
   },
@@ -86,8 +88,14 @@ export type SerializedEditorTableNode = Spread<
  * behavior), resolved in `updateFromJSON`.
  */
 export class EditorTableNode extends TableNode {
+  __idcoId: string | undefined;
   __layout: TableLayout = "responsive";
   __showRowNumbers = false;
+
+  constructor(id?: string, key?: NodeKey) {
+    super(key);
+    this.__idcoId = cleanNodeId(id);
+  }
 
   // A unique node type is mandatory for Lexical's node-replacement registry (a
   // same-type override registers the base klass for "table", so constructing the
@@ -100,11 +108,12 @@ export class EditorTableNode extends TableNode {
   }
 
   static clone(node: EditorTableNode): EditorTableNode {
-    return new EditorTableNode(node.__key);
+    return new EditorTableNode(node.__idcoId, node.__key);
   }
 
   afterCloneFrom(prevNode: this): void {
     super.afterCloneFrom(prevNode);
+    this.__idcoId = prevNode.__idcoId;
     this.__layout = prevNode.__layout;
     this.__showRowNumbers = prevNode.__showRowNumbers;
   }
@@ -121,6 +130,7 @@ export class EditorTableNode extends TableNode {
     const self = super.updateFromJSON(serializedNode);
     // Absent `layout` means a legacy document predating layout modes → fixed.
     return self
+      .setId(serializedNode.id)
       .setLayout(tableLayoutValue(serializedNode.layout ?? "fixed"))
       .setShowRowNumbers(serializedNode.showRowNumbers === true);
   }
@@ -132,6 +142,7 @@ export class EditorTableNode extends TableNode {
     // `responsive` table re-imports as responsive instead of the `fixed` default.
     return {
       ...super.exportJSON(),
+      ...(this.getId() ? { id: this.getId() } : {}),
       layout: this.getLayout(),
       ...(this.getShowRowNumbers() ? { showRowNumbers: true } : {}),
     };
@@ -155,6 +166,16 @@ export class EditorTableNode extends TableNode {
     return this.getLatest().__layout;
   }
 
+  getId(): string | undefined {
+    return this.getLatest().__idcoId;
+  }
+
+  setId(id: string | undefined): this {
+    const self = this.getWritable();
+    self.__idcoId = cleanNodeId(id);
+    return self;
+  }
+
   setLayout(layout: TableLayout): this {
     const self = this.getWritable();
     self.__layout = layout;
@@ -170,6 +191,10 @@ export class EditorTableNode extends TableNode {
     self.__showRowNumbers = showRowNumbers;
     return self;
   }
+}
+
+function cleanNodeId(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 /**

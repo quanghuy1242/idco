@@ -16,27 +16,39 @@ import {
   type RichTextEditorNode,
   type RichTextEditorDocument,
 } from "./schema";
+import { ensureDocumentNodeIds } from "../large-document/ids";
 
 /**
  * Coerce untrusted / legacy JSON into the canonical document shape. This is the
  * inverse boundary to `serialize.ts`: anything stored or pasted is squeezed
  * through here before it reaches Lexical.
  */
-export function normalizeDocument(value: unknown): RichTextEditorDocument {
+export function normalizeDocument(
+  value: unknown,
+  options: { readonly previousDocument?: RichTextEditorDocument } = {},
+): RichTextEditorDocument {
   if (isRecord(value) && isRecord(value.root)) {
     const children = Array.isArray(value.root.children)
       ? value.root.children.flatMap(normalizeNode)
       : [];
-    return ensureRichTextHeadingAnchors({ root: { children } });
+    return ensureDocumentNodeIds(
+      ensureRichTextHeadingAnchors({ root: { children } }),
+      {
+        previousDocument: options.previousDocument,
+      },
+    );
   }
   if (typeof value === "string" && value.trim()) {
     try {
-      return normalizeDocument(JSON.parse(value) as unknown);
+      return normalizeDocument(JSON.parse(value) as unknown, options);
     } catch {
-      return { root: { children: [paragraphNode(value)] } };
+      return ensureDocumentNodeIds(
+        { root: { children: [paragraphNode(value)] } },
+        options,
+      );
     }
   }
-  return { root: { children: [] } };
+  return ensureDocumentNodeIds({ root: { children: [] } }, options);
 }
 
 export function normalizeNode(value: unknown): RichTextEditorNode[] {
@@ -45,10 +57,11 @@ export function normalizeNode(value: unknown): RichTextEditorNode[] {
   }
   const align = alignmentValue(value.format);
   const aligned = align ? { format: align } : {};
-  if (value.type === "paragraph") {
+  if (value.type === "paragraph" || value.type === "editor-paragraph") {
     return [
       {
         children: normalizeChildren(value.children),
+        ...nodeId(value),
         type: "paragraph",
         ...aligned,
       },
@@ -61,26 +74,29 @@ export function normalizeNode(value: unknown): RichTextEditorNode[] {
           ? { anchorId: slugifyHeadingAnchor(stringValue(value.anchorId)!) }
           : {}),
         children: normalizeChildren(value.children),
+        ...nodeId(value),
         tag: headingTag(value.tag),
         type: "heading",
         ...aligned,
       },
     ];
   }
-  if (value.type === "quote") {
+  if (value.type === "quote" || value.type === "editor-quote") {
     return [
       {
         children: normalizeChildren(value.children),
+        ...nodeId(value),
         type: "quote",
         ...aligned,
       },
     ];
   }
-  if (value.type === "list") {
+  if (value.type === "list" || value.type === "editor-list") {
     const listType = listTypeValue(value.listType, value.tag);
     return [
       {
         children: normalizeChildren(value.children),
+        ...nodeId(value),
         listType,
         start: numberValue(value.start) ?? 1,
         tag: listType === "number" ? "ol" : "ul",
@@ -88,10 +104,11 @@ export function normalizeNode(value: unknown): RichTextEditorNode[] {
       },
     ];
   }
-  if (value.type === "listitem") {
+  if (value.type === "listitem" || value.type === "editor-listitem") {
     return [
       {
         children: normalizeChildren(value.children),
+        ...nodeId(value),
         type: "listitem",
         value: numberValue(value.value) ?? 1,
         ...(typeof value.checked === "boolean"
@@ -105,6 +122,7 @@ export function normalizeNode(value: unknown): RichTextEditorNode[] {
       {
         detail: numberValue(value.detail) ?? 0,
         format: numberValue(value.format) ?? 0,
+        ...nodeId(value),
         mode: stringValue(value.mode) ?? "normal",
         style: stringValue(value.style) ?? "",
         text: stringValue(value.text) ?? "",
@@ -113,7 +131,7 @@ export function normalizeNode(value: unknown): RichTextEditorNode[] {
     ];
   }
   if (value.type === "linebreak") {
-    return [{ type: "linebreak" }];
+    return [{ ...nodeId(value), type: "linebreak" }];
   }
   if (value.type === "callout") {
     return [normalizeCalloutNode(value)];
@@ -137,6 +155,7 @@ export function normalizeNode(value: unknown): RichTextEditorNode[] {
     return [
       {
         definition: stringValue(value.definition) ?? "",
+        ...nodeId(value),
         term: stringValue(value.term) ?? "",
         type: "glossary",
       },
@@ -192,6 +211,7 @@ export function normalizeCalloutNode(
 ): RichTextEditorNode {
   return {
     children: [{ text: childText(node) || "Callout", type: "text" }],
+    ...nodeId(node),
     tone: calloutToneValue(node.tone),
     type: "callout",
   };
@@ -202,6 +222,7 @@ export function normalizeCodeBlockNode(
 ): RichTextEditorNode {
   return {
     language: codeLanguageValue(node.language),
+    ...nodeId(node),
     text: stringValue(node.text) ?? "",
     type: "code-block",
   };
@@ -211,6 +232,7 @@ export function normalizeEmbedNode(
   node: RichTextEditorNode,
 ): RichTextEditorNode {
   return {
+    ...nodeId(node),
     type: "embed",
     url: stringValue(node.url) ?? "",
   };
@@ -223,6 +245,7 @@ export function normalizeMediaNode(
     alt: stringValue(node.alt) ?? "",
     caption: stringValue(node.caption) ?? "",
     mediaId: stringValue(node.mediaId) ?? "",
+    ...nodeId(node),
     type: "media",
   };
 }
@@ -231,6 +254,7 @@ export function normalizePostRefNode(
   node: RichTextEditorNode,
 ): RichTextEditorNode {
   return {
+    ...nodeId(node),
     postId: stringValue(node.postId) ?? "",
     title: stringValue(node.title) ?? "",
     type: "post-ref",
@@ -250,6 +274,7 @@ export function normalizeTableOfContentsNode(
     side: settings.side,
     style: settings.style,
     title: settings.title,
+    ...nodeId(node),
     type: "table-of-contents",
   };
 }
@@ -266,4 +291,8 @@ export function textFromChildren(
 
 export function childText(node: RichTextEditorNode): string {
   return textFromChildren(node.children, stringValue(node.text)).join("");
+}
+
+function nodeId(node: RichTextEditorNode): { readonly id?: string } {
+  return stringValue(node.id) ? { id: stringValue(node.id) } : {};
 }
