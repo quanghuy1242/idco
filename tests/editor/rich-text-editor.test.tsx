@@ -59,7 +59,7 @@ describe("RichTextEditor", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: /bold/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /italic/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /insert/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /more/i })).toBeVisible();
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -172,7 +172,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /code/i }));
 
     expect(
@@ -222,7 +222,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(
       screen.getByRole("menuitem", { name: /table of contents/i }),
     );
@@ -330,7 +330,7 @@ describe("RichTextEditor", () => {
     );
 
     fireEvent.click(screen.getByRole("textbox", { name: /^body$/i }));
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /^table$/i }));
 
     await waitFor(() =>
@@ -367,7 +367,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     expect(screen.queryByRole("menuitem", { name: /code/i })).toBeNull();
     expect(screen.getByRole("menuitem", { name: /paragraph/i })).toBeVisible();
   });
@@ -385,7 +385,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /media/i }));
     await pickFromCombo(/pick from media library/i, /cover/i);
 
@@ -427,7 +427,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /callout/i }));
     fireEvent.change(
       await screen.findByRole("textbox", { name: /callout text/i }),
@@ -457,7 +457,7 @@ describe("RichTextEditor", () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /embed/i }));
     const embedUrl = await screen.findByRole("textbox", { name: /embed url/i });
     expect(embedUrl).not.toHaveClass("input-error");
@@ -466,7 +466,7 @@ describe("RichTextEditor", () => {
     });
     await waitFor(() => expect(embedUrl).toHaveClass("input-error"));
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /post ref/i }));
     await pickFromCombo(/referenced post/i, /referenced post/i);
 
@@ -498,7 +498,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /media/i }));
 
     expect(await screen.findByText("Upload a new image")).toBeVisible();
@@ -515,7 +515,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /embed/i }));
     fireEvent.change(
       await screen.findByRole("textbox", { name: /embed url/i }),
@@ -545,7 +545,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /media/i }));
     await pickFromCombo(/pick from media library/i, /cover/i);
 
@@ -562,7 +562,7 @@ describe("RichTextEditor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(screen.getByRole("button", { name: /more/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: /callout/i }));
     expect(
       await screen.findByRole("textbox", { name: /callout text/i }),

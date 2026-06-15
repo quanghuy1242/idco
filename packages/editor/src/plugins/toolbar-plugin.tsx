@@ -1,138 +1,46 @@
-import {
-  Menu,
-  MenuItem,
-  MenuTrigger,
-  NavIcon,
-  Text,
-} from "@quanghuy1242/idco-ui";
-import {
-  $isListNode,
-  INSERT_CHECK_LIST_COMMAND,
-  INSERT_ORDERED_LIST_COMMAND,
-  INSERT_UNORDERED_LIST_COMMAND,
-  REMOVE_LIST_COMMAND,
-} from "@lexical/list";
+import { Text } from "@quanghuy1242/idco-ui";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import {
-  $createQuoteNode,
-  $isHeadingNode,
-  $isQuoteNode,
-  type HeadingTagType,
-} from "@lexical/rich-text";
-import { $setBlocksType } from "@lexical/selection";
 import { mergeRegister } from "@lexical/utils";
 import {
-  $createParagraphNode,
   $getSelection,
-  $isElementNode,
   $isRangeSelection,
   BLUR_COMMAND,
   CAN_REDO_COMMAND,
   CAN_UNDO_COMMAND,
   COMMAND_PRIORITY_LOW,
   FOCUS_COMMAND,
-  FORMAT_ELEMENT_COMMAND,
-  FORMAT_TEXT_COMMAND,
-  INDENT_CONTENT_COMMAND,
-  REDO_COMMAND,
-  UNDO_COMMAND,
-  OUTDENT_CONTENT_COMMAND,
   type ElementFormatType,
-  type LexicalCommand,
   type TextFormatType,
 } from "lexical";
 import {
+  Fragment,
   memo,
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import {
-  Button as AriaButton,
-  Toolbar as AriaToolbar,
-} from "react-aria-components";
+import { Toolbar as AriaToolbar } from "react-aria-components";
 import { capabilityFor, type BlockKind } from "../model/capabilities";
 import {
-  editorInsertActions,
-  type EditorInsertAction,
-} from "../model/insert-actions";
+  $readSelectionState,
+  availableBlockStyles,
+  COMMAND_GROUP_ORDER,
+  groupedSurfaceCommands,
+  type CommandContext,
+  type EditorCommand,
+} from "../model/commands";
 import { canUse } from "../model/schema";
 import { RichTextEditorBindingsContext } from "../nodes";
-import { $createEditorHeadingNode } from "../nodes/heading-node";
+import { BlockStyleControl } from "../toolbar/block-style-control";
+import { CommandButtonGroup } from "../toolbar/command-button-group";
 import { CommentButton } from "../toolbar/comment-button";
 import { GlossaryButton } from "../toolbar/glossary-button";
 import { LinkButton } from "../toolbar/link-button";
-import { ToolbarButton, ToolbarDivider } from "../toolbar/toolbar-button";
-
-const blockStyleOptions: readonly {
-  readonly id: "paragraph" | HeadingTagType | "quote";
-  readonly label: string;
-  readonly icon: string;
-  readonly preview: string;
-  readonly node?: "heading" | "quote";
-}[] = [
-  { icon: "Pilcrow", id: "paragraph", label: "Paragraph", preview: "text-sm" },
-  {
-    icon: "Heading1",
-    id: "h1",
-    label: "Heading 1",
-    node: "heading",
-    preview: "text-2xl font-bold",
-  },
-  {
-    icon: "Heading2",
-    id: "h2",
-    label: "Heading 2",
-    node: "heading",
-    preview: "text-xl font-bold",
-  },
-  {
-    icon: "Heading3",
-    id: "h3",
-    label: "Heading 3",
-    node: "heading",
-    preview: "text-lg font-semibold",
-  },
-  {
-    icon: "Heading4",
-    id: "h4",
-    label: "Heading 4",
-    node: "heading",
-    preview: "text-base font-semibold",
-  },
-  {
-    icon: "Quote",
-    id: "quote",
-    label: "Quote",
-    node: "quote",
-    preview: "text-sm italic text-base-content/70",
-  },
-];
-
-const inlineFormats: readonly {
-  readonly format: TextFormatType;
-  readonly icon: string;
-  readonly label: string;
-}[] = [
-  { format: "bold", icon: "Bold", label: "Bold" },
-  { format: "italic", icon: "Italic", label: "Italic" },
-  { format: "underline", icon: "Underline", label: "Underline" },
-  { format: "strikethrough", icon: "Strikethrough", label: "Strikethrough" },
-  { format: "code", icon: "Code", label: "Inline code" },
-];
-
-const alignmentOptions: readonly {
-  readonly value: Exclude<ElementFormatType, "" | "start" | "end">;
-  readonly icon: string;
-  readonly label: string;
-}[] = [
-  { icon: "AlignLeft", label: "Align left", value: "left" },
-  { icon: "AlignCenter", label: "Align center", value: "center" },
-  { icon: "AlignRight", label: "Align right", value: "right" },
-  { icon: "AlignJustify", label: "Justify", value: "justify" },
-];
+import { MoreMenu } from "../toolbar/more-menu";
+import { ToolbarDivider } from "../toolbar/toolbar-button";
 
 const editorControlSurfaceSelector = [
   "[data-editor-selection-flyout]",
@@ -153,8 +61,17 @@ function isEditorControlTarget(
   );
 }
 
+function sameFormatSet(
+  a: ReadonlySet<TextFormatType>,
+  b: ReadonlySet<TextFormatType>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const format of b) if (!a.has(format)) return false;
+  return true;
+}
+
 // Memoized: the toolbar lives inside the controlled editor, which re-renders on
-// every keystroke. Its props are stable, so memo keeps the 20+ React Aria
+// every keystroke. Its props are stable, so memo keeps the React Aria
 // buttons/tooltips from reconciling on each edit; it still updates itself from
 // its own selection listener when the active block/format actually changes.
 export const LexicalToolbar = memo(function LexicalToolbar({
@@ -172,14 +89,13 @@ export const LexicalToolbar = memo(function LexicalToolbar({
   const bindings = useContext(RichTextEditorBindingsContext);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [blockKind, setBlockKind] = useState<BlockKind>("paragraph");
-  const [activeFormats, setActiveFormats] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
+  const [activeFormats, setActiveFormats] = useState<
+    ReadonlySet<TextFormatType>
+  >(new Set());
   const [activeAlign, setActiveAlign] = useState<ElementFormatType>("");
   // Formatting targets the editable text; it does not apply while a block widget
   // (callout/code/media) holds focus, so the controls disable themselves there.
   const [canFormat, setCanFormat] = useState(false);
-  const [styleOpen, setStyleOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
@@ -187,39 +103,15 @@ export const LexicalToolbar = memo(function LexicalToolbar({
     const selection = $getSelection();
     if (!$isRangeSelection(selection)) return;
     setCanFormat(true);
-    // Refreshed on every editor update (including each keystroke), so bail out
-    // when the active formats are unchanged — a fresh Set would otherwise be a
-    // new reference and re-render the whole toolbar on every edit.
-    const nextFormats = inlineFormats
-      .filter(({ format }) => selection.hasFormat(format))
-      .map(({ format }) => format);
+    const state = $readSelectionState();
+    // Refreshed on every editor update (including each keystroke); bail out when
+    // the active formats are unchanged so a fresh Set is not a new reference that
+    // re-renders the whole toolbar on every edit.
     setActiveFormats((prev) =>
-      prev.size === nextFormats.length && nextFormats.every((f) => prev.has(f))
-        ? prev
-        : new Set(nextFormats),
+      sameFormatSet(prev, state.activeFormats) ? prev : state.activeFormats,
     );
-    const anchor = selection.anchor.getNode();
-    const element =
-      anchor.getKey() === "root"
-        ? anchor
-        : (anchor.getTopLevelElement() ?? anchor);
-    if ($isListNode(element)) {
-      const listType = element.getListType();
-      setBlockKind(
-        listType === "number"
-          ? "number"
-          : listType === "check"
-            ? "check"
-            : "bullet",
-      );
-    } else if ($isHeadingNode(element)) {
-      setBlockKind(element.getTag());
-    } else if ($isQuoteNode(element)) {
-      setBlockKind("quote");
-    } else {
-      setBlockKind("paragraph");
-    }
-    setActiveAlign($isElementNode(element) ? element.getFormatType() : "");
+    setBlockKind(state.blockKind);
+    setActiveAlign(state.activeAlign);
   }, []);
 
   useEffect(
@@ -270,102 +162,117 @@ export const LexicalToolbar = memo(function LexicalToolbar({
   );
 
   // Return focus to the editor after a toolbar action so the caret/selection survives.
-  const focusEditor = () => editor.focus();
-  // Menus steal focus to the trigger on close; refocus the editor on the next frame to win.
-  const focusEditorAfterMenu = () =>
-    requestAnimationFrame(() => editor.focus());
-
-  const applyFormat = (format: TextFormatType) => {
-    editor.dispatchCommand(FORMAT_TEXT_COMMAND, format);
-    focusEditor();
-  };
-
-  const applyAlignment = (value: ElementFormatType) => {
-    editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, value);
-    focusEditor();
-  };
-
-  const applyHistory = (command: typeof UNDO_COMMAND | typeof REDO_COMMAND) => {
-    editor.dispatchCommand(command, undefined);
-    focusEditor();
-  };
-
-  const applyBlockStyle = (id: "paragraph" | HeadingTagType | "quote") => {
-    // Exiting a list needs the list command; $setBlocksType alone leaves orphan list wrappers.
-    if (
-      blockKind === "bullet" ||
-      blockKind === "number" ||
-      blockKind === "check"
-    ) {
-      editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
-    }
-    editor.update(() => {
-      const selection = $getSelection();
-      if (!$isRangeSelection(selection)) return;
-      if (id === "paragraph") {
-        $setBlocksType(selection, () => $createParagraphNode());
-      } else if (id === "quote") {
-        $setBlocksType(selection, () => $createQuoteNode());
-      } else {
-        $setBlocksType(selection, () => $createEditorHeadingNode(id));
-      }
-    });
-    setStyleOpen(false);
-    focusEditorAfterMenu();
-  };
-
-  const toggleList = (kind: "bullet" | "number") => {
-    if (blockKind === kind) {
-      editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
-    } else {
-      editor.dispatchCommand(
-        kind === "bullet"
-          ? INSERT_UNORDERED_LIST_COMMAND
-          : INSERT_ORDERED_LIST_COMMAND,
-        undefined,
-      );
-    }
-    focusEditor();
-  };
-
-  const toggleChecklist = () => {
-    // Toggle off when already a check list; otherwise REMOVE_LIST first so a
-    // bullet/numbered list converts cleanly instead of nesting.
-    if (blockKind === "check") {
-      editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
-    } else {
-      editor.dispatchCommand(INSERT_CHECK_LIST_COMMAND, undefined);
-    }
-    focusEditor();
-  };
-
-  const applyIndent = (
-    command:
-      | LexicalCommand<void>
-      | typeof INDENT_CONTENT_COMMAND
-      | typeof OUTDENT_CONTENT_COMMAND,
-  ) => {
-    editor.dispatchCommand(command, undefined);
-    focusEditor();
-  };
-
-  const applyInsertAction = (action: EditorInsertAction) => {
-    action.run(editor);
-    onMenuOpen(false);
-    focusEditorAfterMenu();
-  };
-
-  const capability = capabilityFor(blockKind);
-  const textAllowed = canUse("text", allowedNodes);
-  const styleChoices = blockStyleOptions.filter(
-    (option) =>
-      option.id === "paragraph" ||
-      (option.node === "heading" && canUse("heading", allowedNodes)) ||
-      (option.node === "quote" && canUse("quote", allowedNodes)),
+  const focusEditor = useCallback(() => editor.focus(), [editor]);
+  // Menus steal focus to the trigger on close; refocus the editor next frame to win.
+  const focusEditorAfterMenu = useCallback(
+    () => requestAnimationFrame(() => editor.focus()),
+    [editor],
   );
-  const currentStyle =
-    styleChoices.find((option) => option.id === blockKind) ?? styleChoices[0];
-  const insertActions = editorInsertActions({ allowedNodes, bindings });
+
+  const ctx = useMemo<CommandContext>(
+    () => ({
+      activeAlign,
+      activeFormats,
+      allowedNodes,
+      bindings,
+      blockKind,
+      canFormat,
+      canRedo,
+      canUndo,
+      capability: capabilityFor(blockKind),
+      editor,
+      hasSelectedText: false,
+      selectedText: "",
+    }),
+    [
+      activeAlign,
+      activeFormats,
+      allowedNodes,
+      bindings,
+      blockKind,
+      canFormat,
+      canRedo,
+      canUndo,
+      editor,
+    ],
+  );
+
+  const runCommand = useCallback(
+    (command: EditorCommand) => {
+      command.run(ctx);
+      focusEditor();
+    },
+    [ctx, focusEditor],
+  );
+
+  const runMoreCommand = useCallback(
+    (command: EditorCommand) => {
+      command.run(ctx);
+      onMenuOpen(false);
+      focusEditorAfterMenu();
+    },
+    [ctx, focusEditorAfterMenu, onMenuOpen],
+  );
+
+  const textAllowed = canUse("text", allowedNodes);
+  const hasBlockStyles = availableBlockStyles(allowedNodes).length > 1;
+  const primaryByGroup = new Map(
+    groupedSurfaceCommands(ctx, "toolbar", "primary").map((segment) => [
+      segment.group,
+      segment.commands,
+    ]),
+  );
+  const hasMore = groupedSurfaceCommands(ctx, "toolbar", "more").length > 0;
+
+  // Build the inline segments in group order; widget-shaped groups (block style,
+  // annotate) render their own controls, the rest render as button groups.
+  const segments: { readonly key: string; readonly node: React.ReactNode }[] =
+    [];
+  for (const group of COMMAND_GROUP_ORDER) {
+    if (group === "blockStyle") {
+      if (hasBlockStyles) {
+        segments.push({
+          key: group,
+          node: (
+            <BlockStyleControl
+              ctx={ctx}
+              isDisabled={!canFormat}
+              onApplied={focusEditorAfterMenu}
+            />
+          ),
+        });
+      }
+    } else if (group === "annotate") {
+      // Annotate controls operate on the live selection; show them whenever text
+      // is allowed (each disables itself until the selection supports it).
+      if (textAllowed) {
+        segments.push({
+          key: group,
+          node: (
+            <div className="flex items-center gap-1">
+              <LinkButton isDisabled={!canFormat} />
+              <GlossaryButton isDisabled={!canFormat} />
+              <CommentButton isDisabled={!canFormat} />
+            </div>
+          ),
+        });
+      }
+    } else {
+      const commands = primaryByGroup.get(group);
+      if (commands && commands.length > 0) {
+        segments.push({
+          key: group,
+          node: (
+            <CommandButtonGroup
+              commands={commands}
+              ctx={ctx}
+              onRun={runCommand}
+            />
+          ),
+        });
+      }
+    }
+  }
 
   return (
     <AriaToolbar
@@ -373,187 +280,23 @@ export const LexicalToolbar = memo(function LexicalToolbar({
       aria-label={`${label} formatting`}
       className="flex flex-wrap items-center gap-1 border-b border-base-300 bg-base-200 px-2 py-2"
     >
-      <div className="flex items-center gap-1">
-        <ToolbarButton
-          icon="Undo2"
-          label="Undo"
-          isDisabled={!canUndo}
-          onPress={() => applyHistory(UNDO_COMMAND)}
-        />
-        <ToolbarButton
-          icon="Redo2"
-          label="Redo"
-          isDisabled={!canRedo}
-          onPress={() => applyHistory(REDO_COMMAND)}
-        />
-      </div>
+      {segments.map((segment, index) => (
+        <Fragment key={segment.key}>
+          {index > 0 ? <ToolbarDivider /> : null}
+          {segment.node}
+        </Fragment>
+      ))}
 
-      <ToolbarDivider />
-
-      {styleChoices.length > 1 ? (
-        <MenuTrigger
-          isOpen={styleOpen}
-          onOpenChange={setStyleOpen}
-          placement="bottom start"
-        >
-          <AriaButton
-            aria-label="Text style"
-            isDisabled={!canFormat}
-            className="btn btn-sm btn-ghost w-40 justify-start gap-2"
-          >
-            <NavIcon name={currentStyle.icon} />
-            <span className="flex-1 truncate text-left">
-              {currentStyle.label}
-            </span>
-            <NavIcon name="ChevronDown" />
-          </AriaButton>
-          <Menu aria-label="Text style" className="w-56">
-            {styleChoices.map((option) => (
-              <MenuItem
-                key={option.id}
-                id={option.id}
-                textValue={option.label}
-                onAction={() => applyBlockStyle(option.id)}
-              >
-                <span className="flex items-center gap-3">
-                  <NavIcon name={option.icon} />
-                  <span className={`leading-tight ${option.preview}`}>
-                    {option.label}
-                  </span>
-                </span>
-              </MenuItem>
-            ))}
-          </Menu>
-        </MenuTrigger>
-      ) : null}
-
-      {textAllowed ? (
+      {hasMore ? (
         <>
-          <ToolbarDivider />
-          <div className="flex items-center gap-1">
-            {inlineFormats.map(({ format, icon, label: formatLabel }) => (
-              <ToolbarButton
-                key={format}
-                icon={icon}
-                label={formatLabel}
-                isActive={activeFormats.has(format)}
-                isDisabled={!canFormat || !capability.inlineFormats.has(format)}
-                onPress={() => applyFormat(format)}
-              />
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {textAllowed ? (
-        <>
-          <ToolbarDivider />
-          <div className="flex items-center gap-1">
-            {alignmentOptions.map(({ value, icon, label: alignLabel }) => (
-              <ToolbarButton
-                key={value}
-                icon={icon}
-                label={alignLabel}
-                isActive={activeAlign === value}
-                isDisabled={!canFormat || !capability.canAlign}
-                onPress={() => applyAlignment(value)}
-              />
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {textAllowed ? (
-        <>
-          <ToolbarDivider />
-          <div className="flex items-center gap-1">
-            <ToolbarButton
-              icon="IndentDecrease"
-              label="Outdent"
-              isDisabled={!canFormat || !capability.canIndent}
-              onPress={() => applyIndent(OUTDENT_CONTENT_COMMAND)}
-            />
-            <ToolbarButton
-              icon="IndentIncrease"
-              label="Indent"
-              isDisabled={!canFormat || !capability.canIndent}
-              onPress={() => applyIndent(INDENT_CONTENT_COMMAND)}
-            />
-          </div>
-        </>
-      ) : null}
-
-      {canUse("list", allowedNodes) ? (
-        <>
-          <ToolbarDivider />
-          <div className="flex items-center gap-1">
-            <ToolbarButton
-              icon="List"
-              label="Bullet list"
-              isActive={blockKind === "bullet"}
-              isDisabled={!canFormat}
-              onPress={() => toggleList("bullet")}
-            />
-            <ToolbarButton
-              icon="ListOrdered"
-              label="Numbered list"
-              isActive={blockKind === "number"}
-              isDisabled={!canFormat}
-              onPress={() => toggleList("number")}
-            />
-            <ToolbarButton
-              icon="ListChecks"
-              label="Check list"
-              isActive={blockKind === "check"}
-              isDisabled={!canFormat}
-              onPress={toggleChecklist}
-            />
-          </div>
-        </>
-      ) : null}
-
-      {textAllowed ? (
-        <>
-          <ToolbarDivider />
-          <div className="flex items-center gap-1">
-            <LinkButton isDisabled={!canFormat} />
-            <GlossaryButton isDisabled={!canFormat} />
-            <CommentButton isDisabled={!canFormat} />
-          </div>
-        </>
-      ) : null}
-
-      {insertActions.length > 0 ? (
-        <>
-          <ToolbarDivider />
-          <MenuTrigger
+          {segments.length > 0 ? <ToolbarDivider /> : null}
+          <MoreMenu
+            ctx={ctx}
             isOpen={menuOpen}
+            label={label}
             onOpenChange={onMenuOpen}
-            placement="bottom start"
-          >
-            <AriaButton
-              aria-label="Insert block"
-              className={`btn btn-sm gap-1.5 ${menuOpen ? "btn-primary" : "btn-ghost"}`}
-            >
-              <NavIcon name="Plus" />
-              <span>Insert</span>
-            </AriaButton>
-            <Menu aria-label={`${label} insert block`} className="w-56">
-              {insertActions.map((action) => (
-                <MenuItem
-                  key={action.id}
-                  id={action.id}
-                  textValue={action.label}
-                  onAction={() => applyInsertAction(action)}
-                >
-                  <span className="flex items-center gap-2.5">
-                    <NavIcon name={action.icon} />
-                    {action.label}
-                  </span>
-                </MenuItem>
-              ))}
-            </Menu>
-          </MenuTrigger>
+            onRun={runMoreCommand}
+          />
         </>
       ) : null}
 

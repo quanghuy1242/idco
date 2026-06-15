@@ -92,6 +92,7 @@ export function CommentButton({
           type="button"
           aria-label="Comment"
           isDisabled={isDisabled}
+          onMouseDown={(event) => event.preventDefault()}
           className="btn btn-sm btn-square btn-ghost"
         >
           <NavIcon name="MessageSquare" />

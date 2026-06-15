@@ -91,6 +91,7 @@ export function LinkButton({
           type="button"
           aria-label="Link"
           isDisabled={isDisabled}
+          onMouseDown={(event) => event.preventDefault()}
           className="btn btn-sm btn-square btn-ghost"
         >
           <NavIcon name="Link" />

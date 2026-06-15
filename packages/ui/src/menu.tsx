@@ -11,11 +11,13 @@ import {
   Popover,
   type MenuProps,
   type MenuItemProps,
+  type PopoverProps,
 } from "react-aria-components";
 
 export function MenuTrigger({
   children,
   placement = "bottom end",
+  shouldCloseOnInteractOutside,
   ...props
 }: {
   children: ReactNode;
@@ -34,6 +36,7 @@ export function MenuTrigger({
     | "left bottom"
     | "right top"
     | "right bottom";
+  shouldCloseOnInteractOutside?: PopoverProps["shouldCloseOnInteractOutside"];
 }) {
   const [trigger, menu] = Children.toArray(children) as [
     React.ReactElement,
@@ -48,6 +51,7 @@ export function MenuTrigger({
         placement={placement}
         offset={4}
         crossOffset={0}
+        shouldCloseOnInteractOutside={shouldCloseOnInteractOutside}
       >
         {menu}
       </Popover>

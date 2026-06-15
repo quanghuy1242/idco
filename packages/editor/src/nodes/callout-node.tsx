@@ -2,8 +2,7 @@
 /* eslint-disable no-underscore-dangle -- Lexical node subclasses use __ fields by convention. */
 
 import {
-  AlertGlyph,
-  alertToneClass,
+  Alert,
   Menu,
   MenuItem,
   MenuTrigger,
@@ -115,9 +114,7 @@ function CalloutEditor({
       nodeKey={nodeKey}
       padded={false}
     >
-      {/* Mirrors the shared <Alert> component so editor and rendered callouts match. */}
-      <div className={`alert ${alertToneClass[tone]} items-start`}>
-        <AlertGlyph tone={tone} />
+      <Alert tone={tone}>
         <textarea
           ref={textareaRef}
           aria-label="Callout text"
@@ -131,7 +128,7 @@ function CalloutEditor({
             })
           }
         />
-      </div>
+      </Alert>
     </BlockShell>
   );
 }

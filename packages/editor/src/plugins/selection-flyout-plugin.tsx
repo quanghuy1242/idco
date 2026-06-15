@@ -8,9 +8,7 @@ import {
   $setSelection,
   type BaseSelection,
   COMMAND_PRIORITY_LOW,
-  INDENT_CONTENT_COMMAND,
   SELECTION_CHANGE_COMMAND,
-  OUTDENT_CONTENT_COMMAND,
 } from "lexical";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
@@ -18,23 +16,63 @@ import {
   Toolbar as AriaToolbar,
 } from "react-aria-components";
 import {
-  $clampRangeSelectionToText,
-  enabledTextSelectionActions,
-  readTextSelectionContext,
-  type TextSelectionAction,
-} from "../model/selection-actions";
+  $readCommandContext,
+  availableAnnotations,
+  availableBlockStyles,
+  surfaceCommands,
+  type CommandContext,
+  type EditorCommand,
+} from "../model/commands";
+import { $clampRangeSelectionToText } from "../model/selection-actions";
 import { RichTextEditorBindingsContext } from "../nodes";
+import { BlockStyleControl } from "../toolbar/block-style-control";
 import { CommentButton } from "../toolbar/comment-button";
 import { GlossaryButton } from "../toolbar/glossary-button";
 import { LinkButton } from "../toolbar/link-button";
+import { MoreMenu } from "../toolbar/more-menu";
 import { ToolbarButton, ToolbarDivider } from "../toolbar/toolbar-button";
 import { selectedTextAnchorPoint } from "./selection-geometry";
 
 type FlyoutState = {
-  readonly actions: readonly TextSelectionAction[];
+  readonly ctx: CommandContext;
   readonly x: number;
   readonly y: number;
 };
+
+function isSelectionActionPopover(element: Element): boolean {
+  return Boolean(element.closest("[data-editor-selection-action-popover]"));
+}
+
+function isSelectionMenuPopover(element: Element): boolean {
+  return Boolean(element.closest('[role="menu"]'));
+}
+
+function isSelectionFlyout(element: Element): boolean {
+  return Boolean(element.closest("[data-editor-selection-flyout]"));
+}
+
+function shouldChildOverlayCloseOnInteractOutside(element: Element): boolean {
+  return !isSelectionActionPopover(element) && !isSelectionMenuPopover(element);
+}
+
+export function shouldSelectionFlyoutCloseOnInteractOutside(
+  element: Element,
+  {
+    childOverlayClosing,
+    childOverlayOpen,
+  }: {
+    readonly childOverlayClosing: boolean;
+    readonly childOverlayOpen: boolean;
+  },
+): boolean {
+  if (isSelectionActionPopover(element) || isSelectionMenuPopover(element)) {
+    return false;
+  }
+  if (childOverlayOpen || childOverlayClosing) {
+    return !isSelectionFlyout(element);
+  }
+  return true;
+}
 
 export function SelectionFlyoutPlugin({
   allowedNodes,
@@ -46,11 +84,20 @@ export function SelectionFlyoutPlugin({
   const anchorRef = useRef<HTMLSpanElement>(null);
   const rafRef = useRef<number | null>(null);
   const childOverlayOpenRef = useRef(false);
+  const childOverlayClosingRef = useRef(false);
   const isApplyingDirectActionRef = useRef(false);
   const isInteractingRef = useRef(false);
   const isPointerSelectingRef = useRef(false);
   const savedSelectionRef = useRef<BaseSelection | null>(null);
+  // Mirrors `flyout !== null` so deferred (rAF) handlers can tell whether an
+  // apply already closed the flyout vs. a child overlay simply being folded.
+  const flyoutOpenRef = useRef(false);
   const [flyout, setFlyout] = useState<FlyoutState | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  useEffect(() => {
+    flyoutOpenRef.current = flyout !== null;
+  }, [flyout]);
 
   const refresh = useCallback(() => {
     const root = editor.getRootElement();
@@ -62,7 +109,7 @@ export function SelectionFlyoutPlugin({
       setFlyout(null);
       return;
     }
-    const { context, selection } = editor.getEditorState().read(() => {
+    const { ctx, selection } = editor.getEditorState().read(() => {
       const live = $getSelection();
       // Clamp element endpoints to text so a triple-click that spills to a block
       // boundary (next to a decorator) still reads as selected text — and so the
@@ -72,13 +119,17 @@ export function SelectionFlyoutPlugin({
         ? $clampRangeSelectionToText(live.clone())
         : (live?.clone() ?? null);
       return {
-        context: readTextSelectionContext({ allowedNodes, bindings }),
+        ctx: $readCommandContext({ allowedNodes, bindings, editor }),
         selection: snapshot,
       };
     });
-    const actions = enabledTextSelectionActions(context);
     const point = selectedTextAnchorPoint(root);
-    if (!point || actions.length === 0) {
+    const hasAction =
+      ctx.hasSelectedText &&
+      (enabledFlyoutFormats(ctx).length > 0 ||
+        availableAnnotations(ctx).size > 0 ||
+        availableBlockStyles(ctx.allowedNodes).length > 1);
+    if (!point || !hasAction) {
       if (
         !isApplyingDirectActionRef.current &&
         !isInteractingRef.current &&
@@ -89,7 +140,7 @@ export function SelectionFlyoutPlugin({
       return;
     }
     savedSelectionRef.current = selection;
-    setFlyout({ actions, x: point.x, y: point.y });
+    setFlyout({ ctx, x: point.x, y: point.y });
   }, [allowedNodes, bindings, editor]);
 
   const scheduleRefresh = useCallback(() => {
@@ -138,34 +189,6 @@ export function SelectionFlyoutPlugin({
     };
   }, [editor, scheduleRefresh]);
 
-  useEffect(() => {
-    function closeChildOverlayInteraction(event: PointerEvent) {
-      if (!childOverlayOpenRef.current) return;
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (
-        target.closest("[data-editor-selection-action-popover]") ||
-        target.closest("[data-editor-selection-flyout]")
-      ) {
-        return;
-      }
-      childOverlayOpenRef.current = false;
-      setFlyout(null);
-    }
-
-    document.addEventListener(
-      "pointerdown",
-      closeChildOverlayInteraction,
-      true,
-    );
-    return () =>
-      document.removeEventListener(
-        "pointerdown",
-        closeChildOverlayInteraction,
-        true,
-      );
-  }, []);
-
   useEffect(
     () =>
       mergeRegister(
@@ -189,7 +212,7 @@ export function SelectionFlyoutPlugin({
     [],
   );
 
-  const applyDirectAction = (action: TextSelectionAction) => {
+  const applyDirectFormat = (command: EditorCommand) => {
     const savedSelection = savedSelectionRef.current;
     isApplyingDirectActionRef.current = true;
     editor.update(
@@ -201,13 +224,7 @@ export function SelectionFlyoutPlugin({
         }
         const selection = $getSelection();
         if (!$isRangeSelection(selection)) return;
-        if (action.format) {
-          selection.formatText(action.format);
-        } else if (action.id === "indent") {
-          editor.dispatchCommand(INDENT_CONTENT_COMMAND, undefined);
-        } else if (action.id === "outdent") {
-          editor.dispatchCommand(OUTDENT_CONTENT_COMMAND, undefined);
-        }
+        if (command.format) selection.formatText(command.format);
       },
       { discrete: true },
     );
@@ -226,14 +243,93 @@ export function SelectionFlyoutPlugin({
     [],
   );
 
-  const handleChildOverlayOpenChange = useCallback((open: boolean) => {
-    childOverlayOpenRef.current = open;
-  }, []);
+  // Folding a child overlay (block-style menu, link/glossary/comment dialog, or
+  // "More") via its own trigger must keep the flyout open. React Aria returns
+  // focus to the trigger and momentarily drops the editor selection, so a refresh
+  // can fire before it is restored and dismiss the flyout. Restore the saved
+  // selection and only then release the dismissal guard — unless an apply already
+  // closed the flyout, in which case leave it closed.
+  const releaseChildOverlay = useCallback(() => {
+    const saved = savedSelectionRef.current;
+    childOverlayClosingRef.current = true;
+    requestAnimationFrame(() => {
+      childOverlayOpenRef.current = false;
+      if (flyoutOpenRef.current && saved) {
+        editor.update(
+          () => {
+            try {
+              $setSelection(saved.clone());
+            } catch {
+              /* snapshot nodes no longer exist */
+            }
+          },
+          { discrete: true },
+        );
+        editor.focus();
+      }
+      requestAnimationFrame(() => {
+        childOverlayClosingRef.current = false;
+      });
+    });
+  }, [editor]);
+
+  const handleChildOverlayOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        childOverlayOpenRef.current = true;
+      } else {
+        releaseChildOverlay();
+      }
+    },
+    [releaseChildOverlay],
+  );
 
   const handleInputActionApplied = useCallback(() => {
     childOverlayOpenRef.current = false;
+    childOverlayClosingRef.current = false;
     setFlyout(null);
   }, []);
+
+  const handleBlockStyleApplied = useCallback(() => {
+    childOverlayOpenRef.current = false;
+    childOverlayClosingRef.current = false;
+    setFlyout(null);
+    requestAnimationFrame(() => editor.focus());
+  }, [editor]);
+
+  const handleMoreOpenChange = useCallback(
+    (open: boolean) => {
+      setMoreOpen(open);
+      if (open) {
+        childOverlayOpenRef.current = true;
+      } else {
+        releaseChildOverlay();
+      }
+    },
+    [releaseChildOverlay],
+  );
+
+  const runMoreCommand = useCallback(
+    (command: EditorCommand) => {
+      if (!flyout) return;
+      const savedSelection = savedSelectionRef.current;
+      editor.update(
+        () => {
+          try {
+            if (savedSelection) $setSelection(savedSelection.clone());
+          } catch {
+            /* selection no longer resolvable */
+          }
+        },
+        { discrete: true },
+      );
+      command.run(flyout.ctx);
+      setMoreOpen(false);
+      handleInputActionApplied();
+      requestAnimationFrame(() => editor.focus());
+    },
+    [editor, flyout, handleInputActionApplied],
+  );
 
   const startFlyoutInteraction = () => {
     isInteractingRef.current = true;
@@ -245,14 +341,100 @@ export function SelectionFlyoutPlugin({
     });
   };
 
-  const hasAction = (id: TextSelectionAction["id"]) =>
-    flyout?.actions.some((action) => action.id === id) ?? false;
-  const formatActions =
-    flyout?.actions.filter((action) => action.group === "format") ?? [];
-  const layoutActions =
-    flyout?.actions.filter((action) => action.group === "layout") ?? [];
-  const hasInsertActions =
-    hasAction("link") || hasAction("glossary") || hasAction("comment");
+  const ctx = flyout?.ctx ?? null;
+  const formatCommands = ctx ? enabledFlyoutFormats(ctx) : [];
+  const annotations = ctx ? availableAnnotations(ctx) : new Set<string>();
+  const hasBlockStyles = ctx
+    ? availableBlockStyles(ctx.allowedNodes).length > 1
+    : false;
+
+  // Inline segments in order: Turn-into, formats, annotate, More.
+  const segments: { readonly key: string; readonly node: React.ReactNode }[] =
+    [];
+  if (ctx && hasBlockStyles) {
+    segments.push({
+      key: "blockStyle",
+      node: (
+        <BlockStyleControl
+          ctx={ctx}
+          variant="compact"
+          getSelectionSnapshot={getSavedSelectionSnapshot}
+          onOpenChange={handleChildOverlayOpenChange}
+          onApplied={handleBlockStyleApplied}
+          shouldCloseOnInteractOutside={
+            shouldChildOverlayCloseOnInteractOutside
+          }
+        />
+      ),
+    });
+  }
+  if (ctx && formatCommands.length > 0) {
+    segments.push({
+      key: "inlineFormat",
+      node: (
+        <div className="flex items-center gap-1">
+          {formatCommands.map((command) => (
+            <ToolbarButton
+              key={command.id}
+              icon={command.icon}
+              label={command.label}
+              isActive={command.isActive(ctx)}
+              onPress={() => applyDirectFormat(command)}
+            />
+          ))}
+        </div>
+      ),
+    });
+  }
+  if (annotations.size > 0) {
+    segments.push({
+      key: "annotate",
+      node: (
+        <div className="flex items-center gap-1">
+          {annotations.has("link") ? (
+            <LinkButton
+              getSelectionSnapshot={getSavedSelectionSnapshot}
+              onApplied={handleInputActionApplied}
+              onDialogOpenChange={handleChildOverlayOpenChange}
+            />
+          ) : null}
+          {annotations.has("glossary") ? (
+            <GlossaryButton
+              getSelectionSnapshot={getSavedSelectionSnapshot}
+              onApplied={handleInputActionApplied}
+              onDialogOpenChange={handleChildOverlayOpenChange}
+            />
+          ) : null}
+          {annotations.has("comment") ? (
+            <CommentButton
+              getSelectionSnapshot={getSavedSelectionSnapshot}
+              onApplied={handleInputActionApplied}
+              onDialogOpenChange={handleChildOverlayOpenChange}
+            />
+          ) : null}
+        </div>
+      ),
+    });
+  }
+  if (ctx && surfaceCommands(ctx, "flyout", "more").length > 0) {
+    segments.push({
+      key: "more",
+      node: (
+        <MoreMenu
+          ctx={ctx}
+          isOpen={moreOpen}
+          label="Selection"
+          onOpenChange={handleMoreOpenChange}
+          onRun={runMoreCommand}
+          shouldCloseOnInteractOutside={
+            shouldChildOverlayCloseOnInteractOutside
+          }
+          surface="flyout"
+          variant="compact"
+        />
+      ),
+    });
+  }
 
   return (
     <>
@@ -277,12 +459,12 @@ export function SelectionFlyoutPlugin({
         onOpenChange={(open) => {
           if (!open && !childOverlayOpenRef.current) setFlyout(null);
         }}
-        shouldCloseOnInteractOutside={(element) => {
-          if (element.closest("[data-editor-selection-action-popover]")) {
-            return false;
-          }
-          return !childOverlayOpenRef.current;
-        }}
+        shouldCloseOnInteractOutside={(element) =>
+          shouldSelectionFlyoutCloseOnInteractOutside(element, {
+            childOverlayClosing: childOverlayClosingRef.current,
+            childOverlayOpen: childOverlayOpenRef.current,
+          })
+        }
         placement="top"
         offset={8}
         className="z-[50] rounded-box border border-base-300 bg-base-100 p-1 shadow-lg data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"
@@ -296,50 +478,21 @@ export function SelectionFlyoutPlugin({
           aria-label="Selected text actions"
           className="flex items-center gap-1"
         >
-          {formatActions.map((action) => (
-            <ToolbarButton
-              key={action.id}
-              icon={action.icon}
-              label={action.label}
-              isActive={action.isActive}
-              onPress={() => applyDirectAction(action)}
-            />
+          {segments.map((segment, index) => (
+            <span key={segment.key} className="flex items-center gap-1">
+              {index > 0 ? <ToolbarDivider /> : null}
+              {segment.node}
+            </span>
           ))}
-          {layoutActions.length > 0 ? <ToolbarDivider /> : null}
-          {layoutActions.map((action) => (
-            <ToolbarButton
-              key={action.id}
-              icon={action.icon}
-              label={action.label}
-              onPress={() => applyDirectAction(action)}
-            />
-          ))}
-          {formatActions.length > 0 && hasInsertActions ? (
-            <ToolbarDivider />
-          ) : null}
-          {hasAction("link") ? (
-            <LinkButton
-              getSelectionSnapshot={getSavedSelectionSnapshot}
-              onApplied={handleInputActionApplied}
-              onDialogOpenChange={handleChildOverlayOpenChange}
-            />
-          ) : null}
-          {hasAction("glossary") ? (
-            <GlossaryButton
-              getSelectionSnapshot={getSavedSelectionSnapshot}
-              onApplied={handleInputActionApplied}
-              onDialogOpenChange={handleChildOverlayOpenChange}
-            />
-          ) : null}
-          {hasAction("comment") ? (
-            <CommentButton
-              getSelectionSnapshot={getSavedSelectionSnapshot}
-              onApplied={handleInputActionApplied}
-              onDialogOpenChange={handleChildOverlayOpenChange}
-            />
-          ) : null}
         </AriaToolbar>
       </AriaPopover>
     </>
+  );
+}
+
+/** Inline formats enabled for the current selection in the flyout. */
+function enabledFlyoutFormats(ctx: CommandContext): readonly EditorCommand[] {
+  return surfaceCommands(ctx, "flyout", "primary").filter(
+    (command) => command.group === "inlineFormat" && command.isEnabled(ctx),
   );
 }

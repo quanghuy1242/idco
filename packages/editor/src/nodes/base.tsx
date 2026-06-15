@@ -19,7 +19,7 @@ import type {
   RichTextEditorNode,
   RichTextEditorPostOption,
 } from "../model/schema";
-import { ChromeBadge, ChromeButton } from "./chrome";
+import { BlockChrome, ChromeButton } from "./chrome";
 
 export const INSERT_RICH_TEXT_NODE_COMMAND: LexicalCommand<RichTextEditorNode> =
   createCommand("INSERT_RICH_TEXT_NODE_COMMAND");
@@ -192,21 +192,13 @@ export function BlockShell({
   const remove = useRemoveNode(nodeKey);
   return (
     <div className="group/block relative rounded-box border border-base-300 bg-base-100">
-      <div className="pointer-events-none absolute -top-2.5 left-3 z-10 opacity-0 transition-opacity group-hover/block:opacity-100 group-focus-within/block:opacity-100">
-        <ChromeBadge icon={icon} label={label} />
-      </div>
-      <div className="absolute -top-2.5 right-2 z-10 flex items-center gap-1">
-        {persistentActions}
-        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover/block:opacity-100 group-focus-within/block:opacity-100">
-          {actions}
-          <ChromeButton
-            icon="X"
-            label={`Remove ${label}`}
-            intent="danger"
-            onPress={remove}
-          />
-        </div>
-      </div>
+      <BlockChrome
+        actions={actions}
+        icon={icon}
+        label={label}
+        onRemove={remove}
+        persistentActions={persistentActions}
+      />
       <div className={padded ? "p-3" : ""}>{children}</div>
     </div>
   );

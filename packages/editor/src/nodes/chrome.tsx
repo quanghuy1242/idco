@@ -11,8 +11,10 @@ import { Button as AriaButton } from "react-aria-components";
 
 /** Surface shared by every chrome element: a light floating pill. */
 const CHROME_SURFACE = "border border-base-300 bg-base-100 shadow-sm";
-const CHROME_INLINE_PILL =
-  "flex h-6 min-h-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase leading-none tracking-wide";
+const CHROME_BADGE_PILL =
+  "flex h-6 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide";
+const CHROME_SELECT_PILL =
+  "flex h-6 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase leading-none tracking-wide";
 
 export type ChromeIntent = "neutral" | "primary" | "danger";
 
@@ -97,7 +99,7 @@ export function ChromeBadge({
   return (
     <span
       className={[
-        `${CHROME_INLINE_PILL} text-base-content/60`,
+        `${CHROME_BADGE_PILL} text-base-content/60`,
         CHROME_SURFACE,
         className ?? "",
       ]
@@ -107,6 +109,64 @@ export function ChromeBadge({
       <NavIcon name={icon} variant="timeline" />
       {label}
     </span>
+  );
+}
+
+export function BlockChrome({
+  actions,
+  icon,
+  label,
+  onRemove,
+  persistentActions,
+  removeLabel = `Remove ${label}`,
+  visibility = "hover",
+}: {
+  readonly actions?: ReactNode;
+  readonly icon: string;
+  readonly label: string;
+  readonly onRemove?: () => void;
+  readonly persistentActions?: ReactNode;
+  readonly removeLabel?: string;
+  readonly visibility?: "hover" | "visible";
+}) {
+  const revealClass =
+    visibility === "hover"
+      ? "opacity-0 transition-opacity group-hover/block:opacity-100 group-focus-within/block:opacity-100"
+      : "";
+
+  return (
+    <>
+      <div
+        className={[
+          "pointer-events-none absolute -top-2.5 left-3 z-10",
+          revealClass,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        <ChromeBadge icon={icon} label={label} />
+      </div>
+      <div className="pointer-events-auto absolute -top-2.5 right-2 z-10 flex items-center gap-1">
+        {persistentActions}
+        {actions || onRemove ? (
+          <div
+            className={["flex items-center gap-1", revealClass]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            {actions}
+            {onRemove ? (
+              <ChromeButton
+                icon="X"
+                label={removeLabel}
+                intent="danger"
+                onPress={onRemove}
+              />
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -141,7 +201,7 @@ export function ChromeSelect<T extends string>({
     <MenuTrigger onOpenChange={onOpenChange}>
       <AriaButton
         aria-label={label}
-        className={`${CHROME_INLINE_PILL} text-base-content/70 transition hover:text-base-content ${CHROME_SURFACE}`}
+        className={`${CHROME_SELECT_PILL} text-base-content/70 transition hover:text-base-content ${CHROME_SURFACE}`}
       >
         {selected?.icon ? (
           <NavIcon name={selected.icon} variant="timeline" />

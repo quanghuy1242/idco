@@ -27,15 +27,13 @@ import {
 import { useContext, useEffect, useRef, useState } from "react";
 import { Button as AriaButton } from "react-aria-components";
 import {
-  editorInsertActions,
-  type EditorInsertAction,
-} from "../model/insert-actions";
+  $readCommandContext,
+  contextCommands,
+  EMPTY_SELECTION_STATE,
+  type CommandContext,
+  type EditorCommand,
+} from "../model/commands";
 import { moveArrayItem } from "../model/layout";
-import {
-  enabledTextSelectionActions,
-  readTextSelectionContext,
-  type TextSelectionAction,
-} from "../model/selection-actions";
 import { RichTextEditorBindingsContext } from "../nodes";
 import { EditorTableNode } from "../nodes/table-node";
 import {
@@ -65,17 +63,40 @@ type SelectionMenuState = {
   readonly kind: "selection";
   readonly x: number;
   readonly y: number;
-  readonly actions: readonly TextSelectionAction[];
+  readonly commands: readonly EditorCommand[];
+  readonly ctx: CommandContext;
   readonly selection: BaseSelection | null;
 };
 
 type MenuState = BlockMenuState | SelectionMenuState;
 
 type CachedSelectionMenu = {
-  readonly actions: readonly TextSelectionAction[];
+  readonly commands: readonly EditorCommand[];
+  readonly ctx: CommandContext;
   readonly rects: readonly CachedSelectionRect[];
   readonly selection: BaseSelection | null;
 };
+
+/**
+ * The context menu over a text selection offers inline formats + indent/outdent
+ * (not annotate/insert). Read the available context commands for those groups.
+ */
+function $readSelectionMenuCommands(input: {
+  readonly editor: CommandContext["editor"];
+  readonly allowedNodes: readonly string[];
+  readonly bindings: CommandContext["bindings"];
+}): {
+  readonly ctx: CommandContext;
+  readonly commands: readonly EditorCommand[];
+} {
+  const ctx = $readCommandContext(input);
+  const commands = contextCommands(ctx).filter(
+    (command) =>
+      (command.group === "inlineFormat" || command.group === "indent") &&
+      command.isEnabled(ctx),
+  );
+  return { commands, ctx };
+}
 
 type CachedSelectionRect = {
   readonly bottom: number;
@@ -127,15 +148,14 @@ export function ContextMenuPlugin({
         right: rect.right,
         top: rect.top,
       }));
-      const { selection, textActions } = editor.getEditorState().read(() => ({
+      const { commands, ctx, selection } = editor.getEditorState().read(() => ({
+        ...$readSelectionMenuCommands({ allowedNodes, bindings, editor }),
         selection: $getSelection()?.clone() ?? null,
-        textActions: enabledTextSelectionActions(
-          readTextSelectionContext({ allowedNodes, bindings }),
-        ).filter((action) => action.group !== "insert"),
       }));
-      if (textActions.length > 0 && rects.length > 0) {
+      if (commands.length > 0 && rects.length > 0) {
         cachedSelectionMenuRef.current = {
-          actions: textActions,
+          commands,
+          ctx,
           rects,
           selection,
         };
@@ -171,14 +191,14 @@ export function ContextMenuPlugin({
     if (!root) return;
     const rootElement = root;
     function onContextMenu(event: MouseEvent) {
-      const { selection: textSelection, textActions } = editor
-        .getEditorState()
-        .read(() => ({
-          selection: $getSelection()?.clone() ?? null,
-          textActions: enabledTextSelectionActions(
-            readTextSelectionContext({ allowedNodes, bindings }),
-          ).filter((action) => action.group !== "insert"),
-        }));
+      const {
+        commands: textCommands,
+        ctx: textCtx,
+        selection: textSelection,
+      } = editor.getEditorState().read(() => ({
+        ...$readSelectionMenuCommands({ allowedNodes, bindings, editor }),
+        selection: $getSelection()?.clone() ?? null,
+      }));
       const cachedSelectionMenu = cachedSelectionMenuRef.current;
       const cachedSelectionHit =
         cachedSelectionMenu &&
@@ -188,7 +208,7 @@ export function ContextMenuPlugin({
           event.clientY,
         );
       if (
-        (textActions.length > 0 &&
+        (textCommands.length > 0 &&
           pointIntersectsSelectedText(
             rootElement,
             event.clientX,
@@ -198,10 +218,11 @@ export function ContextMenuPlugin({
       ) {
         const selectionMenu = cachedSelectionHit
           ? cachedSelectionMenu
-          : { actions: textActions, selection: textSelection };
+          : { commands: textCommands, ctx: textCtx, selection: textSelection };
         event.preventDefault();
         setMenu({
-          actions: selectionMenu.actions,
+          commands: selectionMenu.commands,
+          ctx: selectionMenu.ctx,
           kind: "selection",
           selection: selectionMenu.selection,
           x: event.clientX,
@@ -308,7 +329,7 @@ export function ContextMenuPlugin({
     });
   }
 
-  function applyInsertAction(action: EditorInsertAction) {
+  function applyInsertAction(command: EditorCommand) {
     if (!menu || menu.kind !== "block") return;
     editor.update(
       () => {
@@ -317,7 +338,15 @@ export function ContextMenuPlugin({
         const paragraph = $createParagraphNode();
         block.insertAfter(paragraph);
         paragraph.select();
-        action.run(editor);
+        command.run({
+          ...EMPTY_SELECTION_STATE,
+          allowedNodes,
+          bindings,
+          canFormat: false,
+          canRedo: false,
+          canUndo: false,
+          editor,
+        });
       },
       { discrete: true },
     );
@@ -325,7 +354,7 @@ export function ContextMenuPlugin({
     requestAnimationFrame(() => editor.focus());
   }
 
-  function applySelectionAction(action: TextSelectionAction) {
+  function applySelectionAction(command: EditorCommand) {
     const savedSelection = menu?.kind === "selection" ? menu.selection : null;
     editor.update(
       () => {
@@ -336,11 +365,11 @@ export function ContextMenuPlugin({
         }
         const selection = $getSelection();
         if (!$isRangeSelection(selection)) return;
-        if (action.format) {
-          selection.formatText(action.format);
-        } else if (action.id === "indent") {
+        if (command.format) {
+          selection.formatText(command.format);
+        } else if (command.id === "indent") {
           editor.dispatchCommand(INDENT_CONTENT_COMMAND, undefined);
-        } else if (action.id === "outdent") {
+        } else if (command.id === "outdent") {
           editor.dispatchCommand(OUTDENT_CONTENT_COMMAND, undefined);
         }
       },
@@ -354,10 +383,19 @@ export function ContextMenuPlugin({
   const canMerge = (table?.mergeCellKeys.length ?? 0) >= 2;
   const canMoveLeft = table ? table.colIndex > 0 : false;
   const canMoveRight = table ? table.colIndex < table.colCount - 1 : false;
-  const selectionActions = menu?.kind === "selection" ? menu.actions : null;
-  const insertActions =
+  const selectionCommands = menu?.kind === "selection" ? menu.commands : null;
+  const selectionCtx = menu?.kind === "selection" ? menu.ctx : null;
+  const insertCommands =
     menu?.kind === "block"
-      ? editorInsertActions({ allowedNodes, bindings })
+      ? contextCommands({
+          ...EMPTY_SELECTION_STATE,
+          allowedNodes,
+          bindings,
+          canFormat: false,
+          canRedo: false,
+          canUndo: false,
+          editor,
+        }).filter((command) => command.group === "insert")
       : [];
 
   return (
@@ -376,26 +414,28 @@ export function ContextMenuPlugin({
       />
       <Menu
         aria-label={
-          selectionActions ? "Selected text actions" : "Block actions"
+          selectionCommands ? "Selected text actions" : "Block actions"
         }
         data-editor-context-menu="true"
         className="w-52"
       >
-        {selectionActions ? (
-          selectionActions.map((action) => (
+        {selectionCommands ? (
+          selectionCommands.map((command) => (
             <MenuItem
-              key={action.id}
-              id={action.id}
-              textValue={action.label}
-              onAction={() => applySelectionAction(action)}
+              key={command.id}
+              id={command.id}
+              textValue={command.label}
+              onAction={() => applySelectionAction(command)}
             >
               <span
                 className={`flex items-center gap-2.5 ${
-                  action.isActive ? "text-primary" : ""
+                  selectionCtx && command.isActive(selectionCtx)
+                    ? "text-primary"
+                    : ""
                 }`}
               >
-                <NavIcon name={action.icon} />
-                {action.label}
+                <NavIcon name={command.icon} />
+                {command.label}
               </span>
             </MenuItem>
           ))
@@ -411,16 +451,16 @@ export function ContextMenuPlugin({
                 Insert below
               </span>
             </MenuItem>
-            {insertActions.map((action) => (
+            {insertCommands.map((command) => (
               <MenuItem
-                key={`insert-${action.id}`}
-                id={`insert-${action.id}`}
-                textValue={action.label}
-                onAction={() => applyInsertAction(action)}
+                key={`insert-${command.id}`}
+                id={`insert-${command.id}`}
+                textValue={command.label}
+                onAction={() => applyInsertAction(command)}
               >
                 <span className="flex items-center gap-2.5">
-                  <NavIcon name={action.icon} />
-                  {action.label}
+                  <NavIcon name={command.icon} />
+                  {command.label}
                 </span>
               </MenuItem>
             ))}

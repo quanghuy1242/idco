@@ -11,14 +11,8 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import { Menu, MenuItem, MenuTrigger, NavIcon } from "@quanghuy1242/idco-ui";
 import { $getNearestNodeFromDOMNode, $getNodeByKey } from "lexical";
 import { useEffect, useRef, useState } from "react";
-import { Button as AriaButton } from "react-aria-components";
 import { createPortal } from "react-dom";
-import {
-  ChromeBadge,
-  ChromeBar,
-  ChromeButton,
-  ChromeSelect,
-} from "../nodes/chrome";
+import { BlockChrome, ChromeButton, ChromeSelect } from "../nodes/chrome";
 import {
   resizeColumnWidths,
   scaleColumnWidths,
@@ -513,73 +507,74 @@ export function TableControlsPlugin() {
         />
       ) : null}
 
-      {/* Whole-table chrome: layout mode + structure toggles + remove, mirroring
-          the decorator-block chrome, right-aligned to the table's top edge. */}
+      {/* Whole-table chrome uses the same top-left badge and top-right action
+          slots as decorator blocks; only the host positioning is portalled. */}
       <div
-        className="pointer-events-auto absolute -translate-x-full"
-        style={{ left: geom.right - 6, top: geom.top + 6 }}
+        className="pointer-events-none absolute"
+        style={{
+          left: geom.left,
+          top: geom.top,
+          width: geom.right - geom.left,
+        }}
       >
-        <ChromeBar>
-          <ChromeBadge icon="Table" label="Table" />
-          {meta ? (
-            <ChromeSelect
-              label="Table layout"
-              value={meta.layout}
-              options={TABLE_LAYOUTS}
-              onChange={changeLayout}
-              onOpenChange={(open) => {
-                pinned.current = open;
-              }}
-            />
-          ) : null}
-          <MenuTrigger
-            onOpenChange={(open) => {
-              pinned.current = open;
-            }}
-          >
-            <AriaButton
-              aria-label="Table structure"
-              className="grid size-6 place-items-center rounded-full border border-base-300 bg-base-100 text-base-content/60 shadow-sm transition hover:text-base-content"
-            >
-              <NavIcon name="Settings" variant="timeline" />
-            </AriaButton>
-            <Menu
-              aria-label="Table structure"
-              className="w-52"
-              selectionMode="multiple"
-              selectedKeys={tableToggleKeys(meta)}
-              onSelectionChange={(keys) => applyToggleSelection(keys)}
-            >
-              <MenuItem id="header-row" textValue="Header row">
-                <ToggleRow
-                  on={meta?.headerRow}
-                  icon="Rows3"
-                  label="Header row"
+        <BlockChrome
+          icon="Table"
+          label="Table"
+          visibility="visible"
+          actions={
+            <>
+              {meta ? (
+                <ChromeSelect
+                  label="Table layout"
+                  value={meta.layout}
+                  options={TABLE_LAYOUTS}
+                  onChange={changeLayout}
+                  onOpenChange={(open) => {
+                    pinned.current = open;
+                  }}
                 />
-              </MenuItem>
-              <MenuItem id="header-column" textValue="Header column">
-                <ToggleRow
-                  on={meta?.headerColumn}
-                  icon="Columns3"
-                  label="Header column"
-                />
-              </MenuItem>
-              <MenuItem id="row-numbers" textValue="Numbered column">
-                <ToggleRow
-                  on={meta?.showRowNumbers}
-                  icon="ListOrdered"
-                  label="Numbered column"
-                />
-              </MenuItem>
-            </Menu>
-          </MenuTrigger>
-          <ChromeButton
-            icon="X"
-            label="Remove table"
-            intent="danger"
-            onPress={removeTable}
-          />
-        </ChromeBar>
+              ) : null}
+              <MenuTrigger
+                onOpenChange={(open) => {
+                  pinned.current = open;
+                }}
+              >
+                <ChromeButton icon="Settings" label="Table structure" />
+                <Menu
+                  aria-label="Table structure"
+                  className="w-52"
+                  selectionMode="multiple"
+                  selectedKeys={tableToggleKeys(meta)}
+                  onSelectionChange={(keys) => applyToggleSelection(keys)}
+                >
+                  <MenuItem id="header-row" textValue="Header row">
+                    <ToggleRow
+                      on={meta?.headerRow}
+                      icon="Rows3"
+                      label="Header row"
+                    />
+                  </MenuItem>
+                  <MenuItem id="header-column" textValue="Header column">
+                    <ToggleRow
+                      on={meta?.headerColumn}
+                      icon="Columns3"
+                      label="Header column"
+                    />
+                  </MenuItem>
+                  <MenuItem id="row-numbers" textValue="Numbered column">
+                    <ToggleRow
+                      on={meta?.showRowNumbers}
+                      icon="ListOrdered"
+                      label="Numbered column"
+                    />
+                  </MenuItem>
+                </Menu>
+              </MenuTrigger>
+            </>
+          }
+          removeLabel="Remove table"
+          onRemove={removeTable}
+        />
       </div>
     </div>,
     document.body,

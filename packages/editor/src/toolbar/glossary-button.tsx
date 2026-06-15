@@ -93,6 +93,7 @@ export function GlossaryButton({
           type="button"
           aria-label="Glossary term"
           isDisabled={isDisabled}
+          onMouseDown={(event) => event.preventDefault()}
           className="btn btn-sm btn-square btn-ghost"
         >
           <NavIcon name="BookA" />

@@ -8,7 +8,11 @@ import {
 import type { LexicalEditor } from "lexical";
 import { useCallback, useContext, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { editorInsertActions } from "../model/insert-actions";
+import {
+  EMPTY_SELECTION_STATE,
+  slashCommands,
+  type CommandContext,
+} from "../model/commands";
 import { RichTextEditorBindingsContext } from "../nodes";
 
 class SlashOption extends MenuOption {
@@ -38,9 +42,25 @@ export function SlashMenuPlugin({
   const triggerFn = useBasicTypeaheadTriggerMatch("/", { minLength: 0 });
 
   const options = useMemo(() => {
-    const all = editorInsertActions({ allowedNodes, bindings }).map(
-      (action) =>
-        new SlashOption(action.label, action.icon, action.keywords, action.run),
+    // Slash inserts are availability-gated by allowlist + bindings only, so a
+    // bare context (no live selection) is enough to enumerate them.
+    const ctx: CommandContext = {
+      ...EMPTY_SELECTION_STATE,
+      allowedNodes,
+      bindings,
+      canFormat: false,
+      canRedo: false,
+      canUndo: false,
+      editor,
+    };
+    const all = slashCommands(ctx).map(
+      (command) =>
+        new SlashOption(
+          command.label,
+          command.icon,
+          command.keywords ?? [],
+          (runEditor) => command.run({ ...ctx, editor: runEditor }),
+        ),
     );
     const normalized = (query ?? "").toLowerCase();
     if (!normalized) return all;
@@ -49,7 +69,7 @@ export function SlashMenuPlugin({
         option.label.toLowerCase().includes(normalized) ||
         option.keywords.some((keyword) => keyword.includes(normalized)),
     );
-  }, [allowedNodes, bindings, query]);
+  }, [allowedNodes, bindings, editor, query]);
 
   const onSelectOption = useCallback(
     (

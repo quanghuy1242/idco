@@ -51,7 +51,7 @@ export function Alert({ tone = "info", children }: AlertProps) {
       className={`alert ${alertToneClass[tone]} items-start`}
     >
       <AlertGlyph tone={tone} />
-      <span>{children}</span>
+      <span className="w-full">{children}</span>
     </div>
   );
 }
