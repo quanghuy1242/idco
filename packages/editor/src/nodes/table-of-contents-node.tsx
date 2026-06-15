@@ -1,5 +1,4 @@
 // DaisyUI 5: https://daisyui.com/components/input/
-/* eslint-disable no-underscore-dangle -- Lexical node subclasses use __ fields by convention. */
 
 import {
   RichTextTableOfContents,
@@ -15,7 +14,6 @@ import {
   type RichTextTocSide,
   type RichTextTocStyle,
 } from "@quanghuy1242/idco-lib";
-import type { ElementFormatType, NodeKey } from "lexical";
 import { useEffect, useMemo, useState } from "react";
 import {
   Button as AriaButton,
@@ -35,13 +33,12 @@ import {
   normalizeDocument,
 } from "../model/normalize";
 import type { RichTextEditorNode } from "../model/schema";
-import {
-  BlockShell,
-  RichTextDecoratorBlockNode,
-  useDecoratorNodeUpdater,
-  type SerializedRichTextDecoratorNode,
-} from "./base";
+import { BlockShell } from "./base";
 import { ChromeButton } from "./chrome";
+import {
+  defineDecoratorBlock,
+  type DecoratorBlockProps,
+} from "./decorator-block";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 
 type TocOption<T extends string> = {
@@ -82,36 +79,18 @@ const sideOptions: readonly TocOption<RichTextTocSide>[] = [
   { icon: "AlignRight", label: "Right", value: "right" },
 ];
 
-export class TableOfContentsNode extends RichTextDecoratorBlockNode {
-  static getType(): string {
-    return "table-of-contents";
-  }
-
-  static clone(node: TableOfContentsNode): TableOfContentsNode {
-    return new TableOfContentsNode(node.__data, node.__format, node.__key);
-  }
-
-  static importJSON(serializedNode: SerializedRichTextDecoratorNode) {
-    return new TableOfContentsNode(
-      normalizeTableOfContentsNode(serializedNode),
-      (serializedNode.format as ElementFormatType) || "",
-    );
-  }
-
-  decorate() {
-    return <TableOfContentsEditor nodeKey={this.__key} node={this.getData()} />;
-  }
-}
+export const TableOfContentsNode = defineDecoratorBlock({
+  Editor: TableOfContentsEditor,
+  normalize: normalizeTableOfContentsNode,
+  type: "table-of-contents",
+});
 
 function TableOfContentsEditor({
   node,
   nodeKey,
-}: {
-  readonly node: RichTextEditorNode;
-  readonly nodeKey: NodeKey;
-}) {
+  update: updateNode,
+}: DecoratorBlockProps) {
   const [editor] = useLexicalComposerContext();
-  const updateNode = useDecoratorNodeUpdater(nodeKey);
   const settings = normalizeTocSettings(node);
   const [document, setDocument] = useState<RichTextDocument>(() =>
     normalizeDocument(editor.getEditorState().toJSON()),

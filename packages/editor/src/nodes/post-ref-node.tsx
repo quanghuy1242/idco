@@ -1,48 +1,22 @@
 // DaisyUI 5: https://daisyui.com/components/card/
-/* eslint-disable no-underscore-dangle -- Lexical node subclasses use __ fields by convention. */
 
 import { NavIcon, ResourceSelector, Text } from "@quanghuy1242/idco-ui";
-import type { ElementFormatType, NodeKey } from "lexical";
 import { useContext } from "react";
 import { normalizePostRefNode } from "../model/normalize";
-import { stringValue, type RichTextEditorNode } from "../model/schema";
+import { stringValue } from "../model/schema";
+import { BlockShell, RichTextEditorBindingsContext } from "./base";
 import {
-  BlockShell,
-  RichTextDecoratorBlockNode,
-  RichTextEditorBindingsContext,
-  useDecoratorNodeUpdater,
-  type SerializedRichTextDecoratorNode,
-} from "./base";
+  defineDecoratorBlock,
+  type DecoratorBlockProps,
+} from "./decorator-block";
 
-export class PostRefNode extends RichTextDecoratorBlockNode {
-  static getType(): string {
-    return "post-ref";
-  }
+export const PostRefNode = defineDecoratorBlock({
+  Editor: PostRefEditor,
+  normalize: normalizePostRefNode,
+  type: "post-ref",
+});
 
-  static clone(node: PostRefNode): PostRefNode {
-    return new PostRefNode(node.__data, node.__format, node.__key);
-  }
-
-  static importJSON(serializedNode: SerializedRichTextDecoratorNode) {
-    return new PostRefNode(
-      normalizePostRefNode(serializedNode),
-      (serializedNode.format as ElementFormatType) || "",
-    );
-  }
-
-  decorate() {
-    return <PostRefEditor nodeKey={this.__key} node={this.getData()} />;
-  }
-}
-
-function PostRefEditor({
-  node,
-  nodeKey,
-}: {
-  readonly node: RichTextEditorNode;
-  readonly nodeKey: NodeKey;
-}) {
-  const updateNode = useDecoratorNodeUpdater(nodeKey);
+function PostRefEditor({ node, nodeKey, update }: DecoratorBlockProps) {
   const { postLibrary } = useContext(RichTextEditorBindingsContext);
   const postId = stringValue(node.postId) ?? "";
   const title = stringValue(node.title) ?? "";
@@ -74,9 +48,9 @@ function PostRefEditor({
           <ResourceSelector
             kind="record"
             value={postId}
-            onChange={(id) => updateNode({ postId: String(id) })}
+            onChange={(id) => update({ postId: String(id) })}
             onSelectOption={(option) =>
-              updateNode({
+              update({
                 postId: option.id,
                 title: option.label,
                 url: option.sublabel ?? "",

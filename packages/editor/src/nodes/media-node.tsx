@@ -1,56 +1,34 @@
 // DaisyUI 5: https://daisyui.com/components/card/
-/* eslint-disable no-underscore-dangle -- Lexical node subclasses use __ fields by convention. */
 
 import {
   FileDropzone,
+  Input,
   NavIcon,
   ResourceSelector,
   Text,
 } from "@quanghuy1242/idco-ui";
-import type { ElementFormatType, NodeKey } from "lexical";
 import { useContext, useEffect, useState } from "react";
+import { Button as AriaButton } from "react-aria-components";
 import { normalizeMediaNode } from "../model/normalize";
-import { stringValue, type RichTextEditorNode } from "../model/schema";
+import { stringValue } from "../model/schema";
 import {
   BlockShell,
   FieldLabel,
   OrDivider,
-  RichTextDecoratorBlockNode,
   RichTextEditorBindingsContext,
-  useDecoratorNodeUpdater,
-  type SerializedRichTextDecoratorNode,
 } from "./base";
-import { Button as AriaButton } from "react-aria-components";
+import {
+  defineDecoratorBlock,
+  type DecoratorBlockProps,
+} from "./decorator-block";
 
-export class MediaNode extends RichTextDecoratorBlockNode {
-  static getType(): string {
-    return "media";
-  }
+export const MediaNode = defineDecoratorBlock({
+  Editor: MediaEditor,
+  normalize: normalizeMediaNode,
+  type: "media",
+});
 
-  static clone(node: MediaNode): MediaNode {
-    return new MediaNode(node.__data, node.__format, node.__key);
-  }
-
-  static importJSON(serializedNode: SerializedRichTextDecoratorNode) {
-    return new MediaNode(
-      normalizeMediaNode(serializedNode),
-      (serializedNode.format as ElementFormatType) || "",
-    );
-  }
-
-  decorate() {
-    return <MediaEditor nodeKey={this.__key} node={this.getData()} />;
-  }
-}
-
-function MediaEditor({
-  node,
-  nodeKey,
-}: {
-  readonly node: RichTextEditorNode;
-  readonly nodeKey: NodeKey;
-}) {
-  const updateNode = useDecoratorNodeUpdater(nodeKey);
+function MediaEditor({ node, nodeKey, update }: DecoratorBlockProps) {
   const { mediaLibrary, onUploadMedia } = useContext(
     RichTextEditorBindingsContext,
   );
@@ -84,7 +62,7 @@ function MediaEditor({
       const nodes = await onUploadMedia(files);
       const uploaded = nodes?.find((candidate) => candidate.type === "media");
       if (uploaded) {
-        updateNode(normalizeMediaNode(uploaded));
+        update(normalizeMediaNode(uploaded));
         const url = stringValue(uploaded.previewUrl);
         if (url) setPreviewUrl(url);
       }
@@ -94,7 +72,7 @@ function MediaEditor({
   }
 
   function clearMedia() {
-    updateNode({ alt: "", caption: "", mediaId: "" });
+    update({ alt: "", caption: "", mediaId: "" });
     setPreviewUrl(null);
   }
 
@@ -122,18 +100,16 @@ function MediaEditor({
           )}
           <div className="grid gap-2">
             <FieldLabel>Alt text</FieldLabel>
-            <input
-              aria-label="Media alt text"
-              className="input input-bordered w-full"
+            <Input
+              ariaLabel="Media alt text"
               value={alt}
-              onChange={(event) => updateNode({ alt: event.target.value })}
+              onChange={(value) => update({ alt: value })}
             />
             <FieldLabel>Caption</FieldLabel>
-            <input
-              aria-label="Media caption"
-              className="input input-bordered w-full"
+            <Input
+              ariaLabel="Media caption"
               value={caption}
-              onChange={(event) => updateNode({ caption: event.target.value })}
+              onChange={(value) => update({ caption: value })}
             />
           </div>
           <div>
@@ -159,9 +135,9 @@ function MediaEditor({
             kind="media"
             value=""
             placeholder="Browse library…"
-            onChange={(id) => updateNode({ mediaId: String(id) })}
+            onChange={(id) => update({ mediaId: String(id) })}
             onSelectOption={(option) => {
-              updateNode({ alt: option.sublabel ?? alt, mediaId: option.id });
+              update({ alt: option.sublabel ?? alt, mediaId: option.id });
               if (option.image) setPreviewUrl(option.image);
             }}
             source={{

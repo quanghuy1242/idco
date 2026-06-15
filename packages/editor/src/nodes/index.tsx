@@ -16,28 +16,15 @@ import {
   type LexicalNode,
 } from "lexical";
 import { useEffect } from "react";
-import {
-  normalizeCalloutNode,
-  normalizeCodeBlockNode,
-  normalizeEmbedNode,
-  normalizeMediaNode,
-  normalizePostRefNode,
-  normalizeTableOfContentsNode,
-  textFromChildren,
-} from "../model/normalize";
+import { textFromChildren } from "../model/normalize";
 import {
   headingTag,
   stringValue,
   type RichTextEditorNode,
 } from "../model/schema";
 import { INSERT_RICH_TEXT_NODE_COMMAND } from "./base";
-import { CalloutNode } from "./callout-node";
-import { CodeBlockNode } from "./code-block-node";
-import { EmbedNode } from "./embed-node";
-import { MediaNode } from "./media-node";
-import { PostRefNode } from "./post-ref-node";
 import { $createEditorHeadingNode } from "./heading-node";
-import { TableOfContentsNode } from "./table-of-contents-node";
+import { decoratorNodeDefinition } from "./registry";
 
 export {
   INSERT_RICH_TEXT_NODE_COMMAND,
@@ -45,19 +32,19 @@ export {
   type RichTextEditorBindings,
   type RichTextEditorComment,
 } from "./base";
-export { CalloutNode, CodeBlockNode, EmbedNode, MediaNode, PostRefNode };
+export { CalloutNode } from "./callout-node";
+export { CodeBlockNode } from "./code-block-node";
+export { EmbedNode } from "./embed-node";
+export { MediaNode } from "./media-node";
+export { PostRefNode } from "./post-ref-node";
 export { EditorHeadingNode } from "./heading-node";
 export { TableOfContentsNode } from "./table-of-contents-node";
-
-/** Lexical node classes registered with the composer. */
-export const RICH_TEXT_DECORATOR_NODES = [
-  CalloutNode,
-  CodeBlockNode,
-  EmbedNode,
-  MediaNode,
-  PostRefNode,
-  TableOfContentsNode,
-] as const;
+export {
+  DECORATOR_NODE_DEFINITIONS,
+  RICH_TEXT_DECORATOR_NODES,
+  decoratorNodeDefinition,
+  type DecoratorNodeDefinition,
+} from "./registry";
 
 export function richTextNodeToLexicalNode(
   node: RichTextEditorNode,
@@ -83,23 +70,9 @@ export function richTextNodeToLexicalNode(
     );
     return heading;
   }
-  if (node.type === "callout") {
-    return new CalloutNode(normalizeCalloutNode(node));
-  }
-  if (node.type === "code-block") {
-    return new CodeBlockNode(normalizeCodeBlockNode(node));
-  }
-  if (node.type === "embed") {
-    return new EmbedNode(normalizeEmbedNode(node));
-  }
-  if (node.type === "media") {
-    return new MediaNode(normalizeMediaNode(node));
-  }
-  if (node.type === "post-ref") {
-    return new PostRefNode(normalizePostRefNode(node));
-  }
-  if (node.type === "table-of-contents") {
-    return new TableOfContentsNode(normalizeTableOfContentsNode(node));
+  const decorator = decoratorNodeDefinition(node.type);
+  if (decorator) {
+    return new decorator.NodeClass(decorator.normalize(node));
   }
   return null;
 }

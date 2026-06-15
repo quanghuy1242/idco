@@ -1,4 +1,4 @@
-import { NavIcon, Tooltip } from "@quanghuy1242/idco-ui";
+import { Input, NavIcon, Tooltip } from "@quanghuy1242/idco-ui";
 import { TOGGLE_LINK_COMMAND } from "@lexical/link";
 import { $isLinkNode } from "@lexical/link";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -6,11 +6,11 @@ import { $getSelection, $isRangeSelection, type BaseSelection } from "lexical";
 import { useState } from "react";
 import {
   Button as AriaButton,
-  Dialog as AriaDialog,
   DialogTrigger as AriaDialogTrigger,
-  Popover as AriaPopover,
 } from "react-aria-components";
 import { useSelectionRestore } from "../hooks/use-selection-restore";
+import { FieldLabel } from "../nodes/base";
+import { EditorPopover } from "./editor-popover";
 
 /**
  * Toolbar control for inline links: opens a small React Aria popover with a URL
@@ -97,50 +97,41 @@ export function LinkButton({
           <NavIcon name="Link" />
         </AriaButton>
       </Tooltip>
-      <AriaPopover
-        data-editor-selection-action-popover="true"
-        placement="bottom"
-        offset={8}
-        className="popover-panel z-[60] w-72 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"
-      >
-        <AriaDialog className="outline-none">
-          {({ close }) => (
-            <form
-              className="grid gap-2 p-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                apply(close);
-              }}
-            >
-              <span className="text-xs font-medium text-base-content/70">
-                Link URL
-              </span>
-              <input
-                aria-label="Link URL"
-                autoFocus
-                value={url}
-                placeholder="https://example.com"
-                onChange={(event) => setUrl(event.target.value)}
-                className="input input-sm input-bordered w-full"
-              />
-              <div className="flex items-center justify-end gap-2">
-                {hasLink ? (
-                  <AriaButton
-                    type="button"
-                    onPress={() => remove(close)}
-                    className="btn btn-sm btn-ghost text-error"
-                  >
-                    Remove
-                  </AriaButton>
-                ) : null}
-                <AriaButton type="submit" className="btn btn-sm btn-primary">
-                  Apply
+      <EditorPopover isSelectionAction width="sm">
+        {({ close }) => (
+          <form
+            className="grid gap-2 p-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              apply(close);
+            }}
+          >
+            <FieldLabel>Link URL</FieldLabel>
+            <Input
+              ariaLabel="Link URL"
+              autoFocus
+              size="sm"
+              value={url}
+              placeholder="https://example.com"
+              onChange={setUrl}
+            />
+            <div className="flex items-center justify-end gap-2">
+              {hasLink ? (
+                <AriaButton
+                  type="button"
+                  onPress={() => remove(close)}
+                  className="btn btn-sm btn-ghost text-error"
+                >
+                  Remove
                 </AriaButton>
-              </div>
-            </form>
-          )}
-        </AriaDialog>
-      </AriaPopover>
+              ) : null}
+              <AriaButton type="submit" className="btn btn-sm btn-primary">
+                Apply
+              </AriaButton>
+            </div>
+          </form>
+        )}
+      </EditorPopover>
     </AriaDialogTrigger>
   );
 }

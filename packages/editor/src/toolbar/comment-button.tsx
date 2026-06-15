@@ -1,16 +1,16 @@
-import { NavIcon, Tooltip } from "@quanghuy1242/idco-ui";
+import { NavIcon, TextArea, Tooltip } from "@quanghuy1242/idco-ui";
 import { $wrapSelectionInMarkNode } from "@lexical/mark";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $getSelection, $isRangeSelection, type BaseSelection } from "lexical";
 import { useContext, useRef, useState } from "react";
 import {
   Button as AriaButton,
-  Dialog as AriaDialog,
   DialogTrigger as AriaDialogTrigger,
-  Popover as AriaPopover,
 } from "react-aria-components";
 import { useSelectionRestore } from "../hooks/use-selection-restore";
+import { FieldLabel } from "../nodes/base";
 import { RichTextEditorBindingsContext } from "../nodes";
+import { EditorPopover } from "./editor-popover";
 
 function commentId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -98,54 +98,45 @@ export function CommentButton({
           <NavIcon name="MessageSquare" />
         </AriaButton>
       </Tooltip>
-      <AriaPopover
-        data-editor-selection-action-popover="true"
-        placement="bottom"
-        offset={8}
-        className="popover-panel z-[60] w-72 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"
-      >
-        <AriaDialog className="outline-none">
-          {({ close }) => (
-            <form
-              className="grid gap-2 p-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                apply(close);
-              }}
-            >
-              {hasSelection ? (
-                <>
-                  <span className="text-xs font-medium text-base-content/70">
-                    Comment on “{quoteRef.current}”
-                  </span>
-                  <textarea
-                    aria-label="Comment text"
-                    autoFocus
-                    value={body}
-                    rows={3}
-                    placeholder="Add a comment…"
-                    onChange={(event) => setBody(event.target.value)}
-                    className="textarea textarea-bordered textarea-sm w-full"
-                  />
-                  <div className="flex justify-end">
-                    <AriaButton
-                      type="submit"
-                      isDisabled={body.trim() === ""}
-                      className="btn btn-sm btn-primary"
-                    >
-                      Comment
-                    </AriaButton>
-                  </div>
-                </>
-              ) : (
-                <span className="text-xs text-base-content/60">
-                  Select some text to comment on it.
-                </span>
-              )}
-            </form>
-          )}
-        </AriaDialog>
-      </AriaPopover>
+      <EditorPopover isSelectionAction width="sm">
+        {({ close }) => (
+          <form
+            className="grid gap-2 p-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              apply(close);
+            }}
+          >
+            {hasSelection ? (
+              <>
+                <FieldLabel>Comment on “{quoteRef.current}”</FieldLabel>
+                <TextArea
+                  ariaLabel="Comment text"
+                  autoFocus
+                  size="sm"
+                  rows={3}
+                  value={body}
+                  placeholder="Add a comment…"
+                  onChange={setBody}
+                />
+                <div className="flex justify-end">
+                  <AriaButton
+                    type="submit"
+                    isDisabled={body.trim() === ""}
+                    className="btn btn-sm btn-primary"
+                  >
+                    Comment
+                  </AriaButton>
+                </div>
+              </>
+            ) : (
+              <span className="text-xs text-base-content/60">
+                Select some text to comment on it.
+              </span>
+            )}
+          </form>
+        )}
+      </EditorPopover>
     </AriaDialogTrigger>
   );
 }

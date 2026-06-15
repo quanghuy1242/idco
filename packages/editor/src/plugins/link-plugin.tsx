@@ -1,4 +1,4 @@
-import { NavIcon } from "@quanghuy1242/idco-ui";
+import { Input, NavIcon } from "@quanghuy1242/idco-ui";
 import { $isLinkNode, type LinkNode } from "@lexical/link";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -6,11 +6,11 @@ import { $getNearestNodeFromDOMNode, $getNodeByKey } from "lexical";
 import { useEffect, useState } from "react";
 import {
   Button as AriaButton,
-  Dialog as AriaDialog,
   DialogTrigger as AriaDialogTrigger,
-  Popover as AriaPopover,
 } from "react-aria-components";
 import { useSelectionRestore } from "../hooks/use-selection-restore";
+import { FieldLabel } from "../nodes/base";
+import { EditorPopover } from "../toolbar/editor-popover";
 
 type LinkTarget = {
   readonly key: string;
@@ -117,59 +117,51 @@ function LinkEditorPlugin() {
         className="pointer-events-none fixed size-0 opacity-0"
         style={{ left: target?.x ?? 0, top: target?.y ?? 0 }}
       />
-      <AriaPopover
-        placement="bottom start"
-        offset={6}
-        className="popover-panel z-[60] w-80 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"
-      >
-        <AriaDialog className="outline-none">
-          {({ close }) => (
-            <form
-              className="grid gap-2 p-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                save(close);
-              }}
-            >
-              <span className="text-xs font-medium text-base-content/70">
-                Link URL
-              </span>
-              <input
-                aria-label="Link URL"
-                autoFocus
-                value={draft}
-                placeholder="https://example.com"
-                onChange={(event) => setDraft(event.target.value)}
-                className="input input-sm input-bordered w-full"
-              />
-              <div className="flex items-center justify-between gap-2">
-                <a
-                  href={draft || "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn btn-sm btn-ghost gap-1.5"
+      <EditorPopover width="md" placement="bottom start" offset={6}>
+        {({ close }) => (
+          <form
+            className="grid gap-2 p-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              save(close);
+            }}
+          >
+            <FieldLabel>Link URL</FieldLabel>
+            <Input
+              ariaLabel="Link URL"
+              autoFocus
+              size="sm"
+              value={draft}
+              placeholder="https://example.com"
+              onChange={setDraft}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <a
+                href={draft || "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-sm btn-ghost gap-1.5"
+              >
+                <NavIcon name="ExternalLink" />
+                Open
+              </a>
+              <div className="flex items-center gap-2">
+                <AriaButton
+                  type="button"
+                  onPress={() => unwrap(close)}
+                  className="btn btn-sm btn-ghost gap-1.5 text-error"
                 >
-                  <NavIcon name="ExternalLink" />
-                  Open
-                </a>
-                <div className="flex items-center gap-2">
-                  <AriaButton
-                    type="button"
-                    onPress={() => unwrap(close)}
-                    className="btn btn-sm btn-ghost gap-1.5 text-error"
-                  >
-                    <NavIcon name="Unlink" />
-                    Clear
-                  </AriaButton>
-                  <AriaButton type="submit" className="btn btn-sm btn-primary">
-                    Save
-                  </AriaButton>
-                </div>
+                  <NavIcon name="Unlink" />
+                  Clear
+                </AriaButton>
+                <AriaButton type="submit" className="btn btn-sm btn-primary">
+                  Save
+                </AriaButton>
               </div>
-            </form>
-          )}
-        </AriaDialog>
-      </AriaPopover>
+            </div>
+          </form>
+        )}
+      </EditorPopover>
     </AriaDialogTrigger>
   );
 }

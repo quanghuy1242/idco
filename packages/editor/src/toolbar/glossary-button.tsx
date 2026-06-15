@@ -1,4 +1,4 @@
-import { NavIcon, Tooltip } from "@quanghuy1242/idco-ui";
+import { Input, NavIcon, TextArea, Tooltip } from "@quanghuy1242/idco-ui";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   $createTextNode,
@@ -9,12 +9,12 @@ import {
 import { useState } from "react";
 import {
   Button as AriaButton,
-  Dialog as AriaDialog,
   DialogTrigger as AriaDialogTrigger,
-  Popover as AriaPopover,
 } from "react-aria-components";
 import { useSelectionRestore } from "../hooks/use-selection-restore";
+import { FieldLabel } from "../nodes/base";
 import { $createGlossaryNode } from "../nodes/glossary-node";
+import { EditorPopover } from "./editor-popover";
 
 /**
  * Inserts an inline glossary term (definition shown in a tooltip on hover). The
@@ -99,50 +99,39 @@ export function GlossaryButton({
           <NavIcon name="BookA" />
         </AriaButton>
       </Tooltip>
-      <AriaPopover
-        data-editor-selection-action-popover="true"
-        placement="bottom"
-        offset={8}
-        className="popover-panel z-[60] w-72 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"
-      >
-        <AriaDialog className="outline-none">
-          {({ close }) => (
-            <form
-              className="grid gap-2 p-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                apply(close);
-              }}
-            >
-              <span className="text-xs font-medium text-base-content/70">
-                Term
-              </span>
-              <input
-                aria-label="Glossary term"
-                autoFocus
-                value={term}
-                onChange={(event) => setTerm(event.target.value)}
-                className="input input-sm input-bordered w-full"
-              />
-              <span className="text-xs font-medium text-base-content/70">
-                Definition
-              </span>
-              <textarea
-                aria-label="Glossary definition"
-                value={definition}
-                rows={3}
-                onChange={(event) => setDefinition(event.target.value)}
-                className="textarea textarea-bordered textarea-sm w-full"
-              />
-              <div className="flex justify-end">
-                <AriaButton type="submit" className="btn btn-sm btn-primary">
-                  Insert
-                </AriaButton>
-              </div>
-            </form>
-          )}
-        </AriaDialog>
-      </AriaPopover>
+      <EditorPopover isSelectionAction width="sm">
+        {({ close }) => (
+          <form
+            className="grid gap-2 p-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              apply(close);
+            }}
+          >
+            <FieldLabel>Term</FieldLabel>
+            <Input
+              ariaLabel="Glossary term"
+              autoFocus
+              size="sm"
+              value={term}
+              onChange={setTerm}
+            />
+            <FieldLabel>Definition</FieldLabel>
+            <TextArea
+              ariaLabel="Glossary definition"
+              size="sm"
+              rows={3}
+              value={definition}
+              onChange={setDefinition}
+            />
+            <div className="flex justify-end">
+              <AriaButton type="submit" className="btn btn-sm btn-primary">
+                Insert
+              </AriaButton>
+            </div>
+          </form>
+        )}
+      </EditorPopover>
     </AriaDialogTrigger>
   );
 }

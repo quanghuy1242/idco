@@ -19,7 +19,7 @@ import type {
   RichTextEditorNode,
   RichTextEditorPostOption,
 } from "../model/schema";
-import { BlockChrome, ChromeButton } from "./chrome";
+import { BlockChrome } from "./chrome";
 
 export const INSERT_RICH_TEXT_NODE_COMMAND: LexicalCommand<RichTextEditorNode> =
   createCommand("INSERT_RICH_TEXT_NODE_COMMAND");
@@ -203,9 +203,6 @@ export function BlockShell({
     </div>
   );
 }
-
-/** @deprecated Use `ChromeButton` from `./chrome` directly. */
-export const BlockChromeButton = ChromeButton;
 
 export function FieldLabel({ children }: { readonly children: ReactNode }) {
   return (

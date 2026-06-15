@@ -1,15 +1,14 @@
-import { NavIcon } from "@quanghuy1242/idco-ui";
+import { NavIcon, TextArea } from "@quanghuy1242/idco-ui";
 import { $isMarkNode, $unwrapMarkNode, type MarkNode } from "@lexical/mark";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $getNearestNodeFromDOMNode, $getNodeByKey } from "lexical";
 import { useContext, useEffect, useState } from "react";
 import {
   Button as AriaButton,
-  Dialog as AriaDialog,
   DialogTrigger as AriaDialogTrigger,
-  Popover as AriaPopover,
 } from "react-aria-components";
 import { RichTextEditorBindingsContext } from "../nodes";
+import { EditorPopover } from "../toolbar/editor-popover";
 
 type CommentTarget = {
   readonly key: string;
@@ -116,58 +115,52 @@ export function CommentEditorPlugin() {
         className="pointer-events-none fixed size-0 opacity-0"
         style={{ left: target?.x ?? 0, top: target?.y ?? 0 }}
       />
-      <AriaPopover
-        placement="bottom start"
-        offset={6}
-        className="popover-panel z-[60] w-72 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"
-      >
-        <AriaDialog className="outline-none">
-          <div className="grid gap-2 p-2">
-            <span className="flex items-center gap-1.5 text-xs font-medium text-base-content/70">
-              <NavIcon name="MessageSquare" variant="timeline" />
-              Comment on “{target?.quote}”
-            </span>
+      <EditorPopover width="sm" placement="bottom start" offset={6}>
+        <div className="grid gap-2 p-2">
+          <span className="flex items-center gap-1.5 text-xs font-medium text-base-content/70">
+            <NavIcon name="MessageSquare" variant="timeline" />
+            Comment on “{target?.quote}”
+          </span>
+          {onCommentUpdate ? (
+            <TextArea
+              ariaLabel="Comment text"
+              autoFocus
+              size="sm"
+              rows={3}
+              value={draft}
+              placeholder="Add a comment…"
+              onChange={setDraft}
+            />
+          ) : (
+            <p className="whitespace-pre-wrap text-sm text-base-content">
+              {thread?.body || (
+                <span className="text-base-content/50">No comment text.</span>
+              )}
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <AriaButton
+              type="button"
+              aria-label="Delete comment"
+              onPress={remove}
+              className="btn btn-sm btn-ghost gap-1.5 text-error"
+            >
+              <NavIcon name="Trash2" variant="timeline" />
+              Delete
+            </AriaButton>
             {onCommentUpdate ? (
-              <textarea
-                aria-label="Comment text"
-                autoFocus
-                value={draft}
-                rows={3}
-                placeholder="Add a comment…"
-                onChange={(event) => setDraft(event.target.value)}
-                className="textarea textarea-bordered textarea-sm w-full"
-              />
-            ) : (
-              <p className="whitespace-pre-wrap text-sm text-base-content">
-                {thread?.body || (
-                  <span className="text-base-content/50">No comment text.</span>
-                )}
-              </p>
-            )}
-            <div className="flex items-center justify-between gap-2">
               <AriaButton
                 type="button"
-                aria-label="Delete comment"
-                onPress={remove}
-                className="btn btn-sm btn-ghost gap-1.5 text-error"
+                onPress={save}
+                isDisabled={draft.trim() === ""}
+                className="btn btn-sm btn-primary"
               >
-                <NavIcon name="Trash2" variant="timeline" />
-                Delete
+                Save
               </AriaButton>
-              {onCommentUpdate ? (
-                <AriaButton
-                  type="button"
-                  onPress={save}
-                  isDisabled={draft.trim() === ""}
-                  className="btn btn-sm btn-primary"
-                >
-                  Save
-                </AriaButton>
-              ) : null}
-            </div>
+            ) : null}
           </div>
-        </AriaDialog>
-      </AriaPopover>
+        </div>
+      </EditorPopover>
     </AriaDialogTrigger>
   );
 }

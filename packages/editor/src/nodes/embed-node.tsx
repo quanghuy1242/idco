@@ -1,50 +1,27 @@
 // DaisyUI 5: https://daisyui.com/components/card/
-/* eslint-disable no-underscore-dangle -- Lexical node subclasses use __ fields by convention. */
 
-import { Text } from "@quanghuy1242/idco-ui";
-import type { ElementFormatType, NodeKey } from "lexical";
+import { Input, Text } from "@quanghuy1242/idco-ui";
 import { useContext } from "react";
 import { normalizeEmbedNode } from "../model/normalize";
-import { stringValue, type RichTextEditorNode } from "../model/schema";
+import { stringValue } from "../model/schema";
 import {
   BlockShell,
   embedAllowed,
   FieldLabel,
-  RichTextDecoratorBlockNode,
   RichTextEditorBindingsContext,
-  useDecoratorNodeUpdater,
-  type SerializedRichTextDecoratorNode,
 } from "./base";
+import {
+  defineDecoratorBlock,
+  type DecoratorBlockProps,
+} from "./decorator-block";
 
-export class EmbedNode extends RichTextDecoratorBlockNode {
-  static getType(): string {
-    return "embed";
-  }
+export const EmbedNode = defineDecoratorBlock({
+  Editor: EmbedEditor,
+  normalize: normalizeEmbedNode,
+  type: "embed",
+});
 
-  static clone(node: EmbedNode): EmbedNode {
-    return new EmbedNode(node.__data, node.__format, node.__key);
-  }
-
-  static importJSON(serializedNode: SerializedRichTextDecoratorNode) {
-    return new EmbedNode(
-      normalizeEmbedNode(serializedNode),
-      (serializedNode.format as ElementFormatType) || "",
-    );
-  }
-
-  decorate() {
-    return <EmbedEditor nodeKey={this.__key} node={this.getData()} />;
-  }
-}
-
-function EmbedEditor({
-  node,
-  nodeKey,
-}: {
-  readonly node: RichTextEditorNode;
-  readonly nodeKey: NodeKey;
-}) {
-  const updateNode = useDecoratorNodeUpdater(nodeKey);
+function EmbedEditor({ node, nodeKey, update }: DecoratorBlockProps) {
   const { allowedEmbedDomains } = useContext(RichTextEditorBindingsContext);
   const url = stringValue(node.url) ?? "";
   const allowed = embedAllowed(url, allowedEmbedDomains);
@@ -70,11 +47,11 @@ function EmbedEditor({
           </div>
         )}
         <FieldLabel>URL</FieldLabel>
-        <input
-          aria-label="Embed URL"
-          className={`input input-bordered w-full ${allowed ? "" : "input-error"}`.trim()}
+        <Input
+          ariaLabel="Embed URL"
+          invalid={!allowed}
           value={url}
-          onChange={(event) => updateNode({ url: event.target.value })}
+          onChange={(value) => update({ url: value })}
         />
         {!allowed ? (
           <Text variant="caption">

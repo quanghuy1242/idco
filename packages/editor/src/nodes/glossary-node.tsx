@@ -2,7 +2,7 @@
 // term/definition (a popover); the definition also shows in a tooltip on hover.
 /* eslint-disable no-underscore-dangle -- Lexical node subclasses use __ fields by convention. */
 
-import { Tooltip } from "@quanghuy1242/idco-ui";
+import { Input, TextArea, Tooltip } from "@quanghuy1242/idco-ui";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   $createTextNode,
@@ -17,10 +17,10 @@ import type { Spread } from "lexical";
 import { useState, type ReactNode } from "react";
 import {
   Button as AriaButton,
-  Dialog as AriaDialog,
   DialogTrigger as AriaDialogTrigger,
-  Popover as AriaPopover,
 } from "react-aria-components";
+import { EditorPopover } from "../toolbar/editor-popover";
+import { FieldLabel } from "./base";
 
 export type SerializedGlossaryNode = Spread<
   { term: string; definition: string },
@@ -190,56 +190,46 @@ function GlossaryEditor({
           {term}
         </AriaButton>
       </Tooltip>
-      <AriaPopover
-        placement="bottom"
-        offset={8}
-        className="popover-panel z-[60] w-72 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"
-      >
-        <AriaDialog className="outline-none">
-          {({ close }) => (
-            <form
-              className="grid gap-2 p-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                apply(close);
-              }}
-            >
-              <span className="text-xs font-medium text-base-content/70">
-                Term
-              </span>
-              <input
-                aria-label="Glossary term"
-                autoFocus
-                value={termDraft}
-                onChange={(event) => setTermDraft(event.target.value)}
-                className="input input-sm input-bordered w-full"
-              />
-              <span className="text-xs font-medium text-base-content/70">
-                Definition
-              </span>
-              <textarea
-                aria-label="Glossary definition"
-                value={definitionDraft}
-                rows={3}
-                onChange={(event) => setDefinitionDraft(event.target.value)}
-                className="textarea textarea-bordered textarea-sm w-full"
-              />
-              <div className="flex items-center justify-between gap-2">
-                <AriaButton
-                  type="button"
-                  onPress={() => remove(close)}
-                  className="btn btn-sm btn-ghost text-error"
-                >
-                  Remove
-                </AriaButton>
-                <AriaButton type="submit" className="btn btn-sm btn-primary">
-                  Save
-                </AriaButton>
-              </div>
-            </form>
-          )}
-        </AriaDialog>
-      </AriaPopover>
+      <EditorPopover width="sm">
+        {({ close }) => (
+          <form
+            className="grid gap-2 p-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              apply(close);
+            }}
+          >
+            <FieldLabel>Term</FieldLabel>
+            <Input
+              ariaLabel="Glossary term"
+              autoFocus
+              size="sm"
+              value={termDraft}
+              onChange={setTermDraft}
+            />
+            <FieldLabel>Definition</FieldLabel>
+            <TextArea
+              ariaLabel="Glossary definition"
+              size="sm"
+              rows={3}
+              value={definitionDraft}
+              onChange={setDefinitionDraft}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <AriaButton
+                type="button"
+                onPress={() => remove(close)}
+                className="btn btn-sm btn-ghost text-error"
+              >
+                Remove
+              </AriaButton>
+              <AriaButton type="submit" className="btn btn-sm btn-primary">
+                Save
+              </AriaButton>
+            </div>
+          </form>
+        )}
+      </EditorPopover>
     </AriaDialogTrigger>
   );
 }

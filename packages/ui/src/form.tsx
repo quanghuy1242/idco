@@ -5,9 +5,9 @@ import { useRef, type FormEvent, type ReactNode } from "react";
 import {
   FieldError,
   Form as AriaForm,
-  Input,
+  Input as AriaInput,
   Label,
-  TextArea,
+  TextArea as AriaTextArea,
   TextField,
 } from "react-aria-components";
 import { useRadioGroup, useRadio, useCheckbox } from "react-aria";
@@ -48,6 +48,99 @@ export function Form({
     >
       {children}
     </AriaForm>
+  );
+}
+
+type BareInputProps = {
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  /** Accessible name; these bare controls render no visible label. */
+  readonly ariaLabel: string;
+  readonly type?: "email" | "text" | "url";
+  readonly size?: "sm" | "md";
+  readonly placeholder?: string;
+  readonly autoFocus?: boolean;
+  readonly invalid?: boolean;
+  readonly className?: string;
+};
+
+/**
+ * Bare text input — React Aria `TextField` + `Input` with DaisyUI `input`
+ * styling and no label/error chrome. For inline editing surfaces (popovers,
+ * block controls) that provide their own labels. Use `TextInput` for a full
+ * labelled form field.
+ */
+export function Input({
+  value,
+  onChange,
+  ariaLabel,
+  type = "text",
+  size = "md",
+  placeholder,
+  autoFocus,
+  invalid,
+  className,
+}: BareInputProps) {
+  const sizeClass = size === "sm" ? "input-sm" : "";
+  return (
+    <TextField
+      aria-label={ariaLabel}
+      type={type}
+      value={value}
+      onChange={onChange}
+      isInvalid={invalid || undefined}
+      className="w-full"
+    >
+      <AriaInput
+        autoFocus={autoFocus}
+        placeholder={placeholder}
+        className={`input input-bordered w-full ${sizeClass}${invalid ? " input-error" : ""}${className ? ` ${className}` : ""}`.trim()}
+      />
+    </TextField>
+  );
+}
+
+type BareTextAreaProps = {
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly ariaLabel: string;
+  readonly rows?: number;
+  readonly size?: "sm" | "md";
+  readonly placeholder?: string;
+  readonly autoFocus?: boolean;
+  readonly className?: string;
+};
+
+/**
+ * Bare multiline control — the textarea counterpart to `Input`. No label/error
+ * chrome and no forced monospace; for inline editing surfaces. Use `Textarea`
+ * for a full labelled form field.
+ */
+export function TextArea({
+  value,
+  onChange,
+  ariaLabel,
+  rows = 3,
+  size = "md",
+  placeholder,
+  autoFocus,
+  className,
+}: BareTextAreaProps) {
+  const sizeClass = size === "sm" ? "textarea-sm" : "";
+  return (
+    <TextField
+      aria-label={ariaLabel}
+      value={value}
+      onChange={onChange}
+      className="w-full"
+    >
+      <AriaTextArea
+        autoFocus={autoFocus}
+        rows={rows}
+        placeholder={placeholder}
+        className={`textarea textarea-bordered w-full ${sizeClass}${className ? ` ${className}` : ""}`.trim()}
+      />
+    </TextField>
   );
 }
 
@@ -101,7 +194,7 @@ export function TextInput({
           {!required && showOptionalLabel ? " (Optional)" : ""}
         </span>
       </Label>
-      <Input
+      <AriaInput
         name={name}
         aria-label={label}
         className={`input input-bordered ${sizeClass} w-full bg-base-100 text-base-content focus:input-primary${error ? " input-error" : ""}`.trim()}
@@ -337,7 +430,7 @@ export function Textarea({
           {!required ? " (Optional)" : ""}
         </span>
       </Label>
-      <TextArea
+      <AriaTextArea
         name={name}
         aria-label={label}
         rows={rows}
