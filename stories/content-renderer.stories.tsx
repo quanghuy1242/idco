@@ -31,6 +31,14 @@ const blogDocument: RichTextDocument = {
         type: "heading",
       },
       {
+        type: "table-of-contents",
+        title: "On this page",
+        minLevel: 1,
+        maxLevel: 4,
+        numbering: "decimal",
+        style: "plain",
+      },
+      {
         children: [
           {
             text: "A compact demo post showing every node shape emitted by the ",
@@ -270,5 +278,106 @@ export const CustomRenderer: Story = () => (
         }}
       />
     </Stack>
+  </Container>
+);
+
+const sideTocFiller =
+  "Published article body. This text gives the page enough height for the sticky rail to travel: the table of contents on the side stays pinned beside the content as you scroll past these sections.";
+
+function sideTocDocument(side: "left" | "right"): RichTextDocument {
+  return {
+    root: {
+      children: [
+        {
+          type: "table-of-contents",
+          title: "On this page",
+          minLevel: 2,
+          maxLevel: 3,
+          numbering: "decimal",
+          // `panel` (and `plain`) wrap long headings with a hanging indent and
+          // clamp at 3 lines instead of truncating — easy to see here because
+          // the rail is only 16rem wide. Switch to `compact` to see the
+          // single-line truncation variant.
+          style: "panel",
+          placement: "aside",
+          side,
+        },
+        // Deliberately long sub-headings so the narrow rail has to wrap them.
+        ...[
+          ["Overview", "What this guide covers and who it is written for"],
+          [
+            "Installation",
+            "Installing the CLI and configuring your environment variables",
+          ],
+          [
+            "Configuration",
+            "Configuring the production deployment pipeline with environment-specific secrets",
+          ],
+          [
+            "Deployment",
+            "Deploying to multiple regions with zero-downtime rolling releases",
+          ],
+          [
+            "Troubleshooting",
+            "Diagnosing common failures and reading the structured request logs",
+          ],
+        ].flatMap(([heading, detail]) => [
+          {
+            type: "heading",
+            tag: "h2",
+            children: [{ type: "text", text: heading }],
+          },
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: sideTocFiller }],
+          },
+          {
+            type: "heading",
+            tag: "h3",
+            children: [{ type: "text", text: detail }],
+          },
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: sideTocFiller }],
+          },
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: sideTocFiller }],
+          },
+        ]),
+      ],
+    },
+  };
+}
+
+export const SideTableOfContentsLeft: Story = () => (
+  <Container width="wide">
+    <Stack gap="xs">
+      <Badge tone="primary">Content renderer</Badge>
+      <Text variant="h2">Side table of contents — left rail</Text>
+      <Text variant="caption">
+        A <code>placement: aside</code> TOC renders as a sticky left rail beside
+        the article; the in-flow node is hidden at <code>lg</code>+ and falls
+        back to an inline TOC on narrow screens. Scroll to see the rail stay
+        pinned. The sub-headings are intentionally long: in the 16rem rail they
+        wrap with a hanging indent and clamp at three lines rather than
+        truncating.
+      </Text>
+    </Stack>
+    <RichTextRenderer value={sideTocDocument("left")} />
+  </Container>
+);
+
+export const SideTableOfContentsRight: Story = () => (
+  <Container width="wide">
+    <Stack gap="xs">
+      <Badge tone="primary">Content renderer</Badge>
+      <Text variant="h2">Side table of contents — right rail</Text>
+      <Text variant="caption">
+        The same document with <code>side: right</code>: the sticky rail docks
+        to the right of the article.
+      </Text>
+    </Stack>
+    <RichTextRenderer value={sideTocDocument("right")} />
   </Container>
 );

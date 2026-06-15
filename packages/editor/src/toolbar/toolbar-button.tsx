@@ -21,6 +21,12 @@ export function ToolbarButton({
         aria-label={label}
         isDisabled={isDisabled}
         onPress={onPress}
+        // Keep focus (and the text selection) in the editor when the button is
+        // clicked. Without this, mousedown moves focus to the button, which
+        // makes React Aria's selection flyout popover think focus left the
+        // overlay and briefly start its exit animation -> visible flicker/
+        // "remount". Keyboard focus (Tab / roving tabindex) is unaffected.
+        onMouseDown={(event) => event.preventDefault()}
         className={`btn btn-sm btn-square ${isActive ? "btn-primary" : "btn-ghost"}`}
       >
         <NavIcon name={icon} />

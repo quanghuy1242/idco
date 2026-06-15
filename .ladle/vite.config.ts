@@ -49,6 +49,7 @@ export default defineConfig({
       { find: "@idco/ui", replacement: uiSrc },
       { find: "@quanghuy1242/idco-ui", replacement: uiSrc },
       { find: "@idco/lib", replacement: libSrc },
+      { find: "@quanghuy1242/idco-lib", replacement: libSrc },
       { find: "@idco/content-renderer", replacement: contentRendererSrc },
       { find: "@idco/editor", replacement: editorSrc },
       { find: "@quanghuy1242/idco-editor", replacement: editorSrc },

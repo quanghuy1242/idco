@@ -24,7 +24,10 @@ import {
   RichTextStrong,
   RichTextTable,
   RichTextTableCell,
+  RichTextTableOfContents,
   RichTextTableRow,
+  RichTextTocLayout,
+  RichTextTocRail,
   RichTextUnderline,
   type AlertTone,
   type CodeEditorLanguage,
@@ -32,6 +35,12 @@ import {
   type RichTextHeadingLevel,
   type RichTextListKind,
 } from "@quanghuy1242/idco-ui";
+import {
+  collectRichTextTocEntries,
+  ensureRichTextHeadingAnchors,
+  normalizeTocSettings,
+  richTextNodeText,
+} from "@quanghuy1242/idco-lib";
 import { Fragment, type ReactNode } from "react";
 
 export type RichTextNode = {
@@ -39,6 +48,7 @@ export type RichTextNode = {
   readonly text?: string;
   readonly children?: readonly RichTextNode[];
   readonly tag?: string;
+  readonly anchorId?: string;
   readonly url?: string;
   readonly language?: string;
   readonly mediaId?: string;
@@ -56,6 +66,9 @@ export type RichTextNode = {
   readonly title?: string;
   readonly tone?: string;
   readonly value?: number;
+  readonly minLevel?: number;
+  readonly maxLevel?: number;
+  readonly numbering?: string;
   readonly [key: string]: unknown;
 };
 
@@ -124,6 +137,8 @@ const defaultRenderers: Readonly<Record<string, RichTextNodeRenderer>> = {
   heading: (node, children, key) => (
     <RichTextHeading
       key={key}
+      anchorId={stringValue(node.anchorId)}
+      anchorLabel={richTextNodeText(node)}
       level={headingLevel(node.tag)}
       align={elementAlign(node.format)}
     >
@@ -221,10 +236,47 @@ export function renderRichTextDocument(
 ): ReactNode {
   const root = richTextRoot(value);
   if (!root) return null;
-  return renderNode({ type: "root", children: root.children ?? [] }, "root", {
-    ...options,
-    renderers: { ...defaultRenderers, ...options.renderers },
+  const document = ensureRichTextHeadingAnchors({
+    root: { children: root.children ?? [] },
   });
+  const content = renderNode(
+    { type: "root", children: document.root.children ?? [] },
+    "root",
+    {
+      ...options,
+      renderers: {
+        ...defaultRenderers,
+        "table-of-contents": (node, _children, key) =>
+          renderTableOfContents(node, key, document),
+        ...options.renderers,
+      },
+    },
+  );
+  // Mirror the editor shell: a `placement: "aside"` TOC is rendered as a sticky
+  // side rail beside the article (its in-flow node is hidden at lg+ by
+  // renderTableOfContents and shown inline below lg). Editor and renderer share
+  // RichTextTocLayout/RichTextTocRail so the two surfaces stay identical.
+  const asideNode = (document.root.children ?? []).find(
+    (child) =>
+      child.type === "table-of-contents" &&
+      normalizeTocSettings(child).placement === "aside",
+  );
+  if (!asideNode) return content;
+  const settings = normalizeTocSettings(asideNode);
+  return (
+    <RichTextTocLayout
+      side={settings.side}
+      rail={
+        <RichTextTocRail
+          entries={collectRichTextTocEntries(document, settings)}
+          style={settings.style}
+          title={settings.title}
+        />
+      }
+    >
+      {content}
+    </RichTextTocLayout>
+  );
 }
 
 export function RichTextRenderer({
@@ -394,6 +446,32 @@ function renderTable(node: RichTextNode, children: ReactNode, key: string) {
       {children}
     </RichTextTable>
   );
+}
+
+function renderTableOfContents(
+  node: RichTextNode,
+  key: string,
+  document: RichTextDocument,
+) {
+  const settings = normalizeTocSettings(node);
+  const entries = collectRichTextTocEntries(document, settings);
+  const toc = (
+    <RichTextTableOfContents
+      entries={entries}
+      style={settings.style}
+      title={settings.title}
+    />
+  );
+  // When pinned aside, the sticky rail renders the TOC at lg+; keep an inline
+  // copy for narrow viewports where there is no room for a rail.
+  if (settings.placement === "aside") {
+    return (
+      <div key={key} className="lg:hidden">
+        {toc}
+      </div>
+    );
+  }
+  return <Fragment key={key}>{toc}</Fragment>;
 }
 
 function renderCodeBlock(

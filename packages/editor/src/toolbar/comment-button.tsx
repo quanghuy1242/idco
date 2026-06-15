@@ -1,7 +1,7 @@
 import { NavIcon, Tooltip } from "@quanghuy1242/idco-ui";
 import { $wrapSelectionInMarkNode } from "@lexical/mark";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $getSelection, $isRangeSelection } from "lexical";
+import { $getSelection, $isRangeSelection, type BaseSelection } from "lexical";
 import { useContext, useRef, useState } from "react";
 import {
   Button as AriaButton,
@@ -27,13 +27,20 @@ function commentId(): string {
  * so the host owns thread storage and the thread UI.
  */
 export function CommentButton({
+  getSelectionSnapshot,
   isDisabled,
+  onApplied,
+  onDialogOpenChange,
 }: {
+  readonly getSelectionSnapshot?: () => BaseSelection | null;
   readonly isDisabled?: boolean;
+  readonly onApplied?: () => void;
+  readonly onDialogOpenChange?: (open: boolean) => void;
 }) {
   const [editor] = useLexicalComposerContext();
   const { onComment } = useContext(RichTextEditorBindingsContext);
-  const { onOpen, onClose, markHandled } = useSelectionRestore();
+  const { onOpen, onClose, markHandled, restoreSelection } =
+    useSelectionRestore({ getSelectionSnapshot });
   const [body, setBody] = useState("");
   // The selection collapses when focus moves to the popover input, so the quote
   // is captured up front when the popover opens.
@@ -53,6 +60,7 @@ export function CommentButton({
   function apply(close: () => void) {
     const id = commentId();
     let wrapped = false;
+    restoreSelection();
     editor.update(() => {
       const selection = $getSelection();
       if (!$isRangeSelection(selection) || selection.isCollapsed()) return;
@@ -62,14 +70,17 @@ export function CommentButton({
     if (wrapped) onComment?.(id, quoteRef.current, body.trim());
     markHandled();
     close();
+    onApplied?.();
     requestAnimationFrame(() => editor.focus());
   }
 
   return (
     <AriaDialogTrigger
       onOpenChange={(open) => {
+        onDialogOpenChange?.(open);
         if (open) {
           onOpen();
+          restoreSelection();
           syncFromSelection();
         } else {
           onClose();
@@ -87,6 +98,7 @@ export function CommentButton({
         </AriaButton>
       </Tooltip>
       <AriaPopover
+        data-editor-selection-action-popover="true"
         placement="bottom"
         offset={8}
         className="popover-panel z-[60] w-72 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"

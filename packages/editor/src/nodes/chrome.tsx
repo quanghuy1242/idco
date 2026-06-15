@@ -11,6 +11,8 @@ import { Button as AriaButton } from "react-aria-components";
 
 /** Surface shared by every chrome element: a light floating pill. */
 const CHROME_SURFACE = "border border-base-300 bg-base-100 shadow-sm";
+const CHROME_INLINE_PILL =
+  "flex h-6 min-h-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase leading-none tracking-wide";
 
 export type ChromeIntent = "neutral" | "primary" | "danger";
 
@@ -95,7 +97,7 @@ export function ChromeBadge({
   return (
     <span
       className={[
-        "flex h-6 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase tracking-wide text-base-content/60",
+        `${CHROME_INLINE_PILL} text-base-content/60`,
         CHROME_SURFACE,
         className ?? "",
       ]
@@ -139,7 +141,7 @@ export function ChromeSelect<T extends string>({
     <MenuTrigger onOpenChange={onOpenChange}>
       <AriaButton
         aria-label={label}
-        className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-base-content/70 transition hover:text-base-content ${CHROME_SURFACE}`}
+        className={`${CHROME_INLINE_PILL} text-base-content/70 transition hover:text-base-content ${CHROME_SURFACE}`}
       >
         {selected?.icon ? (
           <NavIcon name={selected.icon} variant="timeline" />

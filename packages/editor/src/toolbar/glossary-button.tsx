@@ -1,6 +1,11 @@
 import { NavIcon, Tooltip } from "@quanghuy1242/idco-ui";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $createTextNode, $getSelection, $isRangeSelection } from "lexical";
+import {
+  $createTextNode,
+  $getSelection,
+  $isRangeSelection,
+  type BaseSelection,
+} from "lexical";
 import { useState } from "react";
 import {
   Button as AriaButton,
@@ -17,14 +22,21 @@ import { $createGlossaryNode } from "../nodes/glossary-node";
  * in place.
  */
 export function GlossaryButton({
+  getSelectionSnapshot,
   isDisabled,
+  onApplied,
+  onDialogOpenChange,
 }: {
+  readonly getSelectionSnapshot?: () => BaseSelection | null;
   readonly isDisabled?: boolean;
+  readonly onApplied?: () => void;
+  readonly onDialogOpenChange?: (open: boolean) => void;
 }) {
   const [editor] = useLexicalComposerContext();
   const [term, setTerm] = useState("");
   const [definition, setDefinition] = useState("");
-  const { onOpen, onClose, markHandled } = useSelectionRestore();
+  const { onOpen, onClose, markHandled, restoreSelection } =
+    useSelectionRestore({ getSelectionSnapshot });
 
   function syncFromSelection() {
     editor.getEditorState().read(() => {
@@ -40,6 +52,7 @@ export function GlossaryButton({
       close();
       return;
     }
+    restoreSelection();
     editor.update(() => {
       const selection = $getSelection();
       if (!$isRangeSelection(selection)) return;
@@ -58,14 +71,17 @@ export function GlossaryButton({
     });
     markHandled();
     close();
+    onApplied?.();
     requestAnimationFrame(() => editor.focus());
   }
 
   return (
     <AriaDialogTrigger
       onOpenChange={(open) => {
+        onDialogOpenChange?.(open);
         if (open) {
           onOpen();
+          restoreSelection();
           syncFromSelection();
         } else {
           onClose();
@@ -83,6 +99,7 @@ export function GlossaryButton({
         </AriaButton>
       </Tooltip>
       <AriaPopover
+        data-editor-selection-action-popover="true"
         placement="bottom"
         offset={8}
         className="popover-panel z-[60] w-72 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"

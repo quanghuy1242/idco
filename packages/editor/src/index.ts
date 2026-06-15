@@ -18,6 +18,8 @@ export {
   EmbedNode,
   MediaNode,
   PostRefNode,
+  EditorHeadingNode,
+  TableOfContentsNode,
   INSERT_RICH_TEXT_NODE_COMMAND,
   type RichTextEditorBindings,
   type RichTextEditorComment,

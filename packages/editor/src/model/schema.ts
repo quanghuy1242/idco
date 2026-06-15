@@ -13,6 +13,7 @@ export type RichTextEditorNode = {
   readonly text?: string;
   readonly children?: readonly RichTextEditorNode[];
   readonly tag?: string;
+  readonly anchorId?: string;
   readonly language?: string;
   readonly mediaId?: string;
   readonly alt?: string;
@@ -22,6 +23,12 @@ export type RichTextEditorNode = {
   readonly url?: string;
   readonly tone?: string;
   readonly format?: number | string;
+  readonly minLevel?: number;
+  readonly maxLevel?: number;
+  readonly numbering?: string;
+  readonly style?: string;
+  readonly placement?: string;
+  readonly side?: string;
   readonly [key: string]: unknown;
 };
 
@@ -82,6 +89,7 @@ export const DEFAULT_ALLOWED_NODES = [
   "media",
   "post-ref",
   "embed",
+  "table-of-contents",
   "table",
   "link",
   "mark",

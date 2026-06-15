@@ -60,12 +60,13 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
   if (node.type === "heading") {
     return [
       {
+        ...(stringValue(node.anchorId) ? { anchorId: node.anchorId } : {}),
         children: (node.children ?? []).flatMap(lexicalNode),
         direction: null,
         format,
         indent: 0,
         tag: headingTag(node.tag),
-        type: "heading",
+        type: "editor-heading",
         version: 1,
       },
     ];
@@ -133,7 +134,8 @@ export function lexicalNode(node: RichTextEditorNode): unknown[] {
     node.type === "code-block" ||
     node.type === "embed" ||
     node.type === "media" ||
-    node.type === "post-ref"
+    node.type === "post-ref" ||
+    node.type === "table-of-contents"
   ) {
     return [
       {

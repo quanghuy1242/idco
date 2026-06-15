@@ -1,6 +1,6 @@
-# 003 — Block Chrome System and Table Capabilities
+# 003 — Block Chrome, Table Capabilities, Heading Anchors, and TOC
 
-> Status: implemented (Parts A–E)
+> Status: implemented (Parts A–F)
 >
 > Date: 2026-06-14
 >
@@ -8,6 +8,8 @@
 >
 > - `/home/quanghuy1242/pjs/idco/packages/editor` (live editor — nodes, plugins, model)
 > - `/home/quanghuy1242/pjs/idco/packages/content-renderer` (read-side renderer — must match any new table layout/header semantics)
+> - `/home/quanghuy1242/pjs/idco/packages/lib` (pure rich-text heading/TOC helpers shared by editor and renderer)
+> - `/home/quanghuy1242/pjs/idco/packages/ui` (read-side rich-text display primitives)
 > - `/home/quanghuy1242/pjs/idco/stories` (Ladle previews)
 > - `/home/quanghuy1242/pjs/idco/tests/editor` (vitest coverage)
 >
@@ -22,6 +24,7 @@
 >
 > - Lexical stays pinned at `0.45.0` across all `@lexical/*` packages. `TableNode.colWidths` is a `number[]` of **pixels** with no native percentage or responsive mode (verified against `@lexical/table@0.45` `dist/*.d.ts`).
 > - The document JSON stays round-trippable through the editor and `@idco/content-renderer`. Any new table attribute (layout mode, header axes) must serialize and render identically on both sides.
+> - Heading anchors are on by default. Heading ids must be stable enough for external links, not only a slug regenerated from the latest text.
 > - The editor stays product-neutral and within the React Aria + DaisyUI contract: no hand-rolled menus/buttons; chrome composes `@idco/ui` primitives (`MenuTrigger`/`Menu`/`MenuItem`, `NavIcon`, React Aria `Button`).
 > - This is opt-in surface area. Existing documents (fixed-px tables, header-row tables) must load and behave exactly as before; new capabilities are additive and default-off where they change behavior.
 
@@ -51,11 +54,16 @@
   - [7.2 Numbered Column](#72-numbered-column)
 - [8. Part D — The Header-Edge Insert Guard](#8-part-d--the-header-edge-insert-guard)
 - [9. Part E — Optional Lexical Capabilities](#9-part-e--optional-lexical-capabilities)
-- [10. Files](#10-files)
-- [11. Edge Cases And Failure Modes](#11-edge-cases-and-failure-modes)
-- [12. Tests](#12-tests)
-- [13. Implementation Sequence](#13-implementation-sequence)
-- [14. Definition Of Done](#14-definition-of-done)
+- [10. Part F — Heading Anchors And Insertable TOC](#10-part-f--heading-anchors-and-insertable-toc)
+  - [10.1 Stable Heading Anchors](#101-stable-heading-anchors)
+  - [10.2 TOC Node Contract](#102-toc-node-contract)
+  - [10.3 Editor Behavior](#103-editor-behavior)
+  - [10.4 Renderer Parity](#104-renderer-parity)
+- [11. Files](#11-files)
+- [12. Edge Cases And Failure Modes](#12-edge-cases-and-failure-modes)
+- [13. Tests](#13-tests)
+- [14. Implementation Sequence](#14-implementation-sequence)
+- [15. Definition Of Done](#15-definition-of-done)
 
 ## 0. As-Built Notes (deviations from the plan)
 
@@ -66,8 +74,10 @@ Five things changed during implementation; each is load-bearing:
 - **No `EditorTableNode` `createDOM` rewrite was needed for behavior, but a thin `createDOM`/`updateDOM` override stamps `data-table-layout` + the `rt-table-numbered` class** (CSS keys off them). Layout *behavior* still emerges from `colWidths`; the attribute/class only drive presentational CSS (responsive `width:100%`, numbered gutter).
 - **Chrome "pinning" was added.** The table chrome is mouse-band-driven, so an open menu's Popover (rendered outside the band) would clear `geom` and unmount the menu mid-click. `pinned` freezes the chrome while the layout select or structure menu is open, and the structure toggles skip the post-mutation editor refocus so the multi-select menu stays open across taps.
 - **Merge/unmerge/column-move live in the right-click context menu** (`ContextMenuPlugin`), table-aware via context captured at open time, rather than a separate cell-selection toolbar. Column move keeps `colWidths` aligned via `moveArrayItem`.
+- **Heading anchors and TOC are document-driven.** Headings carry a persisted `anchorId`; a `table-of-contents` block stores settings only. The live editor preview and read-only renderer compute entries from the current document so the TOC never stores stale heading copies.
+- **TOC settings are consolidated.** The TOC block body is preview-only; title, min/max heading level, numbering, and style live in one React Aria `DialogTrigger`/`Popover` settings panel opened from the block chrome. The shared chrome pill geometry is fixed at `h-6` so the left badge and right actions align.
 
-Verified end-to-end in Ladle with Playwright: editor loads clean; layout switch (fixed→responsive fills the container); numbered gutter; conditional header-edge guard; cell merge/unmerge; column move — all with no console errors. 501 unit tests pass; typecheck, lint, and build are green.
+Verified end-to-end in Ladle with Playwright: editor loads clean; layout switch (fixed→responsive fills the container); numbered gutter; conditional header-edge guard; cell merge/unmerge; column move; heading anchors; insertable TOC with settings — all with no console errors. Unit tests cover the model, editor, renderer, and UI; typecheck, lint, and build are green.
 
 ## 1. Goal
 
@@ -180,8 +190,8 @@ Pick one set and apply it to all three hosts. Proposed canonical tokens (closest
 
 - **Surface:** `border border-base-300 bg-base-100 shadow-sm`.
 - **Icon button:** `grid size-6 place-items-center rounded-full` + surface, neutral `text-base-content/60`, hover intent color (`hover:text-base-content` default, `hover:text-error` for destructive).
-- **Badge:** `flex h-6 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase tracking-wide text-base-content/60` + surface.
-- **Select pill:** badge geometry + `gap-1` + trailing `ChevronDown`, `hover:text-base-content`.
+- **Badge:** `flex h-6 min-h-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase leading-none tracking-wide text-base-content/60` + surface.
+- **Select/settings pill:** badge geometry + trailing icon where needed, `hover:text-base-content`.
 
 `bg-base-100 shadow-sm` wins over `BlockShell`'s `bg-base-200` because two of three hosts (code, table) already use it and it floats correctly over both light node bodies and the document background. `BlockShell` cells move to `bg-base-100`; this is the one intentional visual change and should be eyeballed in Ladle.
 
@@ -342,13 +352,101 @@ Sequenced after A–D; each is independently shippable and uses the standardized
 - **Column move.** `$moveTableColumn` driven from a drag affordance on the existing column boundary handles. Interacts with `colWidths`/`colRatios` — moving a column must move its width/ratio with it.
 - **Cell background color** (`hasCellBackgroundColor`) and **per-table scroll vs wrap** (`setScrollableTablesActive`) — listed for completeness; defer unless requested.
 
-## 10. Files
+## 10. Part F — Heading Anchors And Insertable TOC
+
+### 10.1 Stable Heading Anchors
+
+Headings get a first-class `anchorId` field:
+
+```json
+{
+  "type": "heading",
+  "tag": "h2",
+  "anchorId": "how-this-works",
+  "children": [{ "type": "text", "text": "How this works" }]
+}
+```
+
+The id is generated from the heading text when a heading is created or imported
+without an id, then kept stable. Renaming a heading must not silently break links
+that already point at it. Duplicate headings receive deterministic suffixes
+(`overview`, `overview-2`, `overview-3`) inside the same document.
+
+Implementation contract:
+
+- `packages/lib/src/rich-text.ts` owns pure helpers: text extraction, slugging,
+  duplicate-safe anchor allocation, TOC entry collection, level filtering, and
+  numbering.
+- `packages/editor/src/nodes/heading-node.ts` extends Lexical's `HeadingNode`
+  with `anchorId`, stamps `id` / `data-idco-heading-anchor` in the editor DOM,
+  and serializes the field.
+- `packages/editor/src/plugins/heading-anchor-plugin.tsx` repairs missing or
+  duplicate anchors on editor updates. It must preserve existing unique ids.
+- The renderer passes `anchorId` to `RichTextHeading`, which renders the heading
+  `id` and a hover/focus anchor link by default.
+
+### 10.2 TOC Node Contract
+
+The insertable node stores settings only:
+
+```json
+{
+  "type": "table-of-contents",
+  "title": "Table of contents",
+  "minLevel": 1,
+  "maxLevel": 4,
+  "numbering": "decimal",
+  "style": "plain"
+}
+```
+
+Supported settings:
+
+- `minLevel` / `maxLevel`: heading levels included in the TOC (`1` through `6`);
+  defaults `1 → 4`.
+- `numbering`: `"none"` or `"decimal"`; decimal numbers are computed from the
+  visible heading hierarchy. Default `"decimal"`.
+- `style`: `"panel"`, `"plain"`, or `"compact"`; style affects only display.
+  Default `"plain"`.
+- `title`: optional label for the block; default `"Table of contents"`.
+
+The TOC never persists a copied list of entries. Both editor and renderer call
+the same pure collector against the current document.
+
+### 10.3 Editor Behavior
+
+- `table-of-contents` is part of `DEFAULT_ALLOWED_NODES` and appears in the
+  toolbar insert menu and slash menu.
+- The editor node extends `RichTextDecoratorBlockNode`, uses the existing block
+  chrome vocabulary, and exposes settings through one React Aria popover opened
+  from a `ChromeButton`. The popover contains the title field plus min/max
+  level, numbering, and style controls.
+- The editor preview updates from the current document value after every change.
+  Empty documents show an empty state inside the block rather than stale links.
+- The node is product-neutral and imports no consumer data.
+
+### 10.4 Renderer Parity
+
+`@idco/content-renderer` computes document heading entries once, then renders:
+
+- headings with `id={anchorId}` and a default anchor link;
+- `table-of-contents` blocks as read-only navigation links filtered by their
+  settings.
+
+Renderer output must match the editor preview for included headings, numbering,
+and link targets. Unknown or malformed TOC settings normalize to the defaults.
+
+## 11. Files
 
 New:
 
 - `packages/editor/src/nodes/chrome.tsx` — `ChromeButton`, `ChromeBadge`, `ChromeSelect`, `ChromeBar`, token constants.
 - *No* `TableNode` subclass is needed for the recommended path — `layout` / `colRatios` / `showRowNumbers` thread through `model/serialize.ts` + `model/normalize.ts` (the existing table passthrough). A subclass is only the fallback if runtime access (not just serialization) of `layout` proves awkward.
 - `tests/editor/chrome.test.tsx`, `tests/editor/table-layout-model.test.ts`, `tests/editor/table-headers.test.tsx`.
+- `packages/lib/src/rich-text.ts` — pure heading anchor and TOC helpers.
+- `packages/editor/src/nodes/heading-node.ts` — stable heading ids and editor DOM anchors.
+- `packages/editor/src/nodes/table-of-contents-node.tsx` — insertable TOC block and settings chrome.
+- `packages/editor/src/plugins/heading-anchor-plugin.tsx` — missing/duplicate heading id repair.
 
 Changed:
 
@@ -359,10 +457,11 @@ Changed:
 - `plugins/table-plugin.tsx` — mode-aware seeding; `ResizeObserver` for responsive.
 - `model/layout.ts` — ratio-space helpers.
 - `plugins/context-menu-plugin.tsx` — (Part E) merge/unmerge.
-- `packages/content-renderer/*` — read `layout` / `colRatios` / `showRowNumbers`.
+- `packages/content-renderer/*` — read `layout` / `colRatios` / `showRowNumbers`; render anchors and TOC.
+- `packages/ui/src/rich-text-content.tsx` — read-side heading anchor and TOC display primitives.
 - `docs/001` §7.5 — cross-link this doc.
 
-## 11. Edge Cases And Failure Modes
+## 12. Edge Cases And Failure Modes
 
 - **Mid-drag reconcile race (existing, must preserve).** `table-controls-plugin.tsx` previews on the DOM and commits once on release precisely because routing every frame through `editor.update` makes the document-sync plugin revert the drag. The responsive path must keep this discipline — convert to ratios but still commit once.
 - **Container width 0 at mount.** Responsive derive needs a real container width; if measured 0 (hidden tab, SSR hydrate), defer derivation until the `ResizeObserver` first fires; do not write 0-width `colWidths`.
@@ -373,8 +472,14 @@ Changed:
 - **Numbered gutter vs. geometry.** Insert/resize/header reads index real columns only; the gutter is excluded from `geom.cols`.
 - **Header-edge guard with no header.** Guard must read live header state each hover, not assume; a user can remove the header row and then *should* regain boundary-0 insert.
 - **Renderer drift.** Any table that previews responsive in the editor but renders fixed (or vice versa) on the page is a correctness bug, not cosmetic — covered by a round-trip test (§12).
+- **Renamed headings.** A rename must not regenerate a unique existing `anchorId`; external links stay valid. Missing ids get generated.
+- **Duplicate heading ids.** Paste/import can create duplicates; the repair plugin suffixes later duplicates while preserving the first instance.
+- **Empty headings.** Empty headings receive a deterministic fallback prefix (`section`) so anchor links and TOC entries remain valid.
+- **TOC before headings.** A TOC can appear before the headings it lists. Collection is document-wide, not limited to previous siblings.
+- **TOC self-reference.** The collector ignores `table-of-contents` nodes, so a TOC never lists itself.
+- **Malformed TOC settings.** Bad levels, numbering, or style normalize to defaults in both editor and renderer.
 
-## 12. Tests
+## 13. Tests
 
 - `model/layout` ratio helpers: even split sums to 1; resize conserves total and respects `minRatio`; `ratiosToWidths`/`widthsToRatios` round-trip; container-0 fallback. (Pure, no DOM — mirrors existing `layout.test.ts`.)
 - Chrome primitives: `ChromeSelect` opens, lists options, fires `onChange`; `ChromeButton` fires `onPress` and exposes `aria-label`; danger intent renders error hover. (React Aria interaction tests.)
@@ -383,14 +488,20 @@ Changed:
 - Layout mode: switching `fixed → responsive` preserves proportions; new responsive table seeds even ratios; resize in responsive commits `colRatios` once (not per frame).
 - **Round-trip parity:** a responsive table exported and re-rendered through `@idco/content-renderer` produces percentage `<colgroup>` widths matching the editor; a fixed table still produces px. (Guards §11 "renderer drift".)
 - Ladle: visual pass on the `bg-base-200 → bg-base-100` chrome shift across callout/embed/media/post-ref.
+- `packages/lib` rich-text helpers: slugging, duplicate-safe ids, TOC level filtering, decimal numbering, empty-heading fallback, and malformed setting normalization.
+- Editor heading anchors: missing headings get `anchorId`; unique existing ids are preserved; duplicates are repaired; heading DOM receives `id`.
+- Editor TOC: insert from toolbar/slash, the settings popover updates node data, serialized document stores settings only.
+- Renderer anchors and TOC: headings render `id` + anchor links; TOC renders filtered links with matching hrefs and numbering.
+- UI TOC primitives: panel/plain/compact variants render stable markup and accessible links.
 
-## 13. Implementation Sequence
+## 14. Implementation Sequence
 
 1. **Part A — chrome primitives.** Pure refactor, unblocks the rest, no schema risk. Land and visually verify first.
 2. **Part D — header-edge guard.** Small, self-contained bug fix; can land alongside A.
 3. **Part B — layout modes.** Schema + renderer change. **Decided (2026-06-14):** new tables default to `responsive`; existing/imported docs stay `fixed`. The renderer-parity test (§12) is the gate that makes this safe to ship.
 4. **Part C — header / numbered toggles.** Builds on A's chrome and B's attribute mechanism.
 5. **Part E — merge / move.** Optional, post-MVP.
+6. **Part F — heading anchors and TOC.** Shared pure model first, then heading node replacement, TOC decorator node, renderer/UI parity, tests, and Ladle Playwright verification.
 
 Open decisions to confirm before Part B:
 
@@ -398,7 +509,7 @@ Open decisions to confirm before Part B:
 - Confirm the passthrough path for `layout`/`colRatios` (recommended) over a `TableNode` subclass.
 - Whether `full-width` ships in this pass or follows `responsive`.
 
-## 14. Definition Of Done
+## 15. Definition Of Done
 
 - One chrome vocabulary: `ChromeButton`/`ChromeBadge`/`ChromeSelect`/`ChromeBar` are the only source of badge/button/select styling; `BlockShell`, code block, and `TableControlsPlugin` all compose them; the four bespoke class constants in `table-controls-plugin.tsx` and the duplicated cluster in `code-block-node.tsx` are gone.
 - Tables support `fixed`, `responsive`, and (optionally) `full-width` layout, switchable from table chrome; responsive columns distribute by ratio and reflow with the container; the choice round-trips through the document and renders identically in `@idco/content-renderer`.
@@ -407,3 +518,7 @@ Open decisions to confirm before Part B:
 - `@lexical/table` coverage gaps are documented and either closed (headers) or consciously deferred (merge/move/background) with a tracking note.
 - Existing documents load and behave unchanged; all new behavior is additive and default-safe.
 - Tests in §12 pass, including the renderer round-trip parity test.
+- Heading anchors are on by default; headings round-trip stable `anchorId`, render anchor links in the editor and content renderer, and repair missing/duplicate ids.
+- A `table-of-contents` block is insertable through toolbar and slash menu, stores settings only, previews current document headings, and exposes settings for max/min level, numbering, style, and title through one settings popover.
+- `@idco/content-renderer` renders the TOC with the same entry/filter/numbering semantics as the editor preview, with no edit behavior.
+- The feature is covered by pure model tests, editor tests, renderer tests, UI tests, and a Playwright Ladle pass with console-error checks.

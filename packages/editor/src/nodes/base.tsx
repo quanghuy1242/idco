@@ -108,14 +108,14 @@ export abstract class RichTextDecoratorBlockNode extends DecoratorBlockNode {
     element.className = "my-3";
     // A block's nested inputs (callout textarea, code editor) are real form
     // controls. Lexical's key/clipboard listeners sit on the editor root *above*
-    // this node and otherwise hijack the inputs' native shortcuts — e.g. Ctrl/⌘
-    // +A select-all gets turned into "select the whole document". Stop those
-    // events here, before they bubble to the root, so the input keeps its own
-    // select-all / copy / cut / paste.
+    // this node and otherwise hijack the inputs' native keys: every keystroke
+    // lands in two places. e.g. Tab indents the block *and* the textarea; Enter
+    // splits the document paragraph *and* (because Lexical preventDefaults it)
+    // never reaches the textarea as a newline; Ctrl/⌘+A selects the whole doc
+    // instead of the input. Any keydown from a nested form control belongs to
+    // that control, so stop it here before it bubbles to the root.
     element.addEventListener("keydown", (event) => {
-      if ((event.ctrlKey || event.metaKey) && isFromFormControl(event)) {
-        event.stopPropagation();
-      }
+      if (isFromFormControl(event)) event.stopPropagation();
     });
     for (const type of ["copy", "cut", "paste"] as const) {
       element.addEventListener(type, (event) => {

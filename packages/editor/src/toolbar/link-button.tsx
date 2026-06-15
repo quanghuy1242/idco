@@ -2,7 +2,7 @@ import { NavIcon, Tooltip } from "@quanghuy1242/idco-ui";
 import { TOGGLE_LINK_COMMAND } from "@lexical/link";
 import { $isLinkNode } from "@lexical/link";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $getSelection, $isRangeSelection } from "lexical";
+import { $getSelection, $isRangeSelection, type BaseSelection } from "lexical";
 import { useState } from "react";
 import {
   Button as AriaButton,
@@ -17,9 +17,20 @@ import { useSelectionRestore } from "../hooks/use-selection-restore";
  * field, prefilled from the current link if the caret is inside one. Submitting
  * applies `TOGGLE_LINK_COMMAND`; an empty value removes the link.
  */
-export function LinkButton({ isDisabled }: { readonly isDisabled?: boolean }) {
+export function LinkButton({
+  getSelectionSnapshot,
+  isDisabled,
+  onApplied,
+  onDialogOpenChange,
+}: {
+  readonly getSelectionSnapshot?: () => BaseSelection | null;
+  readonly isDisabled?: boolean;
+  readonly onApplied?: () => void;
+  readonly onDialogOpenChange?: (open: boolean) => void;
+}) {
   const [editor] = useLexicalComposerContext();
-  const { onOpen, onClose, markHandled } = useSelectionRestore();
+  const { onOpen, onClose, markHandled, restoreSelection } =
+    useSelectionRestore({ getSelectionSnapshot });
   const [url, setUrl] = useState("");
   const [hasLink, setHasLink] = useState(false);
 
@@ -45,24 +56,30 @@ export function LinkButton({ isDisabled }: { readonly isDisabled?: boolean }) {
 
   function apply(close: () => void) {
     const value = url.trim();
+    restoreSelection();
     editor.dispatchCommand(TOGGLE_LINK_COMMAND, value === "" ? null : value);
     markHandled();
     close();
+    onApplied?.();
     requestAnimationFrame(() => editor.focus());
   }
 
   function remove(close: () => void) {
+    restoreSelection();
     editor.dispatchCommand(TOGGLE_LINK_COMMAND, null);
     markHandled();
     close();
+    onApplied?.();
     requestAnimationFrame(() => editor.focus());
   }
 
   return (
     <AriaDialogTrigger
       onOpenChange={(open) => {
+        onDialogOpenChange?.(open);
         if (open) {
           onOpen();
+          restoreSelection();
           syncFromSelection();
         } else {
           onClose();
@@ -80,6 +97,7 @@ export function LinkButton({ isDisabled }: { readonly isDisabled?: boolean }) {
         </AriaButton>
       </Tooltip>
       <AriaPopover
+        data-editor-selection-action-popover="true"
         placement="bottom"
         offset={8}
         className="popover-panel z-[60] w-72 data-[entering]:animate-popover-in data-[exiting]:animate-popover-out"

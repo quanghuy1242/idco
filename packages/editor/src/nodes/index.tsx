@@ -1,5 +1,4 @@
 import { $isTableCellNode } from "@lexical/table";
-import { $createHeadingNode } from "@lexical/rich-text";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   $createParagraphNode,
@@ -23,6 +22,7 @@ import {
   normalizeEmbedNode,
   normalizeMediaNode,
   normalizePostRefNode,
+  normalizeTableOfContentsNode,
   textFromChildren,
 } from "../model/normalize";
 import {
@@ -36,6 +36,8 @@ import { CodeBlockNode } from "./code-block-node";
 import { EmbedNode } from "./embed-node";
 import { MediaNode } from "./media-node";
 import { PostRefNode } from "./post-ref-node";
+import { $createEditorHeadingNode } from "./heading-node";
+import { TableOfContentsNode } from "./table-of-contents-node";
 
 export {
   INSERT_RICH_TEXT_NODE_COMMAND,
@@ -44,6 +46,8 @@ export {
   type RichTextEditorComment,
 } from "./base";
 export { CalloutNode, CodeBlockNode, EmbedNode, MediaNode, PostRefNode };
+export { EditorHeadingNode } from "./heading-node";
+export { TableOfContentsNode } from "./table-of-contents-node";
 
 /** Lexical node classes registered with the composer. */
 export const RICH_TEXT_DECORATOR_NODES = [
@@ -52,6 +56,7 @@ export const RICH_TEXT_DECORATOR_NODES = [
   EmbedNode,
   MediaNode,
   PostRefNode,
+  TableOfContentsNode,
 ] as const;
 
 export function richTextNodeToLexicalNode(
@@ -67,7 +72,10 @@ export function richTextNodeToLexicalNode(
     return paragraph;
   }
   if (node.type === "heading") {
-    const heading = $createHeadingNode(headingTag(node.tag));
+    const heading = $createEditorHeadingNode(
+      headingTag(node.tag),
+      node.anchorId,
+    );
     heading.append(
       ...textFromChildren(node.children, stringValue(node.text)).map((text) =>
         $createTextNode(text),
@@ -89,6 +97,9 @@ export function richTextNodeToLexicalNode(
   }
   if (node.type === "post-ref") {
     return new PostRefNode(normalizePostRefNode(node));
+  }
+  if (node.type === "table-of-contents") {
+    return new TableOfContentsNode(normalizeTableOfContentsNode(node));
   }
   return null;
 }

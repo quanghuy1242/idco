@@ -17,6 +17,7 @@
     "typecheck": "tsgo -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@quanghuy1242/idco-lib": "workspace:^",
     "@quanghuy1242/idco-ui": "workspace:^"
   },
   "peerDependencies": {

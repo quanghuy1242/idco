@@ -6,6 +6,7 @@ type TextVariant = "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "body" | "caption";
 type TextProps = {
   readonly variant?: TextVariant;
   readonly as?: ElementType;
+  readonly id?: string;
   readonly mono?: boolean;
   readonly className?: string;
   readonly children?: ReactNode;
@@ -36,6 +37,7 @@ const defaultElement: Record<TextVariant, ElementType> = {
 export function Text({
   variant = "body",
   as,
+  id,
   mono,
   className,
   children,
@@ -45,7 +47,7 @@ export function Text({
     ? `${textClasses[variant]} font-mono break-all`
     : textClasses[variant];
   return (
-    <Component className={className ? `${base} ${className}` : base}>
+    <Component id={id} className={className ? `${base} ${className}` : base}>
       {children}
     </Component>
   );

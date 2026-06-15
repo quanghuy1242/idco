@@ -129,6 +129,39 @@ describe("RichTextEditor", () => {
     expect(body).toHaveTextContent("Second item");
   });
 
+  it("renders heading anchors by default and repairs duplicate ids", () => {
+    const { container } = render(
+      <RichTextEditor
+        label="Body"
+        onChange={() => {}}
+        value={{
+          root: {
+            children: [
+              {
+                type: "heading",
+                tag: "h2",
+                children: [{ type: "text", text: "Overview" }],
+              },
+              {
+                type: "heading",
+                tag: "h3",
+                anchorId: "overview",
+                children: [{ type: "text", text: "Details" }],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(
+      container.querySelector('[data-idco-heading-anchor="overview"]'),
+    ).toHaveTextContent("Overview");
+    expect(
+      container.querySelector('[data-idco-heading-anchor="overview-2"]'),
+    ).toHaveTextContent("Details");
+  });
+
   it("adds starter nodes from the slash menu", async () => {
     const onChange = vi.fn<(value: unknown) => void>();
     render(
@@ -161,6 +194,128 @@ describe("RichTextEditor", () => {
           ]),
         },
       }),
+    );
+  });
+
+  it("inserts a TOC block and stores only its settings", async () => {
+    const onChange = vi.fn<(value: RichTextEditorDocument) => void>();
+    render(
+      <RichTextEditor
+        label="Body"
+        value={{
+          root: {
+            children: [
+              {
+                type: "heading",
+                tag: "h2",
+                children: [{ type: "text", text: "Install" }],
+              },
+              {
+                type: "heading",
+                tag: "h3",
+                children: [{ type: "text", text: "Configure" }],
+              },
+            ],
+          },
+        }}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /insert/i }));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /table of contents/i }),
+    );
+
+    expect(
+      await screen.findByRole("navigation", { name: /table of contents/i }),
+    ).toBeVisible();
+    expect(screen.getByRole("link", { name: /install/i })).toHaveAttribute(
+      "href",
+      "#install",
+    );
+    await waitFor(() =>
+      expect(
+        onChange.mock.calls.some(([value]) =>
+          value.root.children.some(
+            (node) =>
+              node.type === "table-of-contents" &&
+              node.maxLevel === 4 &&
+              node.minLevel === 1 &&
+              node.numbering === "decimal" &&
+              node.style === "plain" &&
+              !("entries" in node),
+          ),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("updates TOC numbering, max level, style, and title settings", async () => {
+    const onChange = vi.fn<(value: RichTextEditorDocument) => void>();
+    render(
+      <RichTextEditor
+        label="Body"
+        value={{
+          root: {
+            children: [
+              {
+                type: "heading",
+                tag: "h2",
+                children: [{ type: "text", text: "Install" }],
+              },
+              {
+                maxLevel: 3,
+                minLevel: 1,
+                numbering: "none",
+                style: "panel",
+                title: "Table of contents",
+                type: "table-of-contents",
+              },
+            ],
+          },
+        }}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /table of contents settings/i }),
+    );
+    const settings = await screen.findByRole("dialog", {
+      name: /table of contents settings/i,
+    });
+
+    fireEvent.click(
+      within(settings).getByRole("button", { name: /numbering/i }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: /numbered/i }));
+    fireEvent.click(
+      within(settings).getByRole("button", { name: /maximum heading level/i }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "H2" }));
+    fireEvent.click(within(settings).getByRole("button", { name: /style/i }));
+    fireEvent.click(await screen.findByRole("option", { name: /compact/i }));
+    fireEvent.change(
+      within(settings).getByRole("textbox", { name: /title/i }),
+      {
+        target: { value: "On this page" },
+      },
+    );
+
+    await waitFor(() =>
+      expect(
+        onChange.mock.calls.some(([value]) =>
+          value.root.children.some(
+            (node) =>
+              node.type === "table-of-contents" &&
+              node.numbering === "decimal" &&
+              node.maxLevel === 2 &&
+              node.style === "compact" &&
+              node.title === "On this page",
+          ),
+        ),
+      ).toBe(true),
     );
   });
 

@@ -1,4 +1,9 @@
 import {
+  ensureRichTextHeadingAnchors,
+  normalizeTocSettings,
+  slugifyHeadingAnchor,
+} from "@quanghuy1242/idco-lib";
+import {
   alignmentValue,
   calloutToneValue,
   codeLanguageValue,
@@ -22,7 +27,7 @@ export function normalizeDocument(value: unknown): RichTextEditorDocument {
     const children = Array.isArray(value.root.children)
       ? value.root.children.flatMap(normalizeNode)
       : [];
-    return { root: { children } };
+    return ensureRichTextHeadingAnchors({ root: { children } });
   }
   if (typeof value === "string" && value.trim()) {
     try {
@@ -49,9 +54,12 @@ export function normalizeNode(value: unknown): RichTextEditorNode[] {
       },
     ];
   }
-  if (value.type === "heading") {
+  if (value.type === "heading" || value.type === "editor-heading") {
     return [
       {
+        ...(stringValue(value.anchorId)
+          ? { anchorId: slugifyHeadingAnchor(stringValue(value.anchorId)!) }
+          : {}),
         children: normalizeChildren(value.children),
         tag: headingTag(value.tag),
         type: "heading",
@@ -115,6 +123,9 @@ export function normalizeNode(value: unknown): RichTextEditorNode[] {
   }
   if (value.type === "embed") {
     return [normalizeEmbedNode(value)];
+  }
+  if (value.type === "table-of-contents") {
+    return [normalizeTableOfContentsNode(value)];
   }
   if (value.type === "media") {
     return [normalizeMediaNode(value)];
@@ -224,6 +235,22 @@ export function normalizePostRefNode(
     title: stringValue(node.title) ?? "",
     type: "post-ref",
     url: stringValue(node.url) ?? "",
+  };
+}
+
+export function normalizeTableOfContentsNode(
+  node: RichTextEditorNode,
+): RichTextEditorNode {
+  const settings = normalizeTocSettings(node);
+  return {
+    maxLevel: settings.maxLevel,
+    minLevel: settings.minLevel,
+    numbering: settings.numbering,
+    placement: settings.placement,
+    side: settings.side,
+    style: settings.style,
+    title: settings.title,
+    type: "table-of-contents",
   };
 }
 

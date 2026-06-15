@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   RichTextRenderer,
@@ -229,5 +229,140 @@ describe("@idco/content-renderer", () => {
     expect(container.querySelector("style")?.textContent).toContain(
       "counter(rt-row)",
     );
+  });
+
+  it("renders heading anchors and repairs missing duplicate ids", () => {
+    render(
+      <RichTextRenderer
+        value={{
+          root: {
+            children: [
+              {
+                type: "heading",
+                tag: "h2",
+                children: [{ type: "text", text: "Overview" }],
+              },
+              {
+                type: "heading",
+                tag: "h3",
+                anchorId: "overview",
+                children: [{ type: "text", text: "Details" }],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: /overview/i })).toHaveAttribute(
+      "id",
+      "overview",
+    );
+    expect(screen.getByRole("heading", { name: /details/i })).toHaveAttribute(
+      "id",
+      "overview-2",
+    );
+    expect(
+      screen.getByRole("link", { name: /link to overview/i }),
+    ).toHaveAttribute("href", "#overview");
+  });
+
+  it("renders table-of-contents blocks from current headings and settings", () => {
+    render(
+      <RichTextRenderer
+        value={{
+          root: {
+            children: [
+              {
+                type: "table-of-contents",
+                title: "On this page",
+                minLevel: 2,
+                maxLevel: 3,
+                numbering: "decimal",
+                style: "compact",
+              },
+              {
+                type: "heading",
+                tag: "h1",
+                children: [{ type: "text", text: "Skipped" }],
+              },
+              {
+                type: "heading",
+                tag: "h2",
+                children: [{ type: "text", text: "Install" }],
+              },
+              {
+                type: "heading",
+                tag: "h3",
+                children: [{ type: "text", text: "Configure" }],
+              },
+              {
+                type: "heading",
+                tag: "h4",
+                children: [{ type: "text", text: "Too deep" }],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    const nav = screen.getByRole("navigation", { name: /on this page/i });
+    expect(nav).toHaveClass("rounded-box");
+    expect(
+      within(nav).getByRole("link", { name: /1 install/i }),
+    ).toHaveAttribute("href", "#install");
+    expect(
+      within(nav).getByRole("link", { name: /1.1 configure/i }),
+    ).toHaveAttribute("href", "#configure");
+    expect(within(nav).queryByRole("link", { name: /skipped/i })).toBeNull();
+    expect(within(nav).queryByRole("link", { name: /too deep/i })).toBeNull();
+  });
+
+  it("renders an aside table-of-contents as a sticky side rail plus an inline fallback", () => {
+    const { container } = render(
+      <RichTextRenderer
+        value={{
+          root: {
+            children: [
+              {
+                type: "table-of-contents",
+                title: "On this page",
+                minLevel: 2,
+                maxLevel: 3,
+                style: "compact",
+                placement: "aside",
+                side: "right",
+              },
+              {
+                type: "heading",
+                tag: "h2",
+                children: [{ type: "text", text: "Install" }],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    // The layout reserves a right-side rail column.
+    const layout = container.firstElementChild as HTMLElement;
+    expect(layout.className).toContain("lg:grid");
+    expect(layout.className).toContain("minmax(0,1fr)_16rem");
+
+    // Two copies render: the sticky rail (hidden below lg) and the inline
+    // fallback (hidden at lg+). Both list the same heading.
+    const navs = screen.getAllByRole("navigation", { name: /on this page/i });
+    expect(navs).toHaveLength(2);
+    navs.forEach((nav) => {
+      expect(
+        within(nav).getByRole("link", { name: /1 install/i }),
+      ).toHaveAttribute("href", "#install");
+    });
+
+    const rail = container.querySelector("aside");
+    expect(rail).not.toBeNull();
+    expect(rail?.className).toContain("hidden");
+    expect(rail?.className).toContain("lg:block");
   });
 });

@@ -1,6 +1,7 @@
 // DaisyUI 5: https://daisyui.com/components/alert/
 // DaisyUI 5: https://daisyui.com/components/badge/
 // DaisyUI 5: https://daisyui.com/components/card/
+// DaisyUI 5: https://daisyui.com/components/menu/
 "use client";
 
 import type { ReactNode } from "react";
@@ -8,11 +9,22 @@ import { Link as AriaLink } from "react-aria-components";
 import { Alert, type AlertTone } from "./alert";
 import { Badge } from "./badge";
 import { CodeEditor, type CodeEditorLanguage } from "./code-editor";
+import { NavIcon } from "./nav-icons";
 import { Text } from "./typography";
 
 export type RichTextHeadingLevel = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 export type RichTextListKind = "bullet" | "number";
 export type RichTextAlign = "left" | "center" | "right" | "justify";
+export type RichTextTableOfContentsStyle = "panel" | "plain" | "compact";
+
+export type RichTextTableOfContentsEntry = {
+  readonly id: string;
+  readonly href: string;
+  readonly text: string;
+  readonly level: number;
+  readonly depth?: number;
+  readonly number?: string;
+};
 
 type RichTextChildrenProps = {
   readonly children?: ReactNode;
@@ -51,18 +63,38 @@ export function RichTextParagraph({
 export function RichTextHeading({
   level,
   align,
+  anchorId,
+  anchorLabel,
   children,
 }: RichTextChildrenProps & {
   readonly level: RichTextHeadingLevel;
   readonly align?: RichTextAlign;
+  readonly anchorId?: string;
+  readonly anchorLabel?: string;
 }) {
+  const className = [
+    align ? alignClass[align] : "",
+    anchorId ? "group/heading scroll-mt-20" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <Text
+      id={anchorId}
       variant={level}
       as={level}
-      className={align ? alignClass[align] : undefined}
+      className={className || undefined}
     >
-      {children}
+      <span>{children}</span>
+      {anchorId ? (
+        <AriaLink
+          href={`#${anchorId}`}
+          aria-label={`Link to ${anchorLabel || "heading"}`}
+          className="ml-2 inline-flex align-middle text-base-content/40 opacity-0 transition hover:text-primary focus:text-primary focus:opacity-100 group-hover/heading:opacity-100"
+        >
+          <NavIcon name="Link2" />
+        </AriaLink>
+      ) : null}
     </Text>
   );
 }
@@ -389,4 +421,185 @@ export function RichTextTableCell({
     );
   }
   return <td className={className}>{children}</td>;
+}
+
+// Margin (not padding): see the call site — `menu` owns the anchor's
+// `padding-inline`, so depth has to indent with `margin-inline-start` to avoid
+// fighting it.
+const tocDepthClass: Record<number, string> = {
+  0: "",
+  1: "ms-6",
+  2: "ms-12",
+  3: "ms-18",
+  4: "ms-24",
+  5: "ms-30",
+};
+
+export function RichTextTableOfContents({
+  entries,
+  style = "plain",
+  title = "Table of contents",
+}: {
+  readonly entries: readonly RichTextTableOfContentsEntry[];
+  readonly style?: RichTextTableOfContentsStyle;
+  readonly title?: string;
+}) {
+  const hasNumbers = entries.some((entry) => Boolean(entry.number));
+  const body = (
+    <>
+      <div className="flex items-center gap-2 text-sm font-semibold text-base-content">
+        <NavIcon name="ScrollText" />
+        {title}
+      </div>
+      {entries.length > 0 ? (
+        <ul
+          className={`menu w-full p-0 ${style === "compact" ? "text-xs" : "text-sm"}`}
+        >
+          {entries.map((entry) => (
+            <li key={entry.id}>
+              <AriaLink
+                href={entry.href}
+                aria-label={
+                  entry.number ? `${entry.number} ${entry.text}` : entry.text
+                }
+                // Depth indentation uses `ms-*` (margin-inline-start), not
+                // `pl-*`: DaisyUI's `menu` already sets `padding-inline` on the
+                // anchor for its themed inset, and a competing `padding-left`
+                // would lose to it and collapse the first level flush with the
+                // root. Margin stacks cleanly on top of the menu padding. When
+                // any entry is numbered, every row reserves a fixed number column
+                // (the `min-w` span) so text aligns and the indentation reads as
+                // real structure — including unnumbered orphans (a heading whose
+                // parent level is filtered out), which keep an empty number cell
+                // instead of shifting left.
+                className={[
+                  "items-baseline",
+                  tocDepthClass[Math.min(entry.depth ?? 0, 5)] ?? "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {hasNumbers ? (
+                  <span className="min-w-9 text-right font-mono text-xs tabular-nums text-base-content/50">
+                    {entry.number ?? ""}
+                  </span>
+                ) : null}
+                {/* Headings are nav labels, so prefer wrapping over dropping
+                    text: panel/plain wrap with a hanging indent (the number sits
+                    in its own column) and clamp at 3 lines as a safety valve.
+                    `compact` opts into density, so it keeps single-line
+                    truncation. */}
+                <span
+                  className={`min-w-0 ${style === "compact" ? "truncate" : "line-clamp-3"}`}
+                >
+                  {entry.text}
+                </span>
+              </AriaLink>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="m-0 text-sm text-base-content/60">
+          No headings in this document.
+        </p>
+      )}
+    </>
+  );
+
+  if (style === "plain") {
+    return (
+      <nav aria-label={title} className="my-3 grid gap-2">
+        {body}
+      </nav>
+    );
+  }
+
+  if (style === "compact") {
+    return (
+      <nav
+        aria-label={title}
+        className="my-2 rounded-box border border-base-300 bg-base-100 p-3"
+      >
+        <div className="grid gap-1.5">{body}</div>
+      </nav>
+    );
+  }
+
+  // `border-base-300`, not DaisyUI's `card-border` (which is base-200): the rail
+  // sits beside the editor frame / article, and those use base-300 — as does the
+  // `compact` variant above — so match it for a consistent edge.
+  return (
+    <nav
+      aria-label={title}
+      className="card my-3 border border-base-300 bg-base-100"
+    >
+      <div className="card-body gap-2 p-4">{body}</div>
+    </nav>
+  );
+}
+
+export type RichTextTocSide = "left" | "right";
+
+/**
+ * Sticky side rail for a `placement: "aside"` table of contents. Hidden below
+ * `lg` (the shells render the TOC inline at that breakpoint instead); at `lg`+
+ * it pins to the top of the viewport and travels the full height of its grid
+ * track. Presentational only — the reserved column lives in `RichTextTocLayout`.
+ */
+export function RichTextTocRail({
+  entries,
+  title = "Table of contents",
+  style = "compact",
+  top = "1rem",
+}: {
+  readonly entries: readonly RichTextTableOfContentsEntry[];
+  readonly title?: string;
+  readonly style?: RichTextTableOfContentsStyle;
+  /** CSS length used for the sticky offset from the top of the scroll container. */
+  readonly top?: string;
+}) {
+  return (
+    <aside className="hidden lg:block">
+      {/* Drop the TOC's own vertical margin so the rail's top aligns with the
+          editor frame / article top instead of sitting a row lower. */}
+      <div className="lg:sticky [&>nav]:my-0" style={{ top }}>
+        <RichTextTableOfContents
+          entries={entries}
+          style={style}
+          title={title}
+        />
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * Side-aware responsive shell that reserves a column for a TOC rail. At `lg`+ it
+ * is a two-column grid (rail + content, ordered by `side`); below `lg` it
+ * collapses to normal flow so the rail's own `lg:` visibility hides it and the
+ * content reads single-column. When `rail` is absent it renders children as-is,
+ * so callers can mount it unconditionally. Used by both the editor shell and the
+ * read-side renderer so editor and published output stay in lockstep.
+ */
+export function RichTextTocLayout({
+  children,
+  rail,
+  side = "left",
+}: {
+  readonly children: ReactNode;
+  readonly rail?: ReactNode;
+  readonly side?: RichTextTocSide;
+}) {
+  if (!rail) return <>{children}</>;
+  const columns =
+    side === "right"
+      ? "lg:grid-cols-[minmax(0,1fr)_16rem]"
+      : "lg:grid-cols-[16rem_minmax(0,1fr)]";
+  return (
+    <div className={`lg:grid ${columns} lg:gap-6`}>
+      {side === "left" ? rail : null}
+      {children}
+      {side === "right" ? rail : null}
+    </div>
+  );
 }

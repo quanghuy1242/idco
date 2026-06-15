@@ -68,6 +68,14 @@ const richDocument: RichTextEditorDocument = {
         children: [{ type: "text", text: "Chapter one" }],
       },
       {
+        type: "table-of-contents",
+        title: "On this page",
+        minLevel: 1,
+        maxLevel: 4,
+        numbering: "decimal",
+        style: "plain",
+      },
+      {
         type: "paragraph",
         format: "center",
         children: [
@@ -76,6 +84,11 @@ const richDocument: RichTextEditorDocument = {
             text: "Centered intro paragraph — alignment is live.",
           },
         ],
+      },
+      {
+        type: "heading",
+        tag: "h3",
+        children: [{ type: "text", text: "Inline formatting" }],
       },
       {
         type: "paragraph",
@@ -194,6 +207,36 @@ const richDocument: RichTextEditorDocument = {
                 ],
               },
             ],
+          },
+        ],
+      },
+    ],
+  },
+};
+
+const selectionActionDocument: RichTextEditorDocument = {
+  root: {
+    children: [
+      {
+        type: "heading",
+        tag: "h2",
+        children: [{ type: "text", text: "Selection actions" }],
+      },
+      {
+        type: "paragraph",
+        children: [
+          {
+            type: "text",
+            text: "The contextual action model keeps selected text commands close to the authoring surface.",
+          },
+        ],
+      },
+      {
+        type: "quote",
+        children: [
+          {
+            type: "text",
+            text: "This quote keeps inline formatting unavailable while annotation actions remain possible.",
           },
         ],
       },
@@ -323,6 +366,27 @@ export const FullEditor: Story = () => {
   );
 };
 
+export const SelectionActions: Story = () => {
+  const [doc, setDoc] = useState<RichTextEditorDocument>(
+    selectionActionDocument,
+  );
+  const [comments, setComments] = useState<
+    { id: string; quote: string; body: string }[]
+  >([]);
+  return (
+    <RichTextEditor
+      label="Selection action surface"
+      name="selection-actions"
+      value={doc}
+      onChange={setDoc}
+      comments={comments}
+      onComment={(id, quote, body) =>
+        setComments((current) => [...current, { body, id, quote }])
+      }
+    />
+  );
+};
+
 export const CaretAroundBlocks: Story = () => {
   const [doc, setDoc] = useState<RichTextEditorDocument>(blockBoundedDocument);
   return (
@@ -396,5 +460,99 @@ export const ConstrainedNodes: Story = () => {
       value={doc}
       onChange={setDoc}
     />
+  );
+};
+
+const sideTocFiller =
+  "This paragraph exists to give the document enough height that the side rail has somewhere to stick while you scroll. The table of contents should stay pinned beside the body as these sections move past it.";
+
+const sideTocDocument: RichTextEditorDocument = {
+  root: {
+    children: [
+      {
+        type: "table-of-contents",
+        title: "On this page",
+        minLevel: 1,
+        maxLevel: 3,
+        numbering: "decimal",
+        // `panel`/`plain` wrap long headings with a hanging indent and clamp at
+        // three lines in the narrow rail instead of truncating; switch this to
+        // `compact` in the node settings to see single-line truncation.
+        style: "panel",
+        placement: "aside",
+        side: "left",
+      },
+      // Deliberately long sub-headings so the narrow rail has to wrap them.
+      ...[
+        ["Introduction", "What this guide covers and who it is written for"],
+        [
+          "Getting started",
+          "Installing the CLI and configuring your environment variables",
+        ],
+        [
+          "Configuration",
+          "Configuring the production deployment pipeline with environment-specific secrets",
+        ],
+        [
+          "Advanced usage",
+          "Deploying to multiple regions with zero-downtime rolling releases",
+        ],
+        [
+          "Troubleshooting",
+          "Diagnosing common failures and reading the structured request logs",
+        ],
+      ].flatMap(
+        ([
+          heading,
+          detail,
+        ]): RichTextEditorDocument["root"]["children"][number][] => [
+          {
+            type: "heading",
+            tag: "h2",
+            children: [{ type: "text", text: heading }],
+          },
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: sideTocFiller }],
+          },
+          {
+            type: "heading",
+            tag: "h3",
+            children: [{ type: "text", text: detail }],
+          },
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: sideTocFiller }],
+          },
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: sideTocFiller }],
+          },
+        ],
+      ),
+    ],
+  },
+};
+
+export const SideTableOfContents: Story = () => {
+  const [doc, setDoc] = useState<RichTextEditorDocument>(sideTocDocument);
+  return (
+    <Stack>
+      <Text variant="body">
+        The table of contents is set to <code>placement: aside</code>. It
+        renders as a sticky rail beside the editor frame; in the document flow
+        it leaves a compact placeholder. Open its settings to switch placement
+        (inline / side rail) and side (left / right). Scroll to see the rail
+        stay pinned. The sub-headings are intentionally long: in the rail they
+        wrap with a hanging indent and clamp at three lines rather than
+        truncating (switch the style to <code>compact</code> to compare).
+      </Text>
+      <RichTextEditor
+        label="Book section"
+        name="side-toc"
+        value={doc}
+        onChange={setDoc}
+      />
+    </Stack>
   );
 };

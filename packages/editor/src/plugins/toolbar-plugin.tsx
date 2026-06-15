@@ -12,10 +12,8 @@ import {
   INSERT_UNORDERED_LIST_COMMAND,
   REMOVE_LIST_COMMAND,
 } from "@lexical/list";
-import { INSERT_TABLE_COMMAND } from "@lexical/table";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
-  $createHeadingNode,
   $createQuoteNode,
   $isHeadingNode,
   $isQuoteNode,
@@ -35,9 +33,12 @@ import {
   FOCUS_COMMAND,
   FORMAT_ELEMENT_COMMAND,
   FORMAT_TEXT_COMMAND,
+  INDENT_CONTENT_COMMAND,
   REDO_COMMAND,
   UNDO_COMMAND,
+  OUTDENT_CONTENT_COMMAND,
   type ElementFormatType,
+  type LexicalCommand,
   type TextFormatType,
 } from "lexical";
 import {
@@ -53,12 +54,13 @@ import {
   Toolbar as AriaToolbar,
 } from "react-aria-components";
 import { capabilityFor, type BlockKind } from "../model/capabilities";
-import { paragraphNode } from "../model/normalize";
-import { canUse, type RichTextEditorNode } from "../model/schema";
 import {
-  INSERT_RICH_TEXT_NODE_COMMAND,
-  RichTextEditorBindingsContext,
-} from "../nodes";
+  editorInsertActions,
+  type EditorInsertAction,
+} from "../model/insert-actions";
+import { canUse } from "../model/schema";
+import { RichTextEditorBindingsContext } from "../nodes";
+import { $createEditorHeadingNode } from "../nodes/heading-node";
 import { CommentButton } from "../toolbar/comment-button";
 import { GlossaryButton } from "../toolbar/glossary-button";
 import { LinkButton } from "../toolbar/link-button";
@@ -132,83 +134,23 @@ const alignmentOptions: readonly {
   { icon: "AlignJustify", label: "Justify", value: "justify" },
 ];
 
-export const starterNodes: readonly {
-  readonly id: string;
-  readonly label: string;
-  readonly icon: string;
-  readonly node: RichTextEditorNode;
-}[] = [
-  {
-    icon: "Pilcrow",
-    id: "paragraph",
-    label: "Paragraph",
-    node: paragraphNode(""),
-  },
-  {
-    icon: "Heading2",
-    id: "heading",
-    label: "Heading",
-    node: {
-      children: [{ text: "Heading", type: "text" }],
-      tag: "h2",
-      type: "heading",
-    },
-  },
-  {
-    icon: "Info",
-    id: "callout",
-    label: "Callout",
-    node: {
-      children: [{ text: "Callout", type: "text" }],
-      tone: "info",
-      type: "callout",
-    },
-  },
-  {
-    icon: "Code",
-    id: "code-block",
-    label: "Code",
-    node: {
-      language: "ts",
-      text: "const value = true;",
-      type: "code-block",
-    },
-  },
-  {
-    icon: "Globe",
-    id: "embed",
-    label: "Embed",
-    node: { type: "embed", url: "https://example.com" },
-  },
-  {
-    icon: "Image",
-    id: "media",
-    label: "Media",
-    node: { alt: "", caption: "", mediaId: "", type: "media" },
-  },
-  {
-    icon: "Link2",
-    id: "post-ref",
-    label: "Post Ref",
-    node: { postId: "", title: "Referenced post", type: "post-ref" },
-  },
-];
+const editorControlSurfaceSelector = [
+  "[data-editor-selection-flyout]",
+  "[data-editor-selection-action-popover]",
+  "[data-editor-context-menu]",
+  "[data-editor-slash-menu]",
+].join(",");
 
-export function canInsertStarterNode(
-  item: (typeof starterNodes)[number],
-  bindings: {
-    readonly mediaLibrary?: unknown;
-    readonly onUploadMedia?: unknown;
-    readonly postLibrary?: unknown;
-  },
+function isEditorControlTarget(
+  target: EventTarget | null,
+  toolbar: HTMLElement | null,
 ): boolean {
-  if (item.node.type === "media") {
-    return Boolean(bindings.mediaLibrary || bindings.onUploadMedia);
-  }
-  if (item.node.type === "post-ref") {
-    return Boolean(bindings.postLibrary);
-  }
-  return true;
+  if (!(target instanceof Node)) return false;
+  if (toolbar?.contains(target)) return true;
+  return (
+    target instanceof Element &&
+    Boolean(target.closest(editorControlSurfaceSelector))
+  );
 }
 
 // Memoized: the toolbar lives inside the controlled editor, which re-renders on
@@ -244,6 +186,7 @@ export const LexicalToolbar = memo(function LexicalToolbar({
   const refreshToolbar = useCallback(() => {
     const selection = $getSelection();
     if (!$isRangeSelection(selection)) return;
+    setCanFormat(true);
     // Refreshed on every editor update (including each keystroke), so bail out
     // when the active formats are unchanged — a fresh Set would otherwise be a
     // new reference and re-render the whole toolbar on every edit.
@@ -299,10 +242,7 @@ export const LexicalToolbar = memo(function LexicalToolbar({
             // Keep controls enabled when focus moves to the toolbar itself
             // (clicking a format button), but disable them for block widgets.
             const next = event.relatedTarget;
-            if (
-              !(next instanceof Node) ||
-              !toolbarRef.current?.contains(next)
-            ) {
+            if (!isEditorControlTarget(next, toolbarRef.current)) {
               setCanFormat(false);
             }
             return false;
@@ -367,7 +307,7 @@ export const LexicalToolbar = memo(function LexicalToolbar({
       } else if (id === "quote") {
         $setBlocksType(selection, () => $createQuoteNode());
       } else {
-        $setBlocksType(selection, () => $createHeadingNode(id));
+        $setBlocksType(selection, () => $createEditorHeadingNode(id));
       }
     });
     setStyleOpen(false);
@@ -399,18 +339,18 @@ export const LexicalToolbar = memo(function LexicalToolbar({
     focusEditor();
   };
 
-  const insertNode = (node: RichTextEditorNode) => {
-    editor.dispatchCommand(INSERT_RICH_TEXT_NODE_COMMAND, node);
-    onMenuOpen(false);
-    focusEditorAfterMenu();
+  const applyIndent = (
+    command:
+      | LexicalCommand<void>
+      | typeof INDENT_CONTENT_COMMAND
+      | typeof OUTDENT_CONTENT_COMMAND,
+  ) => {
+    editor.dispatchCommand(command, undefined);
+    focusEditor();
   };
 
-  const insertTable = () => {
-    editor.dispatchCommand(INSERT_TABLE_COMMAND, {
-      columns: "3",
-      includeHeaders: true,
-      rows: "3",
-    });
+  const applyInsertAction = (action: EditorInsertAction) => {
+    action.run(editor);
     onMenuOpen(false);
     focusEditorAfterMenu();
   };
@@ -425,11 +365,7 @@ export const LexicalToolbar = memo(function LexicalToolbar({
   );
   const currentStyle =
     styleChoices.find((option) => option.id === blockKind) ?? styleChoices[0];
-  const menuItems = starterNodes.filter(
-    (item) =>
-      canUse(item.node.type, allowedNodes) &&
-      canInsertStarterNode(item, bindings),
-  );
+  const insertActions = editorInsertActions({ allowedNodes, bindings });
 
   return (
     <AriaToolbar
@@ -527,6 +463,26 @@ export const LexicalToolbar = memo(function LexicalToolbar({
         </>
       ) : null}
 
+      {textAllowed ? (
+        <>
+          <ToolbarDivider />
+          <div className="flex items-center gap-1">
+            <ToolbarButton
+              icon="IndentDecrease"
+              label="Outdent"
+              isDisabled={!canFormat || !capability.canIndent}
+              onPress={() => applyIndent(OUTDENT_CONTENT_COMMAND)}
+            />
+            <ToolbarButton
+              icon="IndentIncrease"
+              label="Indent"
+              isDisabled={!canFormat || !capability.canIndent}
+              onPress={() => applyIndent(INDENT_CONTENT_COMMAND)}
+            />
+          </div>
+        </>
+      ) : null}
+
       {canUse("list", allowedNodes) ? (
         <>
           <ToolbarDivider />
@@ -567,7 +523,7 @@ export const LexicalToolbar = memo(function LexicalToolbar({
         </>
       ) : null}
 
-      {menuItems.length > 0 || canUse("table", allowedNodes) ? (
+      {insertActions.length > 0 ? (
         <>
           <ToolbarDivider />
           <MenuTrigger
@@ -583,27 +539,19 @@ export const LexicalToolbar = memo(function LexicalToolbar({
               <span>Insert</span>
             </AriaButton>
             <Menu aria-label={`${label} insert block`} className="w-56">
-              {menuItems.map((item) => (
+              {insertActions.map((action) => (
                 <MenuItem
-                  key={item.id}
-                  id={item.id}
-                  textValue={item.label}
-                  onAction={() => insertNode(item.node)}
+                  key={action.id}
+                  id={action.id}
+                  textValue={action.label}
+                  onAction={() => applyInsertAction(action)}
                 >
                   <span className="flex items-center gap-2.5">
-                    <NavIcon name={item.icon} />
-                    {item.label}
+                    <NavIcon name={action.icon} />
+                    {action.label}
                   </span>
                 </MenuItem>
               ))}
-              {canUse("table", allowedNodes) ? (
-                <MenuItem id="table" textValue="Table" onAction={insertTable}>
-                  <span className="flex items-center gap-2.5">
-                    <NavIcon name="Table" />
-                    Table
-                  </span>
-                </MenuItem>
-              ) : null}
             </Menu>
           </MenuTrigger>
         </>
