@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:61000";
+const serverHost = process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1";
+const serverPort = Number(process.env.PLAYWRIGHT_SERVER_PORT ?? 61000);
+const baseURL =
+  process.env.PLAYWRIGHT_BASE_URL ?? `http://${serverHost}:${serverPort}`;
 
 export default defineConfig({
   expect: {
@@ -22,7 +25,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm dev:ladle",
+    command: `pnpm exec ladle serve --host ${serverHost} --port ${serverPort} --noWatch`,
     reuseExistingServer: true,
     timeout: 120_000,
     url: baseURL,
