@@ -4,6 +4,7 @@ const serverHost = process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1";
 const serverPort = Number(process.env.PLAYWRIGHT_SERVER_PORT ?? 61000);
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ?? `http://${serverHost}:${serverPort}`;
+const browserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL;
 
 export default defineConfig({
   expect: {
@@ -14,7 +15,10 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(browserChannel ? { channel: browserChannel } : {}),
+      },
     },
   ],
   reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],

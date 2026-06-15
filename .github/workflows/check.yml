@@ -32,10 +32,11 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: google-chrome --version
       - run: pnpm test:e2e:editor
         env:
           EDITOR_PERF_REPORT_DIR: test-results/editor-perf
+          PLAYWRIGHT_BROWSER_CHANNEL: chrome
       - uses: actions/upload-artifact@v5
         if: always()
         with:
