@@ -127,6 +127,79 @@ async function focusedHostSnapshot(
 }
 
 /**
+ * Replay the exact hidden-textarea event stream real Firefox emits for Windows
+ * Vietnamese Telex when typing "xin chào" (captured from the polyfill story).
+ * The shape that broke earlier fixes:
+ *   - every preedit update fires a `beforeinput`+`input` pair, both with
+ *     `inputType: "insertCompositionText"` and the full composing word as `data`
+ *     (so the `input` twin is pure redundancy), and
+ *   - Firefox fires one more `insertCompositionText` `input` with
+ *     `isComposing: false` *after* `compositionend`.
+ * The polyfill must drive composition only from `beforeinput` and ignore every
+ * `insertCompositionText` `input`; re-applying the trailing post-`compositionend`
+ * event re-inserts the committed word ("xin" → "xinxin", "chào" → "chàochào").
+ */
+async function replayFirefoxTelexXinChao(page: Page): Promise<void> {
+  await polyfillTextarea(page).evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    const setValue = (value: string) => {
+      textarea.value = value;
+      textarea.setSelectionRange(value.length, value.length);
+    };
+    const fireInput = (
+      type: "beforeinput" | "input",
+      inputType: string,
+      data: string,
+      isComposing: boolean,
+    ) =>
+      textarea.dispatchEvent(
+        new InputEvent(type, {
+          bubbles: true,
+          cancelable: type === "beforeinput" && inputType === "insertText",
+          data,
+          inputType,
+          isComposing,
+        }),
+      );
+
+    // Compose one IME word in place after `base`. Firefox reports the OLD value
+    // on `beforeinput` and the NEW value on `input`; only the non-composition
+    // `input` path reads the textarea value, so faithfulness there is what
+    // matters.
+    const composeWord = (base: string, steps: readonly string[]) => {
+      const final = steps[steps.length - 1] ?? "";
+      textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+      for (const data of steps) {
+        textarea.dispatchEvent(
+          new CompositionEvent("compositionupdate", { data }),
+        );
+        fireInput("beforeinput", "insertCompositionText", data, true);
+        setValue(base + data);
+        fireInput("input", "insertCompositionText", data, true);
+      }
+      setValue(base + final);
+      textarea.dispatchEvent(
+        new CompositionEvent("compositionend", { data: final }),
+      );
+      // Trailing event Firefox emits after compositionend — the real bug trigger.
+      fireInput("input", "insertCompositionText", final, false);
+    };
+
+    const insertText = (base: string, data: string) => {
+      fireInput("beforeinput", "insertText", data, false);
+      setValue(base + data);
+      fireInput("input", "insertText", data, false);
+    };
+
+    composeWord("", ["x", "xi", "xin", "xin"]);
+    insertText("xin", " ");
+    composeWord("xin ", ["c", "ch", "cha", "chao", "chào", "chào"]);
+  });
+}
+
+/**
  * Return a clickable point for a model offset in the plain text node. The
  * multi-click tests need stable coordinates that follow browser font metrics,
  * not guessed pixel offsets.
@@ -512,6 +585,42 @@ test("shared renderer paints IME preedit formats from the API", async ({
 
   await expect(composition).toHaveCount(0);
   expect((await diagnostics(page)).composing).toBe(false);
+});
+
+// This bug is in the polyfill, not any one engine: with the previous fix this
+// replay fails identically on both firefox AND webkit (Received "xinchàochào").
+// We run it on every polyfill engine. The event stream was captured from real
+// Firefox; we have no real Safari/WebKit capture (Playwright can't drive a
+// platform IME, and Windows has no WebKit browser), so the webkit run is a
+// synthetic proxy. Real Safari coverage rides on upstream-parity: the polyfill
+// uses the same beforeinput-only composition strategy as @neftaly's polyfill,
+// which is fuzz-tested against Safari 15.4+.
+test("polyfill composes Vietnamese Telex 'xin chào' from the real Firefox event stream", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  await replayFirefoxTelexXinChao(page);
+
+  // Earlier fixes left "xinxin chàochào" here (the dup), which then desynced the
+  // model from the textarea and let the real IME corrupt it further into "o  ".
+  // The dup is the reproducible root cause; "o  " was its downstream symptom.
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("xin chào");
+  expect((await diagnostics(page)).composing).toBe(false);
+
+  // Assert the *rendered* text too, not just the model: the controller mirrors
+  // `EditContext.text` into the rendered surface wholesale, so a model/display
+  // divergence would show up here.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin chào");
 });
 
 test("native and API polyfill expose the same focused host outline", async ({

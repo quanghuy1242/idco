@@ -342,6 +342,7 @@ class PolyfillBinding {
   readonly #shadowRoot: ShadowRoot;
   #composing = false;
   #compositionStart = 0;
+  #compositionEnd = 0;
 
   constructor(host: HTMLElement, ctx: EditContext) {
     this.#host = host;
@@ -375,6 +376,7 @@ class PolyfillBinding {
 
     host.addEventListener("pointerdown", this.#focusSink);
     host.addEventListener("focus", this.#focusSink);
+    textarea.addEventListener("beforeinput", this.#onBeforeInput);
     textarea.addEventListener("input", this.#onInput);
     textarea.addEventListener("compositionstart", this.#onCompositionStart);
     textarea.addEventListener("compositionend", this.#onCompositionEnd);
@@ -382,6 +384,10 @@ class PolyfillBinding {
 
   /** Keep the textarea selection aligned with the model (engine-driven nav). */
   syncSelection(): void {
+    // Do not write back into the hidden textarea while the browser owns an
+    // active composition session. Safari/Firefox IMEs can cancel composition if
+    // we replace the textarea value mid-preedit; sync once composition ends.
+    if (this.#composing || this.#ctx.isComposing) return;
     this.#textarea.value = this.#ctx.text;
     this.#textarea.setSelectionRange(
       this.#ctx.selectionStart,
@@ -392,6 +398,16 @@ class PolyfillBinding {
   destroy(): void {
     this.#host.removeEventListener("pointerdown", this.#focusSink);
     this.#host.removeEventListener("focus", this.#focusSink);
+    this.#textarea.removeEventListener("beforeinput", this.#onBeforeInput);
+    this.#textarea.removeEventListener("input", this.#onInput);
+    this.#textarea.removeEventListener(
+      "compositionstart",
+      this.#onCompositionStart,
+    );
+    this.#textarea.removeEventListener(
+      "compositionend",
+      this.#onCompositionEnd,
+    );
     this.#textarea.remove();
   }
 
@@ -434,32 +450,120 @@ class PolyfillBinding {
     this.syncSelection();
   };
 
-  readonly #onInput = (): void => {
+  /**
+   * Apply IME composition from `beforeinput`, replacing the tracked composition
+   * range with the event's reported `data`. `insertCompositionText` reports the
+   * whole composing word each update (e.g. "c" → "ch" → "chào"), and the IME
+   * fires a matching `beforeinput` before every composition `input`, so this is
+   * the single authoritative entry point for composition — the `input` twin is
+   * ignored (see `#onInput`). Driving the model from the composition range plus
+   * `data` keeps the surrounding document text stable regardless of how the
+   * browser mutates the hidden textarea.
+   */
+  readonly #onBeforeInput = (event: Event): void => {
+    if (!(event instanceof InputEvent)) return;
+    if (event.inputType !== "insertCompositionText") return;
+    event.stopPropagation();
+    this.#beginComposition();
+    this.#replaceCompositionText(event.data ?? "");
+    this.#emitCompositionFormat();
+  };
+
+  readonly #onInput = (event: Event): void => {
+    // Composition is handled entirely from `beforeinput`. Ignore every
+    // `insertCompositionText` `input` event unconditionally — matching native
+    // EditContext and the upstream polyfill. This is load-bearing on Firefox,
+    // which fires a trailing `insertCompositionText` `input` (isComposing
+    // === false) *after* `compositionend`; re-applying that event re-inserts the
+    // just-committed word ("xin" → "xinxin", "chào" → "chàochào") and cascades
+    // into the corrupted "o  " state. The textarea value during composition is
+    // never folded back here.
+    if (
+      event instanceof InputEvent &&
+      event.inputType === "insertCompositionText"
+    ) {
+      return;
+    }
     this.#emitTextUpdate();
     if (this.#composing) this.#emitCompositionFormat();
   };
 
   readonly #onCompositionStart = (): void => {
-    this.#composing = true;
-    this.#compositionStart =
-      this.#textarea.selectionStart ?? this.#ctx.selectionStart;
-    this.#ctx.isComposing = true;
-    this.#ctx.compositionStart = this.#compositionStart;
-    this.#ctx.compositionEnd = this.#compositionStart;
-    this.#ctx.dispatchEvent(new Event("compositionstart"));
+    this.#beginComposition();
   };
 
-  readonly #onCompositionEnd = (): void => {
+  readonly #onCompositionEnd = (event: CompositionEvent): void => {
+    if (!this.#composing) return;
+    const finalText = event.data ?? "";
+    const activeText = this.#ctx.text.slice(
+      this.#compositionStart,
+      this.#compositionEnd,
+    );
+    if (finalText !== "" && finalText !== activeText) {
+      this.#replaceCompositionText(finalText);
+    }
     this.#composing = false;
-    this.#emitTextUpdate();
     this.#ctx.isComposing = false;
     this.#ctx.compositionStart = this.#ctx.selectionStart;
     this.#ctx.compositionEnd = this.#ctx.selectionEnd;
+    this.#compositionStart = this.#ctx.selectionStart;
+    this.#compositionEnd = this.#ctx.selectionEnd;
+    this.syncSelection();
     this.#ctx.dispatchEvent(
       new PolyfilledTextFormatUpdateEvent("textformatupdate", []),
     );
     this.#ctx.dispatchEvent(new Event("compositionend"));
   };
+
+  /**
+   * Start a composition from the current logical selection (idempotent within a
+   * session). Tracking the composition range in model coordinates — rather than
+   * reading the textarea DOM range per event — keeps the surrounding document
+   * text stable as the IME rewrites the active word in place.
+   */
+  #beginComposition(): void {
+    if (this.#composing) return;
+    this.#composing = true;
+    this.#compositionStart = Math.min(
+      this.#ctx.selectionStart,
+      this.#ctx.selectionEnd,
+    );
+    this.#compositionEnd = Math.max(
+      this.#ctx.selectionStart,
+      this.#ctx.selectionEnd,
+    );
+    this.#ctx.isComposing = true;
+    this.#ctx.compositionStart = this.#compositionStart;
+    this.#ctx.compositionEnd = this.#compositionEnd;
+    this.#ctx.dispatchEvent(new Event("compositionstart"));
+  }
+
+  /**
+   * Replace the current preedit span with the IME's latest full composition
+   * string. `insertCompositionText` reports the whole composing text each time,
+   * so this rewrites the tracked composition range instead of appending deltas.
+   */
+  #replaceCompositionText(text: string): void {
+    const rangeStart = this.#compositionStart;
+    const rangeEnd = this.#compositionEnd;
+    const next = `${this.#ctx.text.slice(0, rangeStart)}${text}${this.#ctx.text.slice(rangeEnd)}`;
+    const selection = rangeStart + text.length;
+    this.#ctx.text = next;
+    this.#ctx.selectionStart = selection;
+    this.#ctx.selectionEnd = selection;
+    this.#ctx.compositionStart = rangeStart;
+    this.#compositionEnd = selection;
+    this.#ctx.compositionEnd = selection;
+    this.#ctx.dispatchEvent(
+      new PolyfilledTextUpdateEvent("textupdate", {
+        text,
+        selectionStart: selection,
+        selectionEnd: selection,
+        updateRangeStart: rangeStart,
+        updateRangeEnd: rangeEnd,
+      }),
+    );
+  }
 
   #emitTextUpdate(): void {
     const previousLength = this.#ctx.text.length;
@@ -471,7 +575,8 @@ class PolyfillBinding {
     this.#ctx.selectionEnd = selectionEnd;
     if (this.#composing) {
       this.#ctx.compositionStart = this.#compositionStart;
-      this.#ctx.compositionEnd = Math.max(this.#compositionStart, selectionEnd);
+      this.#compositionEnd = Math.max(this.#compositionStart, selectionEnd);
+      this.#ctx.compositionEnd = this.#compositionEnd;
     }
     this.#ctx.dispatchEvent(
       new PolyfilledTextUpdateEvent("textupdate", {
@@ -491,7 +596,7 @@ class PolyfillBinding {
    * a simple thin underline for the shared renderer to paint.
    */
   #emitCompositionFormat(): void {
-    const end = Math.max(this.#compositionStart, this.#ctx.selectionEnd);
+    const end = Math.max(this.#compositionStart, this.#compositionEnd);
     const formats =
       end > this.#compositionStart
         ? [
