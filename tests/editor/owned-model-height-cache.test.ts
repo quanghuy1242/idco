@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { RichTextSectionHeightCache } from "../../packages/editor/src/large-document/height-cache";
+import { RichTextSectionHeightCache } from "../../packages/editor/src/owned-model/core/height-cache";
 
-describe("large document height cache", () => {
+describe("owned-model height cache", () => {
   it("keys measured heights by section id and content signature", () => {
     const cache = new RichTextSectionHeightCache();
     cache.set({ sectionId: "s1", signature: "a" }, 123.2);

@@ -39,17 +39,6 @@ function ControlledMediaEditor() {
   return <RichTextEditor label="Body" value={value} onChange={setValue} />;
 }
 
-function paragraphs(count: number): RichTextEditorDocument {
-  return {
-    root: {
-      children: Array.from({ length: count }, (_, index) => ({
-        type: "paragraph",
-        children: [{ type: "text", text: `Paragraph ${index + 1}` }],
-      })),
-    },
-  };
-}
-
 describe("RichTextEditor", () => {
   it("renders a Lexical textbox with formatting toolbar controls", () => {
     const onChange = vi.fn<(value: unknown) => void>();
@@ -72,44 +61,6 @@ describe("RichTextEditor", () => {
     expect(screen.getByRole("button", { name: /italic/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /more/i })).toBeVisible();
     expect(onChange).not.toHaveBeenCalled();
-  });
-
-  it("keeps auto large-document mode stable near the threshold", () => {
-    const onChange = vi.fn<(value: RichTextEditorDocument) => void>();
-    const { container, rerender } = render(
-      <RichTextEditor
-        label="Body"
-        largeDocument={{ maxStandardBlocks: 10, mode: "auto" }}
-        value={paragraphs(11)}
-        onChange={onChange}
-      />,
-    );
-
-    expect(
-      container.querySelector("[data-large-document-shell]"),
-    ).toBeVisible();
-
-    rerender(
-      <RichTextEditor
-        label="Body"
-        largeDocument={{ maxStandardBlocks: 10, mode: "auto" }}
-        value={paragraphs(10)}
-        onChange={onChange}
-      />,
-    );
-    expect(
-      container.querySelector("[data-large-document-shell]"),
-    ).toBeVisible();
-
-    rerender(
-      <RichTextEditor
-        label="Body"
-        largeDocument={{ maxStandardBlocks: 10, mode: "auto" }}
-        value={paragraphs(8)}
-        onChange={onChange}
-      />,
-    );
-    expect(container.querySelector("[data-large-document-shell]")).toBeNull();
   });
 
   it("exposes icon-only formatting controls and a text-style picker", () => {

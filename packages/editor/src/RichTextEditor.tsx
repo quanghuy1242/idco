@@ -9,13 +9,6 @@ import {
 } from "@quanghuy1242/idco-ui";
 import type { EditorState } from "lexical";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  documentScale,
-  VirtualRichTextEditor,
-  type RichTextEditorMode,
-  type RichTextLargeDocumentPolicy,
-} from "./large-document";
-import { resolveLargeDocumentPolicy } from "./large-document/policy";
 import { RichTextEditorComposer } from "./RichTextEditorComposer";
 import { normalizeDocument } from "./model/normalize";
 import {
@@ -48,10 +41,10 @@ export type RichTextEditorProps = {
   readonly comments?: RichTextEditorBindings["comments"];
   readonly onCommentUpdate?: RichTextEditorBindings["onCommentUpdate"];
   readonly onCommentDelete?: RichTextEditorBindings["onCommentDelete"];
-  readonly largeDocument?: RichTextLargeDocumentPolicy;
   /**
-   * Phase 0 large-document support (docs/009 §6.1.1). When `true`, decorator
-   * block bodies that are offscreen collapse to measured placeholders instead
+   * Phase 0 decorator-body virtualization (docs/009 §6.1.1). When `true`,
+   * decorator block bodies that are offscreen collapse to measured placeholders
+   * instead
    * of staying mounted, so a decorator-heavy document keeps the live React
    * subtree bounded. Off by default; selection, undo, and persisted JSON are
    * unchanged either way.
@@ -74,7 +67,6 @@ export function RichTextEditor({
   comments,
   onCommentUpdate,
   onCommentDelete,
-  largeDocument,
   decoratorVirtualization = false,
 }: RichTextEditorProps) {
   // The value we last emitted via `onChange`. When the controlled `value` is
@@ -83,7 +75,6 @@ export function RichTextEditor({
   // plugin's full re-serialize. Only a genuinely external value gets reapplied.
   const lastEmittedValue = useRef<RichTextEditorDocument | null>(null);
   const currentDocument = useRef<RichTextEditorDocument | null>(null);
-  const selectedModeRef = useRef<RichTextEditorMode>("standard");
   const onChangeRef = useRef(onChange);
   const isEcho = value === lastEmittedValue.current;
   const document = useMemo(
@@ -149,45 +140,6 @@ export function RichTextEditor({
     scheduleEditorStatePublish(editorState);
   }
 
-  const selectedMode = selectStableEditorMode(
-    document,
-    largeDocument,
-    selectedModeRef.current,
-  );
-
-  useEffect(() => {
-    selectedModeRef.current = selectedMode;
-  }, [selectedMode]);
-
-  if (selectedMode !== "standard") {
-    return (
-      <Stack gap="sm">
-        <VirtualRichTextEditor
-          allowedEmbedDomains={allowedEmbedDomains}
-          allowedNodes={allowedNodes}
-          comments={comments}
-          label={label}
-          largeDocument={largeDocument}
-          mediaLibrary={mediaLibrary}
-          name={name}
-          postLibrary={postLibrary}
-          readOnly={selectedMode === "read-shell"}
-          value={document}
-          onChange={onChange}
-          onComment={onComment}
-          onCommentDelete={onCommentDelete}
-          onCommentUpdate={onCommentUpdate}
-          onUploadMedia={onUploadMedia}
-        />
-        {error ? (
-          <p role="alert" className="text-sm text-error">
-            {error}
-          </p>
-        ) : null}
-      </Stack>
-    );
-  }
-
   return (
     <Stack gap="sm">
       <Text variant="h3">{label}</Text>
@@ -224,29 +176,4 @@ export function RichTextEditor({
       ) : null}
     </Stack>
   );
-}
-
-function selectStableEditorMode(
-  document: RichTextEditorDocument,
-  policyInput: RichTextLargeDocumentPolicy | undefined,
-  currentMode: RichTextEditorMode,
-): RichTextEditorMode {
-  if (!policyInput) return "standard";
-  if (policyInput.mode && policyInput.mode !== "auto") return policyInput.mode;
-  const policy = resolveLargeDocumentPolicy(policyInput);
-  const scale = documentScale(document);
-  const aboveEnterThreshold =
-    scale.rootBlocks > policy.maxStandardBlocks ||
-    scale.decoratorBlocks > policy.maxStandardDecoratorBlocks;
-  if (currentMode !== "large-document") {
-    return aboveEnterThreshold ? "large-document" : "standard";
-  }
-  const leaveBlockThreshold = Math.floor(policy.maxStandardBlocks * 0.85);
-  const leaveDecoratorThreshold = Math.floor(
-    policy.maxStandardDecoratorBlocks * 0.85,
-  );
-  return scale.rootBlocks <= leaveBlockThreshold &&
-    scale.decoratorBlocks <= leaveDecoratorThreshold
-    ? "standard"
-    : "large-document";
 }

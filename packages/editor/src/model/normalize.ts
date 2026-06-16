@@ -16,7 +16,7 @@ import {
   type RichTextEditorNode,
   type RichTextEditorDocument,
 } from "./schema";
-import { ensureDocumentNodeIds } from "../large-document/ids";
+import { ensureDocumentNodeIds } from "../owned-model/core/ids";
 
 /**
  * Coerce untrusted / legacy JSON into the canonical document shape. This is the

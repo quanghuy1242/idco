@@ -14,8 +14,6 @@ const STANDARD_STORY =
   "packages-editor--rich-text-editor--decorator-heavy-standard";
 const VIRTUALIZED_STORY =
   "packages-editor--rich-text-editor--decorator-heavy-virtualized";
-const SECTION_SHELL_STORY =
-  "packages-editor--rich-text-editor--decorator-heavy-section-shell";
 
 type StoryMetrics = {
   readonly mountedBodies: number;
@@ -27,16 +25,6 @@ type StoryMetrics = {
   readonly peakMountedDuringScroll: number;
 };
 
-type SectionShellMetrics = {
-  readonly blockCount: number;
-  readonly domNodes: number;
-  readonly measuredHeightCount: number;
-  readonly readyMs: number;
-  readonly renderedSectionCount: number;
-  readonly sectionCount: number;
-  readonly totalHeight: number;
-};
-
 test.use({ trace: "off" });
 
 test("decorator virtualization: bounded mounted bodies and DOM weight", async ({
@@ -44,10 +32,6 @@ test("decorator virtualization: bounded mounted bodies and DOM weight", async ({
 }, testInfo) => {
   const standard = await measureStory(page, STANDARD_STORY);
   const virtualized = await measureStory(page, VIRTUALIZED_STORY);
-  const sectionShell = await measureSectionShellStory(
-    page,
-    SECTION_SHELL_STORY,
-  );
 
   const report = {
     recordedAt: new Date().toISOString(),
@@ -57,7 +41,6 @@ test("decorator virtualization: bounded mounted bodies and DOM weight", async ({
       runId: process.env.GITHUB_RUN_ID ?? null,
     },
     standard,
-    sectionShell,
     virtualized,
     deltas: {
       mountedBodiesReductionPct: reductionPct(
@@ -69,14 +52,6 @@ test("decorator virtualization: bounded mounted bodies and DOM weight", async ({
         virtualized.domNodes,
       ),
       readyMsReductionPct: reductionPct(standard.readyMs, virtualized.readyMs),
-      sectionShellDomNodeReductionPct: reductionPct(
-        standard.domNodes,
-        sectionShell.domNodes,
-      ),
-      sectionShellReadyMsReductionPct: reductionPct(
-        standard.readyMs,
-        sectionShell.readyMs,
-      ),
     },
   };
   await writeReport(report, testInfo);
@@ -104,12 +79,6 @@ test("decorator virtualization: bounded mounted bodies and DOM weight", async ({
   expect(virtualized.peakMountedDuringScroll).toBeLessThan(
     standard.mountedBodies * 0.5,
   );
-
-  expect(sectionShell.blockCount).toBe(521);
-  expect(sectionShell.renderedSectionCount).toBeLessThan(
-    sectionShell.sectionCount,
-  );
-  expect(sectionShell.domNodes).toBeLessThan(standard.domNodes);
 });
 
 async function measureStory(page: Page, story: string): Promise<StoryMetrics> {
@@ -145,34 +114,6 @@ async function measureStory(page: Page, story: string): Promise<StoryMetrics> {
     domNodes: initial.domNodes,
     readyMs,
     peakMountedDuringScroll,
-  };
-}
-
-async function measureSectionShellStory(
-  page: Page,
-  story: string,
-): Promise<SectionShellMetrics> {
-  const startedAt = Date.now();
-  await page.goto(`/?story=${story}`, { waitUntil: "commit" });
-  await page
-    .locator("[data-large-document-shell]")
-    .waitFor({ state: "visible" });
-  await expect
-    .poll(() =>
-      page.evaluate(() => window["__IDCO_LARGE_DOC__"]?.sectionCount ?? 0),
-    )
-    .toBeGreaterThan(0);
-  await settle(page);
-  const readyMs = Date.now() - startedAt;
-  const snapshot = await page.evaluate(() => {
-    const value = window["__IDCO_LARGE_DOC__"];
-    if (!value) throw new Error("Missing large-document diagnostics");
-    return value;
-  });
-  return {
-    ...snapshot,
-    domNodes: await page.locator("*").count(),
-    readyMs,
   };
 }
 
@@ -256,67 +197,43 @@ function reductionPct(before: number, after: number): number {
 }
 
 function formatTable(report: {
-  sectionShell: SectionShellMetrics;
   standard: StoryMetrics;
   virtualized: StoryMetrics;
   deltas: {
     mountedBodiesReductionPct: number;
     domNodeReductionPct: number;
     readyMsReductionPct: number;
-    sectionShellDomNodeReductionPct: number;
-    sectionShellReadyMsReductionPct: number;
   };
 }): string {
   const rows = [
-    ["metric", "standard", "phase 0", "section shell"],
+    ["metric", "standard", "phase 0"],
     [
       "mounted decorator bodies",
       String(report.standard.mountedBodies),
       String(report.virtualized.mountedBodies),
-      "0",
     ],
     [
       "placeholders",
       String(report.standard.placeholders),
       String(report.virtualized.placeholders),
-      "sections",
     ],
     [
       "total DOM nodes",
       String(report.standard.domNodes),
       String(report.virtualized.domNodes),
-      String(report.sectionShell.domNodes),
     ],
     [
       "time to ready (ms)",
       String(report.standard.readyMs),
       String(report.virtualized.readyMs),
-      String(report.sectionShell.readyMs),
     ],
     [
       "peak mounted during scroll",
       String(report.standard.peakMountedDuringScroll),
       String(report.virtualized.peakMountedDuringScroll),
-      "",
     ],
-    [
-      "rendered sections",
-      "n/a",
-      "n/a",
-      `${report.sectionShell.renderedSectionCount}/${report.sectionShell.sectionCount}`,
-    ],
-    [
-      "DOM reduction",
-      "",
-      `${report.deltas.domNodeReductionPct}%`,
-      `${report.deltas.sectionShellDomNodeReductionPct}%`,
-    ],
-    [
-      "ready reduction",
-      "",
-      `${report.deltas.readyMsReductionPct}%`,
-      `${report.deltas.sectionShellReadyMsReductionPct}%`,
-    ],
+    ["DOM reduction", "", `${report.deltas.domNodeReductionPct}%`],
+    ["ready reduction", "", `${report.deltas.readyMsReductionPct}%`],
   ];
   const widths = rows[0].map((_, col) =>
     Math.max(...rows.map((row) => row[col].length)),

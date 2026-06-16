@@ -4,16 +4,16 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 /**
- * Phase 0 large-document support (docs/009 §6.1.1). Keep the single Lexical
- * root and the whole editing surface, but render a decorator block's React body
- * only while it is near the viewport. Offscreen decorators collapse to a cheap
- * measured placeholder, so a decorator-heavy document does not pay to mount
- * every code editor, callout, media frame, and embed at once.
+ * Phase 0 decorator-body virtualization (docs/009 §6.1.1). Keep the single
+ * Lexical root and the whole editing surface, but render a decorator block's
+ * React body only while it is near the viewport. Offscreen decorators collapse
+ * to a cheap measured placeholder, so a decorator-heavy document does not pay to
+ * mount every code editor, callout, media frame, and embed at once.
  *
  * What this deliberately does NOT touch: the Lexical node tree, selection,
  * undo, and the persisted JSON are all unchanged — only the *rendered body* of
  * an offscreen decorator is swapped for a placeholder of the same height. That
- * is why this can ship before, and independently of, the section shell.
+ * is why this ships independently of any whole-document virtualization engine.
  */
 
 /** Distance beyond the viewport (px) within which bodies stay mounted. */
@@ -23,8 +23,8 @@ const DEFAULT_ESTIMATED_HEIGHT_PX = 140;
 
 /**
  * Whether decorator bodies in the current editor should virtualize. Off by
- * default so existing editors keep mounting every body; the large-document
- * surface opts in.
+ * default so existing editors keep mounting every body; a decorator-heavy
+ * editor opts in.
  */
 export const DecoratorVirtualizationContext = createContext(false);
 

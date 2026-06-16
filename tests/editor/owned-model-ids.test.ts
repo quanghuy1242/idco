@@ -4,7 +4,7 @@ import { normalizeDocument } from "../../packages/editor/src/model/normalize";
 import { lexicalEditorState } from "../../packages/editor/src/model/serialize";
 import type { RichTextEditorDocument } from "@idco/editor";
 
-describe("large document stable node ids", () => {
+describe("owned-model stable node ids", () => {
   it("adds unique stable ids to top-level blocks", () => {
     const document = normalizeDocument(paragraphs(5000));
     const ids = document.root.children.map((node) => node.id);

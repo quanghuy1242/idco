@@ -29,6 +29,24 @@ function isEditorPerformanceSource(filename) {
   return filename.endsWith("/packages/editor/src/plugins/editor-performance.ts");
 }
 
+function isOwnedModelCoreSource(filename) {
+  filename = normalizeFilename(filename);
+  return filename.includes("/packages/editor/src/owned-model/core/");
+}
+
+function isFrameworkImportSource(spec) {
+  if (!spec) return false;
+  return (
+    spec === "react" ||
+    spec === "react-dom" ||
+    spec.startsWith("react/") ||
+    spec.startsWith("react-dom/") ||
+    spec === "lexical" ||
+    spec.startsWith("lexical/") ||
+    spec.startsWith("@lexical/")
+  );
+}
+
 function isIdcoPackageSource(filename) {
   return (
     isUiPackageSource(filename) ||
@@ -184,10 +202,28 @@ var editorNoDirectUpdateListenerRule = {
   },
 };
 
+var ownedModelCoreNoFrameworkRule = {
+  meta: { type: "problem", docs: { description: "owned-model engine core stays framework-agnostic: no React or Lexical imports (docs/010 §7.1, G3)" } },
+  create: function (context) {
+    var filename = context.filename || context.physicalFilename || "";
+    if (!isOwnedModelCoreSource(filename)) return {};
+
+    return {
+      ImportDeclaration: function (node) {
+        var spec = extractImportSource(node);
+        if (isFrameworkImportSource(spec)) {
+          context.report({ node: node.source, message: "owned-model/core must not import React or Lexical (docs/010 §7.1); keep the engine core framework-agnostic. Offending import: " + spec });
+        }
+      },
+    };
+  },
+};
+
 var plugin = {
   meta: { name: "architecture" },
   rules: {
     "editor-no-direct-update-listener": editorNoDirectUpdateListenerRule,
+    "owned-model-core-no-framework": ownedModelCoreNoFrameworkRule,
     "idco-package-boundary": idcoPackageBoundaryRule,
     "ui-no-side-effect-css": uiNoSideEffectCssRule,
     "ui-no-native-dialog": uiNoNativeDialogRule,

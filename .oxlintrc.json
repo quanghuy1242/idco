@@ -20,6 +20,7 @@
     "typescript/no-explicit-any": "error",
     "unicorn/no-array-sort": "off",
     "architecture/editor-no-direct-update-listener": "error",
+    "architecture/owned-model-core-no-framework": "error",
     "architecture/idco-package-boundary": "error",
     "architecture/ui-no-side-effect-css": "error",
     "architecture/ui-no-native-dialog": "error",

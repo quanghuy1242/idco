@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { calculateVirtualRange } from "@idco/editor";
 
-describe("large document virtual range", () => {
+describe("owned-model virtual range", () => {
   it("returns visible indexes plus overscan and aggregate spacer heights", () => {
     const range = calculateVirtualRange({
       getItemSize: () => 100,
