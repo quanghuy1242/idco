@@ -1,18 +1,22 @@
-// docs/010 §5.5 / §7.4 — bind an EditContext to one host element. On Chromium
-// the native `EditContext` drives the host; elsewhere (or when forced) the
-// vendored polyfill provides it through a hidden-textarea bridge. The engine
-// only ever touches the EditContext API surface, so the two are invisible here.
+// docs/010 §5.5 / §7.4 — bind the exact EditContext API to one host element.
+// Native EditContext and this package's hidden-textarea implementation are two
+// implementations of the same contract; backend-specific glue is contained in
+// this adapter so editor controllers do not grow native-vs-polyfill behavior.
 
 import {
   install,
+  releaseForcedInstall,
   syncPolyfillSelection,
 } from "../vendor/editcontext-polyfill";
 
-/** The EditContext surface the controllers depend on (native or polyfilled). */
+/** The exact EditContext surface the controllers depend on. */
 export type EditContextLike = EventTarget & {
   text: string;
   selectionStart: number;
   selectionEnd: number;
+  readonly isComposing?: boolean;
+  readonly compositionStart?: number;
+  readonly compositionEnd?: number;
   updateText(rangeStart: number, rangeEnd: number, text: string): void;
   updateSelection(start: number, end: number): void;
   updateControlBounds(controlBounds: DOMRect): void;
@@ -23,17 +27,41 @@ export type EditContextLike = EventTarget & {
   ): void;
 };
 
+export type EditContextBackend = "native" | "polyfill";
+
+export type EditContextReplacementResult = {
+  readonly text: string;
+  readonly selectionStart: number;
+  readonly selectionEnd: number;
+};
+
 type EditContextConstructor = new (init?: {
   text?: string;
   selectionStart?: number;
   selectionEnd?: number;
 }) => EditContextLike;
 
+type MaybePolyfilledEditContextConstructor = EditContextConstructor & {
+  readonly isIdcoPolyfill?: boolean;
+};
+
 export type EditContextHost = {
   readonly editContext: EditContextLike;
-  /** Whether the polyfill (not native EditContext) is driving this host. */
-  readonly polyfilled: boolean;
-  /** Re-align the polyfill input sink after engine-driven selection moves. */
+  /** Which EditContext implementation is active; exposed for tests only. */
+  readonly backend: EditContextBackend;
+  /** Focus the active implementation's input sink. */
+  readonly focus: () => void;
+  /**
+   * Replace text through the EditContext API and collapse the selection after
+   * the inserted text. Editor commands use this for text insertion so native
+   * and hidden-textarea implementations observe the same contract.
+   */
+  readonly replaceText: (
+    rangeStart: number,
+    rangeEnd: number,
+    text: string,
+  ) => EditContextReplacementResult;
+  /** Re-align the active implementation's input sink after selection moves. */
   readonly syncInputSelection: () => void;
   readonly destroy: () => void;
 };
@@ -41,7 +69,7 @@ export type EditContextHost = {
 export type CreateEditContextHostOptions = {
   readonly host: HTMLElement;
   readonly initialText?: string;
-  /** Force the polyfill path even when native EditContext exists (AC5). */
+  /** Force the API polyfill even when native EditContext exists (AC5). */
   readonly forcePolyfill?: boolean;
 };
 
@@ -50,11 +78,15 @@ export function createEditContextHost(
 ): EditContextHost {
   const { host, initialText = "", forcePolyfill = false } = options;
   const view = host.ownerDocument.defaultView ?? window;
+  const activeCtor = (view as { EditContext?: unknown }).EditContext as
+    | MaybePolyfilledEditContextConstructor
+    | undefined;
   const hasNative =
-    typeof (view as { EditContext?: unknown }).EditContext === "function";
-  const polyfilled = forcePolyfill || !hasNative;
+    typeof activeCtor === "function" && activeCtor.isIdcoPolyfill !== true;
+  const backend: EditContextBackend =
+    forcePolyfill || !hasNative ? "polyfill" : "native";
 
-  if (polyfilled) {
+  if (backend === "polyfill") {
     install({ force: forcePolyfill });
   }
 
@@ -68,25 +100,57 @@ export function createEditContextHost(
 
   if (host.tabIndex < 0) host.tabIndex = 0;
 
-  // docs/010 §7.4: the `data-editcontext-active` marker is polyfill-only — never
-  // set it on the native Chromium path, where it would suppress the native
-  // `::selection` painting the native path may rely on.
-  if (polyfilled) host.setAttribute("data-editcontext-active", "");
-
-  // Attach. Native: real `HTMLElement.editContext`. Polyfill: the patched
-  // setter wires the hidden-textarea bridge for this host.
+  // Attach through the platform shape. Native uses the browser's
+  // `HTMLElement.editContext`; the polyfill installs the same property and
+  // wires it to the hidden-textarea input sink.
   (host as unknown as { editContext: EditContextLike }).editContext =
     editContext;
 
   const syncInputSelection = (): void => {
-    if (polyfilled) syncPolyfillSelection(host);
+    if (backend === "polyfill") syncPolyfillSelection(host);
+  };
+
+  const focus = (): void => {
+    host.focus({ preventScroll: true });
+  };
+
+  const replaceText = (
+    rangeStart: number,
+    rangeEnd: number,
+    text: string,
+  ): EditContextReplacementResult => {
+    const length = editContext.text.length;
+    const start = Math.min(
+      Math.max(0, Math.floor(Math.min(rangeStart, rangeEnd))),
+      length,
+    );
+    const end = Math.min(
+      Math.max(0, Math.floor(Math.max(rangeStart, rangeEnd))),
+      length,
+    );
+    editContext.updateText(start, end, text);
+    const selection = start + text.length;
+    editContext.updateSelection(selection, selection);
+    syncInputSelection();
+    return {
+      text: editContext.text,
+      selectionStart: editContext.selectionStart,
+      selectionEnd: editContext.selectionEnd,
+    };
   };
 
   const destroy = (): void => {
     (host as unknown as { editContext: EditContextLike | null }).editContext =
       null;
-    host.removeAttribute("data-editcontext-active");
+    if (forcePolyfill) releaseForcedInstall();
   };
 
-  return { editContext, polyfilled, syncInputSelection, destroy };
+  return {
+    editContext,
+    backend,
+    focus,
+    replaceText,
+    syncInputSelection,
+    destroy,
+  };
 }

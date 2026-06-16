@@ -1,15 +1,15 @@
 /**
- * Vendored EditContext polyfill (docs/010 §5.5 / §6.7). See VENDOR.md for
- * provenance. The engine binds to this API surface only, so native vs
- * polyfilled is invisible to it; this module is framework-free.
+ * Vendored EditContext API polyfill (docs/010 §5.5 / §6.7). See VENDOR.md for
+ * provenance. This module implements the same API shape the browser exposes;
+ * editor behavior lives above that boundary and must not fork on backend.
  *
  * Phase 2 (input + caret + selection spike) makes the surface functional for
  * the non-Chromium path: `install()` defines `EditContext` and patches
  * `HTMLElement.prototype.editContext` so `host.editContext = ctx` wires a
  * visually-hidden `<textarea>` input bridge (the docs/010 §5.5 hidden-input
  * approach) that captures keystrokes/IME and re-dispatches them as EditContext
- * `textupdate`/composition events. Selection *painting* is the engine's job
- * (docs/010 §7.4), not the polyfill's, in this spike.
+ * `textupdate`/composition events. Selection painting and model commands are
+ * the engine's job (docs/010 §7.4), not hidden side effects in the polyfill.
  */
 
 export type EditContextTextUpdateEventInit = {
@@ -18,6 +18,13 @@ export type EditContextTextUpdateEventInit = {
   readonly text: string;
   readonly selectionStart: number;
   readonly selectionEnd: number;
+};
+
+export type PolyfilledTextFormat = {
+  readonly rangeStart: number;
+  readonly rangeEnd: number;
+  readonly underlineStyle: string;
+  readonly underlineThickness: string;
 };
 
 /** Minimal `TextUpdateEvent` shape the engine reads on `textupdate`. */
@@ -35,6 +42,25 @@ export class PolyfilledTextUpdateEvent extends Event {
     this.text = init.text;
     this.selectionStart = init.selectionStart;
     this.selectionEnd = init.selectionEnd;
+  }
+}
+
+/**
+ * Minimal `TextFormatUpdateEvent` shape for IME preedit styling. Native
+ * EditContext fires this so custom editors can draw the platform's composition
+ * underline themselves; the polyfill mirrors that contract for its hidden
+ * textarea composition range.
+ */
+export class PolyfilledTextFormatUpdateEvent extends Event {
+  readonly #formats: readonly PolyfilledTextFormat[];
+
+  constructor(type: string, formats: readonly PolyfilledTextFormat[]) {
+    super(type);
+    this.#formats = [...formats];
+  }
+
+  getTextFormats(): readonly PolyfilledTextFormat[] {
+    return this.#formats;
   }
 }
 
@@ -62,6 +88,9 @@ export class EditContext extends EventTarget {
   text: string;
   selectionStart: number;
   selectionEnd: number;
+  isComposing = false;
+  compositionStart = 0;
+  compositionEnd = 0;
   characterBoundsRangeStart = 0;
   /** Last control bounds fed back via {@link updateControlBounds}. */
   controlBounds?: DOMRect;
@@ -134,9 +163,9 @@ export class EditContext extends EventTarget {
 
 export type InstallOptions = {
   /**
-   * Install the polyfill even when a native `EditContext` exists. Used by the
-   * forced-polyfill story/test variant (docs/010 P2 AC5) to exercise the
-   * polyfill path on Chromium.
+   * Install this API implementation even when native `EditContext` exists.
+   * Used by the forced-polyfill story/test variant (docs/010 P2 AC5) to prove
+   * the API polyfill on Chromium.
    */
   readonly force?: boolean;
   /**
@@ -148,14 +177,27 @@ export type InstallOptions = {
 };
 
 export type InstallResult = {
-  /** Whether this call installed the polyfilled `EditContext`. */
+  /** Whether this call installed the API polyfill `EditContext`. */
   readonly installed: boolean;
   /** Whether a native `EditContext` was present before this call. */
   readonly native: boolean;
 };
 
+type MaybePolyfilledEditContextConstructor = Function & {
+  readonly isIdcoPolyfill?: boolean;
+};
+
+const HOST_BINDINGS = new WeakMap<Element, PolyfillBinding>();
+const FOCUS_OUTLINE_STYLE_ID = "idco-editcontext-polyfill-focus-outline";
+let forcedInstallCount = 0;
+let forcedGlobalTarget: Record<string, unknown> | null = null;
+let forcedHadEditContext = false;
+let forcedEditContextValue: unknown;
+let forcedHadHtmlElementDescriptor = false;
+let forcedHtmlElementDescriptor: PropertyDescriptor | undefined;
+
 /**
- * Install the polyfilled `EditContext` onto the target global when it is absent
+ * Install the API polyfill `EditContext` onto the target global when it is absent
  * (or when `force` is set). Idempotent and side-effect-free unless called. When
  * installing onto the real global it also patches `HTMLElement.prototype` so
  * `element.editContext = ctx` wires the hidden-textarea input bridge.
@@ -167,22 +209,89 @@ export function install(options: InstallOptions = {}): InstallResult {
     string,
     unknown
   >;
-  const native = typeof target.EditContext === "function";
+  const existing = target.EditContext;
+  const native =
+    typeof existing === "function" &&
+    (existing as MaybePolyfilledEditContextConstructor).isIdcoPolyfill !== true;
   if (native && !options.force) {
     return { installed: false, native };
+  }
+  if (usingGlobalTarget && options.force) {
+    rememberForcedInstallOriginals(target);
+    forcedInstallCount += 1;
   }
   target.EditContext = EditContext;
   if (usingGlobalTarget) {
     patchHtmlElement(Boolean(options.force));
-    patchSelection();
   }
   return { installed: true, native };
 }
 
-const HOST_BINDINGS = new WeakMap<Element, PolyfillBinding>();
+/**
+ * Save the real browser editing hooks before a forced-polyfill story replaces
+ * them. Ladle is a long-lived SPA, so without this the forced story poisons the
+ * later default story in the same page.
+ */
+function rememberForcedInstallOriginals(target: Record<string, unknown>): void {
+  if (forcedGlobalTarget) return;
+  forcedGlobalTarget = target;
+  forcedHadEditContext = Object.prototype.hasOwnProperty.call(
+    target,
+    "EditContext",
+  );
+  forcedEditContextValue = target.EditContext;
+  if (typeof HTMLElement !== "undefined") {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "editContext",
+    );
+    forcedHadHtmlElementDescriptor = descriptor !== undefined;
+    forcedHtmlElementDescriptor = descriptor;
+  }
+}
 
 /**
- * Patch `HTMLElement.prototype.editContext` so assigning a polyfilled
+ * Undo a forced-polyfill install once its host is destroyed. Non-Chromium
+ * browsers can reinstall the API polyfill on demand; Chromium gets its native
+ * constructor and native `HTMLElement.editContext` descriptor back before the
+ * next story.
+ */
+export function releaseForcedInstall(): void {
+  if (forcedInstallCount <= 0) return;
+  forcedInstallCount -= 1;
+  if (forcedInstallCount > 0 || !forcedGlobalTarget) return;
+
+  if (forcedHadEditContext) {
+    forcedGlobalTarget.EditContext = forcedEditContextValue;
+  } else {
+    delete forcedGlobalTarget.EditContext;
+  }
+
+  if (typeof HTMLElement !== "undefined") {
+    if (forcedHadHtmlElementDescriptor && forcedHtmlElementDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "editContext",
+        forcedHtmlElementDescriptor,
+      );
+    } else {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+        .editContext;
+    }
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>)[
+      "__idcoEditContextPatched"
+    ];
+  }
+
+  forcedGlobalTarget = null;
+  forcedHadEditContext = false;
+  forcedEditContextValue = undefined;
+  forcedHadHtmlElementDescriptor = false;
+  forcedHtmlElementDescriptor = undefined;
+}
+
+/**
+ * Patch `HTMLElement.prototype.editContext` so assigning an API polyfill
  * `EditContext` attaches/detaches the input bridge, mirroring the native
  * `HTMLElement.editContext` attach point.
  */
@@ -221,58 +330,6 @@ function patchHtmlElement(force: boolean): void {
   });
 }
 
-function closestActiveHost(node: Node | null): HTMLElement | null {
-  let current: Node | null = node;
-  while (current) {
-    if (
-      current instanceof HTMLElement &&
-      current.hasAttribute("data-editcontext-active")
-    ) {
-      return current;
-    }
-    current = current.parentNode;
-  }
-  return null;
-}
-
-/**
- * Patch `Selection.prototype.addRange`/`removeAllRanges` (docs/010 §7.4). On a
- * `[data-editcontext-active]` host the engine hand-paints its own caret +
- * selection overlay, and mutating the real document Selection there would blur
- * the polyfill's hidden-textarea input sink — so we no-op the real mutation for
- * those hosts and let the original run everywhere else.
- */
-function patchSelection(): void {
-  if (typeof Selection === "undefined") return;
-  const proto = Selection.prototype as unknown as Record<string, unknown>;
-  if ("__idcoSelectionPatched" in proto) return;
-
-  const originalAddRange = Selection.prototype.addRange;
-  const originalRemoveAll = Selection.prototype.removeAllRanges;
-
-  Selection.prototype.addRange = function patchedAddRange(
-    this: Selection,
-    range: Range,
-  ): void {
-    if (range && closestActiveHost(range.startContainer)) return;
-    originalAddRange.call(this, range);
-  };
-  Selection.prototype.removeAllRanges = function patchedRemoveAll(
-    this: Selection,
-  ): void {
-    const active =
-      typeof document !== "undefined" ? document.activeElement : null;
-    if (closestActiveHost(active)) return;
-    originalRemoveAll.call(this);
-  };
-
-  Object.defineProperty(proto, "__idcoSelectionPatched", {
-    configurable: true,
-    enumerable: false,
-    value: true,
-  });
-}
-
 /**
  * The hidden-textarea bridge for one host. Captures keystrokes/IME on a
  * visually-hidden `<textarea>` and mirrors them onto the bound `EditContext`,
@@ -282,11 +339,16 @@ class PolyfillBinding {
   readonly #host: HTMLElement;
   readonly #ctx: EditContext;
   readonly #textarea: HTMLTextAreaElement;
+  readonly #shadowRoot: ShadowRoot;
   #composing = false;
+  #compositionStart = 0;
 
   constructor(host: HTMLElement, ctx: EditContext) {
     this.#host = host;
     this.#ctx = ctx;
+    this.#shadowRoot =
+      host.shadowRoot ??
+      host.attachShadow({ mode: "open", delegatesFocus: true });
     this.#textarea = document.createElement("textarea");
     const textarea = this.#textarea;
     textarea.setAttribute("aria-hidden", "true");
@@ -307,7 +369,9 @@ class PolyfillBinding {
       resize: "none",
     } satisfies Partial<CSSStyleDeclaration>);
     textarea.value = ctx.text;
-    host.append(textarea);
+    this.#ensureFocusOutlineStyle();
+    this.#ensureSlot();
+    this.#shadowRoot.append(textarea);
 
     host.addEventListener("pointerdown", this.#focusSink);
     host.addEventListener("focus", this.#focusSink);
@@ -331,26 +395,69 @@ class PolyfillBinding {
     this.#textarea.remove();
   }
 
+  /**
+   * Provide the UA focus ring native EditContext gives its focused host. Chrome
+   * paints that outline from low-level browser focus styling, while a hidden
+   * textarea in delegated-focus shadow DOM only retargets focus to the host;
+   * these shadow host rules fill that API gap without adding visible wrapper
+   * DOM.
+   */
+  #ensureFocusOutlineStyle(): void {
+    if (this.#shadowRoot.querySelector(`#${FOCUS_OUTLINE_STYLE_ID}`)) return;
+    const style = document.createElement("style");
+    style.id = FOCUS_OUTLINE_STYLE_ID;
+    style.textContent = `
+:host(:focus),
+:host(:focus-within) {
+  outline: auto;
+  outline: -webkit-focus-ring-color auto 1px;
+}
+`;
+    this.#shadowRoot.prepend(style);
+  }
+
+  /**
+   * Render host light-DOM children through the shadow root. The hidden textarea
+   * must live inside a delegated-focus shadow tree so browser focus retargets
+   * to the visible EditContext host, matching native EditContext focus/outline
+   * semantics while keeping the textarea an implementation detail.
+   */
+  #ensureSlot(): void {
+    if (this.#shadowRoot.querySelector("slot")) return;
+    this.#shadowRoot.append(document.createElement("slot"));
+  }
+
   readonly #focusSink = (): void => {
-    if (document.activeElement !== this.#textarea) {
+    if (this.#shadowRoot.activeElement !== this.#textarea) {
       this.#textarea.focus({ preventScroll: true });
-      this.syncSelection();
     }
+    this.syncSelection();
   };
 
   readonly #onInput = (): void => {
-    if (this.#composing) return;
     this.#emitTextUpdate();
+    if (this.#composing) this.#emitCompositionFormat();
   };
 
   readonly #onCompositionStart = (): void => {
     this.#composing = true;
+    this.#compositionStart =
+      this.#textarea.selectionStart ?? this.#ctx.selectionStart;
+    this.#ctx.isComposing = true;
+    this.#ctx.compositionStart = this.#compositionStart;
+    this.#ctx.compositionEnd = this.#compositionStart;
     this.#ctx.dispatchEvent(new Event("compositionstart"));
   };
 
   readonly #onCompositionEnd = (): void => {
     this.#composing = false;
     this.#emitTextUpdate();
+    this.#ctx.isComposing = false;
+    this.#ctx.compositionStart = this.#ctx.selectionStart;
+    this.#ctx.compositionEnd = this.#ctx.selectionEnd;
+    this.#ctx.dispatchEvent(
+      new PolyfilledTextFormatUpdateEvent("textformatupdate", []),
+    );
     this.#ctx.dispatchEvent(new Event("compositionend"));
   };
 
@@ -362,6 +469,10 @@ class PolyfillBinding {
     this.#ctx.text = next;
     this.#ctx.selectionStart = selectionStart;
     this.#ctx.selectionEnd = selectionEnd;
+    if (this.#composing) {
+      this.#ctx.compositionStart = this.#compositionStart;
+      this.#ctx.compositionEnd = Math.max(this.#compositionStart, selectionEnd);
+    }
     this.#ctx.dispatchEvent(
       new PolyfilledTextUpdateEvent("textupdate", {
         text: next,
@@ -370,6 +481,30 @@ class PolyfillBinding {
         updateRangeStart: 0,
         updateRangeEnd: previousLength,
       }),
+    );
+  }
+
+  /**
+   * Emit the same `textformatupdate` signal native EditContext uses for IME
+   * preedit styling. Native can report richer platform underline values; this
+   * hidden-textarea bridge only knows the active composition range, so it sends
+   * a simple thin underline for the shared renderer to paint.
+   */
+  #emitCompositionFormat(): void {
+    const end = Math.max(this.#compositionStart, this.#ctx.selectionEnd);
+    const formats =
+      end > this.#compositionStart
+        ? [
+            {
+              rangeStart: this.#compositionStart,
+              rangeEnd: end,
+              underlineStyle: "solid",
+              underlineThickness: "thin",
+            },
+          ]
+        : [];
+    this.#ctx.dispatchEvent(
+      new PolyfilledTextFormatUpdateEvent("textformatupdate", formats),
     );
   }
 }

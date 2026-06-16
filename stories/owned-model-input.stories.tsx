@@ -1,14 +1,14 @@
 // docs/010 Phase 2 — Input + caret + selection spike. Binds one EditContext to
 // one host element rendering a single plain-text block, with the owned-model
 // core controllers driving input, caret, and selection. Two variants exercise
-// both substrates: `Native` uses native EditContext on Chromium (polyfill on
-// Firefox/WebKit, which lack it), and `ForcedPolyfill` forces the vendored
-// polyfill path even on Chromium (AC5).
+// the same EditContext API contract: `Native` uses the platform implementation
+// when available, and `ForcedPolyfill` forces our API polyfill even on Chromium
+// (AC5).
 //
 // Driven by tests/e2e/owned-model-input.spec.ts across chromium/webkit/firefox.
 
 import type { Story, StoryDefault } from "@ladle/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createTextInputController } from "../packages/editor/src/owned-model/core";
 
 export default {
@@ -22,8 +22,9 @@ function InputSpike({ force }: { readonly force: boolean }) {
     const host = hostRef.current;
     if (!host) return;
     const textElement = host.querySelector<HTMLElement>("[data-owned-text]");
-    const overlayElement =
-      host.querySelector<HTMLElement>("[data-owned-overlay]");
+    const overlayElement = host.querySelector<HTMLElement>(
+      "[data-owned-overlay]",
+    );
     if (!textElement || !overlayElement) return;
 
     const controller = createTextInputController({
@@ -40,9 +41,9 @@ function InputSpike({ force }: { readonly force: boolean }) {
   return (
     <div style={{ display: "grid", gap: "0.75rem", maxWidth: "40rem" }}>
       <p style={{ font: "14px/1.5 system-ui, sans-serif", margin: 0 }}>
-        EditContext input spike ({force ? "forced polyfill" : "native"}). Click
-        to focus, then type. Arrow keys move the caret; Shift+Arrow and drag
-        select. The caret and selection are engine-painted from the model.
+        EditContext input spike ({force ? "forced API polyfill" : "default"}).
+        Click to focus, then type. Arrow keys move the caret; Shift+Arrow and
+        drag select. The caret and selection are engine-painted from the model.
       </p>
       <div
         ref={hostRef}
@@ -79,3 +80,23 @@ function InputSpike({ force }: { readonly force: boolean }) {
 
 export const Native: Story = () => <InputSpike force={false} />;
 export const ForcedPolyfill: Story = () => <InputSpike force />;
+
+export const SwitchingHarness: Story = () => {
+  const [force, setForce] = useState(true);
+  return (
+    <div style={{ display: "grid", gap: "0.75rem" }}>
+      <button
+        data-owned-switch=""
+        type="button"
+        onClick={() => setForce(false)}
+      >
+        Switch to native
+      </button>
+      {/* The forced-polyfill bridge creates a shadow root, and browsers do not
+      allow removing a shadow root from an existing host. Remount on backend
+      switches so the native story gets the same clean host a real page load
+      would provide. */}
+      <InputSpike key={force ? "polyfill" : "native"} force={force} />
+    </div>
+  );
+};

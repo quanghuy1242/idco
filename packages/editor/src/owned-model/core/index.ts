@@ -40,6 +40,8 @@ export {
   createEditContextHost,
   type EditContextHost,
   type EditContextLike,
+  type EditContextBackend,
+  type EditContextReplacementResult,
   type CreateEditContextHostOptions,
 } from "./editcontext-host";
 export {

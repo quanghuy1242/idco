@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   EditContext,
   install,
+  releaseForcedInstall,
 } from "../../packages/editor/src/owned-model/vendor/editcontext-polyfill";
 
 function nativeCtor() {}
@@ -33,6 +34,19 @@ describe("vendored editcontext polyfill", () => {
       native: true,
     });
     expect(target.EditContext).toBe(EditContext);
+  });
+
+  it("does not patch document Selection while installing the API polyfill", () => {
+    const originalAddRange = Selection.prototype.addRange;
+    const originalRemoveAllRanges = Selection.prototype.removeAllRanges;
+
+    install({ force: true });
+    try {
+      expect(Selection.prototype.addRange).toBe(originalAddRange);
+      expect(Selection.prototype.removeAllRanges).toBe(originalRemoveAllRanges);
+    } finally {
+      releaseForcedInstall();
+    }
   });
 
   it("owns a text buffer and selection decoupled from the DOM", () => {
