@@ -28,6 +28,13 @@
   },
   "overrides": [
     {
+      "files": ["packages/editor/src/owned-model/vendor/editcontext-polyfill/**/*.ts"],
+      "rules": {
+        "no-underscore-dangle": "off",
+        "typescript/no-unsafe-declaration-merging": "off"
+      }
+    },
+    {
       "files": ["tests/**/*.ts", "tests/**/*.tsx"],
       "rules": {
         "no-console": "off",

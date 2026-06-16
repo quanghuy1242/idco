@@ -50,7 +50,11 @@ describe("vendored editcontext polyfill", () => {
   });
 
   it("owns a text buffer and selection decoupled from the DOM", () => {
-    const ctx = new EditContext({ text: "abcdef", selectionStart: 2 });
+    const ctx = new EditContext({
+      text: "abcdef",
+      selectionStart: 2,
+      selectionEnd: 2,
+    });
     expect(ctx.text).toBe("abcdef");
     expect(ctx.selectionStart).toBe(2);
     expect(ctx.selectionEnd).toBe(2);

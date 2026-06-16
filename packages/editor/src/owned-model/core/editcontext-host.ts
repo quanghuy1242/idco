@@ -87,7 +87,10 @@ export function createEditContextHost(
     forcePolyfill || !hasNative ? "polyfill" : "native";
 
   if (backend === "polyfill") {
-    install({ force: forcePolyfill });
+    install({
+      force: forcePolyfill,
+      target: view as unknown as Record<string, unknown>,
+    });
   }
 
   const Ctor = (view as unknown as { EditContext: EditContextConstructor })
