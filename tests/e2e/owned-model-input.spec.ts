@@ -135,9 +135,9 @@ async function focusedHostSnapshot(
  *     (so the `input` twin is pure redundancy), and
  *   - Firefox fires one more `insertCompositionText` `input` with
  *     `isComposing: false` *after* `compositionend`.
- * The polyfill must drive composition only from `beforeinput` and ignore every
- * `insertCompositionText` `input`; re-applying the trailing post-`compositionend`
- * event re-inserts the committed word ("xin" → "xinxin", "chào" → "chàochào").
+ * The polyfill must never fold a post-`compositionend` `insertCompositionText`
+ * input back into the model; re-applying that trailing event re-inserts the
+ * committed word ("xin" → "xinxin", "chào" → "chàochào").
  */
 async function replayFirefoxTelexXinChao(page: Page): Promise<void> {
   await polyfillTextarea(page).evaluate((element) => {
@@ -164,11 +164,7 @@ async function replayFirefoxTelexXinChao(page: Page): Promise<void> {
         }),
       );
 
-    // Compose one IME word in place after `base`. Firefox reports the OLD value
-    // on `beforeinput` and the NEW value on `input`; only the non-composition
-    // `input` path reads the textarea value, so faithfulness there is what
-    // matters.
-    const composeWord = (base: string, steps: readonly string[]) => {
+    const composeWord = (steps: readonly string[]) => {
       const final = steps[steps.length - 1] ?? "";
       textarea.dispatchEvent(new CompositionEvent("compositionstart"));
       for (const data of steps) {
@@ -176,10 +172,10 @@ async function replayFirefoxTelexXinChao(page: Page): Promise<void> {
           new CompositionEvent("compositionupdate", { data }),
         );
         fireInput("beforeinput", "insertCompositionText", data, true);
-        setValue(base + data);
+        setValue(data);
         fireInput("input", "insertCompositionText", data, true);
       }
-      setValue(base + final);
+      setValue(final);
       textarea.dispatchEvent(
         new CompositionEvent("compositionend", { data: final }),
       );
@@ -187,15 +183,318 @@ async function replayFirefoxTelexXinChao(page: Page): Promise<void> {
       fireInput("input", "insertCompositionText", final, false);
     };
 
-    const insertText = (base: string, data: string) => {
-      fireInput("beforeinput", "insertText", data, false);
-      setValue(base + data);
+    const insertText = (data: string) => {
+      const notPrevented = fireInput("beforeinput", "insertText", data, false);
+      if (!notPrevented) return;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? start;
+      setValue(
+        textarea.value.slice(0, start) + data + textarea.value.slice(end),
+      );
       fireInput("input", "insertText", data, false);
     };
 
-    composeWord("", ["x", "xi", "xin", "xin"]);
-    insertText("xin", " ");
-    composeWord("xin ", ["c", "ch", "cha", "chao", "chào", "chào"]);
+    composeWord(["x", "xi", "xin", "xin"]);
+    insertText(" ");
+    composeWord(["c", "ch", "cha", "chao", "chào", "chào"]);
+  });
+}
+
+/**
+ * Reproduce the real Firefox+Telex selection-desync captured from the spike:
+ * after committing "xin " the IME leaves the hidden textarea SELECTION pointing
+ * at the previous word ("0-3") while the model caret is at "4-4", then fires a
+ * plain `insertText "o"` that would replace "xin" with "o" in the textarea. A
+ * polyfill that mirrors `textarea.value` collapses the document to "o  "; the
+ * fix must apply the insert at the MODEL selection instead, yielding "xin o".
+ *
+ * The helper dispatches the realistic `beforeinput`+`input` pair and only
+ * performs the textarea's replacement when the edit was NOT prevented — so the
+ * same script reproduces the corruption on the old code and passes on the fix.
+ */
+async function replayFirefoxTelexSelectionDesync(page: Page): Promise<void> {
+  await polyfillTextarea(page).evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    const composeWord = (base: string, steps: readonly string[]) => {
+      const final = steps[steps.length - 1] ?? "";
+      textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+      for (const data of steps) {
+        textarea.dispatchEvent(
+          new InputEvent("beforeinput", {
+            bubbles: true,
+            cancelable: false,
+            data,
+            inputType: "insertCompositionText",
+            isComposing: true,
+          }),
+        );
+        textarea.value = base + data;
+        textarea.setSelectionRange((base + data).length, (base + data).length);
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            data,
+            inputType: "insertCompositionText",
+            isComposing: true,
+          }),
+        );
+      }
+      textarea.value = base + final;
+      textarea.setSelectionRange((base + final).length, (base + final).length);
+      textarea.dispatchEvent(
+        new CompositionEvent("compositionend", { data: final }),
+      );
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data: final,
+          inputType: "insertCompositionText",
+          isComposing: false,
+        }),
+      );
+    };
+
+    // Plain insertText with the textarea selection at [selStart, selEnd]. The
+    // browser only performs the edit (and fires `input`) when `beforeinput` was
+    // not prevented — exactly what the polyfill controls.
+    const insertTextAt = (data: string, selStart: number, selEnd: number) => {
+      textarea.setSelectionRange(selStart, selEnd);
+      const notPrevented = textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+      if (notPrevented) {
+        textarea.value =
+          textarea.value.slice(0, selStart) +
+          data +
+          textarea.value.slice(selEnd);
+        const caret = selStart + data.length;
+        textarea.setSelectionRange(caret, caret);
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            data,
+            inputType: "insertText",
+            isComposing: false,
+          }),
+        );
+      }
+    };
+
+    composeWord("", ["x", "xi", "xin"]); // model + textarea = "xin", caret 3
+    insertTextAt(" ", 3, 3); // in-sync space → "xin ", caret 4
+    insertTextAt("o", 0, 3); // DESYNC: textarea selection on "xin", model caret 4
+  });
+}
+
+/**
+ * Microsoft Vietnamese Telex in Firefox can drive the second word through a
+ * different composition shape from the captured `insertCompositionText` stream:
+ * while composition is active, the scratch textarea receives ordinary
+ * composing `insertText`/`input` events and `compositionend.data` can be empty.
+ * The final physical key may then echo as one plain `insertText "o"` after the
+ * composition already committed into the scratch textarea. Dropping the
+ * composing `insertText` events produces the exact field report: "xin chào" →
+ * "xin o".
+ */
+async function replayMicrosoftTelexXinChaoInsertTextPath(
+  page: Page,
+): Promise<void> {
+  await polyfillTextarea(page).evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    const composeWithInsertCompositionText = (steps: readonly string[]) => {
+      const final = steps[steps.length - 1] ?? "";
+      textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+      for (const data of steps) {
+        textarea.dispatchEvent(
+          new InputEvent("beforeinput", {
+            bubbles: true,
+            cancelable: false,
+            data,
+            inputType: "insertCompositionText",
+            isComposing: true,
+          }),
+        );
+        textarea.value = data;
+        textarea.setSelectionRange(data.length, data.length);
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            data,
+            inputType: "insertCompositionText",
+            isComposing: true,
+          }),
+        );
+      }
+      textarea.dispatchEvent(
+        new CompositionEvent("compositionend", { data: final }),
+      );
+    };
+
+    const insertText = (data: string) => {
+      const notPrevented = textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+      if (!notPrevented) return;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? start;
+      textarea.value =
+        textarea.value.slice(0, start) + data + textarea.value.slice(end);
+      const caret = start + data.length;
+      textarea.setSelectionRange(caret, caret);
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+    };
+
+    const composeViaScratchInput = (
+      values: readonly string[],
+      trailingEcho: string,
+    ) => {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+      for (const value of values) {
+        const data = value.slice(-1);
+        textarea.dispatchEvent(
+          new InputEvent("beforeinput", {
+            bubbles: true,
+            cancelable: false,
+            data,
+            inputType: "insertText",
+            isComposing: true,
+          }),
+        );
+        textarea.value = value;
+        textarea.setSelectionRange(value.length, value.length);
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            data,
+            inputType: "insertText",
+            isComposing: true,
+          }),
+        );
+      }
+      textarea.dispatchEvent(
+        new CompositionEvent("compositionend", { data: "o" }),
+      );
+      insertText(trailingEcho);
+    };
+
+    composeWithInsertCompositionText(["x", "xi", "xin"]);
+    insertText(" ");
+    composeViaScratchInput(["c", "ch", "cha", "chao", "chào"], "o");
+  });
+}
+
+/**
+ * Same user-visible Microsoft Telex failure, but the composing event is still
+ * named `insertCompositionText`; only `event.data` is not the full preedit. The
+ * matching `input` event's textarea value is the authoritative scratch word.
+ */
+async function replayMicrosoftTelexCompositionTextDeltaPath(
+  page: Page,
+): Promise<void> {
+  await polyfillTextarea(page).evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    const insertText = (data: string) => {
+      const notPrevented = textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+      if (!notPrevented) return;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? start;
+      textarea.value =
+        textarea.value.slice(0, start) + data + textarea.value.slice(end);
+      const caret = start + data.length;
+      textarea.setSelectionRange(caret, caret);
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+    };
+
+    const composeWord = (
+      values: readonly string[],
+      data: readonly string[],
+      endData: string,
+    ) => {
+      const final = values[values.length - 1] ?? "";
+      textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+      for (let index = 0; index < values.length; index += 1) {
+        const value = values[index] ?? "";
+        const eventData = data[index] ?? value;
+        textarea.dispatchEvent(
+          new InputEvent("beforeinput", {
+            bubbles: true,
+            cancelable: false,
+            data: eventData,
+            inputType: "insertCompositionText",
+            isComposing: true,
+          }),
+        );
+        textarea.value = value;
+        textarea.setSelectionRange(value.length, value.length);
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            data: eventData,
+            inputType: "insertCompositionText",
+            isComposing: true,
+          }),
+        );
+      }
+      textarea.dispatchEvent(
+        new CompositionEvent("compositionend", { data: endData }),
+      );
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data: final,
+          inputType: "insertCompositionText",
+          isComposing: false,
+        }),
+      );
+    };
+
+    composeWord(["x", "xi", "xin"], ["x", "xi", "xin"], "xin");
+    insertText(" ");
+    composeWord(
+      ["c", "ch", "cha", "chao", "chào"],
+      ["c", "h", "a", "o", "o"],
+      "o",
+    );
   });
 }
 
@@ -226,6 +525,14 @@ async function pointForTextOffset(page: Page, offset: number) {
       y: rect.top + rect.height / 2,
     };
   }, offset);
+}
+
+async function expectCaretPixelAligned(page: Page): Promise<void> {
+  const caretBox = await page.locator("[data-owned-caret]").boundingBox();
+  if (!caretBox) throw new Error("owned caret missing");
+  const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio);
+  const deviceX = caretBox.x * devicePixelRatio;
+  expect(Math.abs(deviceX - Math.round(deviceX))).toBeLessThanOrEqual(0.01);
 }
 
 /**
@@ -441,6 +748,7 @@ test("caret aligns with Vietnamese collapsed-range geometry", async ({
   );
   expect(diag.focus).toBe(targetOffset);
   expect(Math.abs(diag.caretLeft - expectedLeft)).toBeLessThanOrEqual(1.5);
+  await expectCaretPixelAligned(page);
 });
 
 test("double-click selects a word and triple-click selects a line", async ({
@@ -521,7 +829,7 @@ test("IME composition produces the correct final text", async ({ page }) => {
       const textarea = element as HTMLTextAreaElement;
       textarea.focus();
       textarea.dispatchEvent(new CompositionEvent("compositionstart"));
-      textarea.value = `a${value}`;
+      textarea.value = value;
       textarea.setSelectionRange(textarea.value.length, textarea.value.length);
       textarea.dispatchEvent(new InputEvent("input", { isComposing: true }));
       textarea.dispatchEvent(
@@ -564,10 +872,26 @@ test("shared renderer paints IME preedit formats from the API", async ({
     const textarea = element as HTMLTextAreaElement;
     textarea.focus();
     textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+    // Real IMEs drive composition through `beforeinput`/`insertCompositionText`
+    // (the `input` twin is redundant); the polyfill owns it from there.
+    textarea.dispatchEvent(
+      new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: false,
+        data: "bo",
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }),
+    );
     textarea.value = "bo";
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
     textarea.dispatchEvent(
-      new InputEvent("input", { data: "bo", isComposing: true }),
+      new InputEvent("input", {
+        bubbles: true,
+        data: "bo",
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }),
     );
   });
 
@@ -614,6 +938,68 @@ test("polyfill composes Vietnamese Telex 'xin chào' from the real Firefox event
   // Assert the *rendered* text too, not just the model: the controller mirrors
   // `EditContext.text` into the rendered surface wholesale, so a model/display
   // divergence would show up here.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin chào");
+});
+
+test("polyfill ignores a desynced textarea selection and edits at the model caret", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  await replayFirefoxTelexSelectionDesync(page);
+
+  // The IME left the textarea selection on the committed "xin" (taSel 0-3) and
+  // tried to replace it; trusting the textarea collapsed the doc to "o  ". The
+  // fix applies the insert at the model caret (4) → "xin o", and the rendered
+  // surface must match the model.
+  await expect.poll(async () => (await diagnostics(page)).text).toBe("xin o");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin o");
+});
+
+test("polyfill preserves Microsoft Telex composition when Firefox reports composing insertText", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  await replayMicrosoftTelexXinChaoInsertTextPath(page);
+
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("xin chào");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin chào");
+});
+
+test("polyfill reads scratch preedit when insertCompositionText data is only a key delta", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  await replayMicrosoftTelexCompositionTextDeltaPath(page);
+
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("xin chào");
   await expect
     .poll(() =>
       page.evaluate(

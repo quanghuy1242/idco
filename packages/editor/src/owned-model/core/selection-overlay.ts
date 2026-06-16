@@ -118,6 +118,39 @@ function visualCaretGeometry(
   };
 }
 
+function snapViewportPixel(value: number, doc: Document): number {
+  const scale = doc.defaultView?.devicePixelRatio ?? 1;
+  return Math.round(value * scale) / scale;
+}
+
+/**
+ * Firefox anti-aliases a 1px absolutely positioned bar across two columns when
+ * the bar lands on a fractional viewport X. Snap the final painted box to the
+ * device-pixel grid while keeping the underlying range geometry unchanged for
+ * model hit-testing and IME bounds.
+ */
+function snapPaintedCaretGeometry(
+  geometry: {
+    readonly left: number;
+    readonly top: number;
+    readonly height: number;
+  },
+  hostRect: DOMRect,
+  doc: Document,
+): { left: number; top: number; height: number } {
+  const viewportLeft = snapViewportPixel(hostRect.left + geometry.left, doc);
+  const viewportTop = snapViewportPixel(hostRect.top + geometry.top, doc);
+  const viewportBottom = snapViewportPixel(
+    hostRect.top + geometry.top + geometry.height,
+    doc,
+  );
+  return {
+    left: viewportLeft - hostRect.left,
+    top: viewportTop - hostRect.top,
+    height: Math.max(1, viewportBottom - viewportTop),
+  };
+}
+
 /**
  * Suppress the native caret + `::selection` highlight on the engine surface so
  * the engine's hand-painted caret/selection are the only ones visible. Injected
@@ -322,10 +355,11 @@ export function createSelectionOverlay(
     // Caret at the focus offset, with an empty-block fallback so it never lands
     // at the viewport origin.
     const geometry = caretGeometry(model.focus, hostRect);
+    const paintedGeometry = snapPaintedCaretGeometry(geometry, hostRect, doc);
     Object.assign(caret.style, {
-      left: `${geometry.left}px`,
-      top: `${geometry.top}px`,
-      height: `${geometry.height}px`,
+      left: `${paintedGeometry.left}px`,
+      top: `${paintedGeometry.top}px`,
+      height: `${paintedGeometry.height}px`,
       visibility: model.focused ? "visible" : "hidden",
     } satisfies Partial<CSSStyleDeclaration>);
     // Restart the blink only while focused. A pre-painted blinking caret on an
@@ -338,10 +372,10 @@ export function createSelectionOverlay(
     if (hi === lo) {
       editContext.updateSelectionBounds(
         new DOMRect(
-          hostRect.left + geometry.left,
-          hostRect.top + geometry.top,
+          hostRect.left + paintedGeometry.left,
+          hostRect.top + paintedGeometry.top,
           1,
-          geometry.height,
+          paintedGeometry.height,
         ),
       );
     }
@@ -379,9 +413,9 @@ export function createSelectionOverlay(
     }
 
     return {
-      caretLeft: geometry.left,
-      caretTop: geometry.top,
-      caretHeight: geometry.height,
+      caretLeft: paintedGeometry.left,
+      caretTop: paintedGeometry.top,
+      caretHeight: paintedGeometry.height,
       rectCount,
       usedAddRange,
     };

@@ -99,7 +99,7 @@
 
 Define the editor runtime IDCO needs to become a **live technical book platform**, and record the architecture decisions made while reasoning toward it. The conclusion is that the long-term editing surface should not be a `contenteditable` rich-text engine. It should be an **owned-model, virtualized editor** built around a central input engine — native EditContext where it behaves, a hidden-textarea backend where that is more reliable — where the document model, not the DOM, is the source of truth.
 
-This document is the philosophy and the decision record. It deliberately omits a backlog and per-ticket implementation breakdown; those will be split out once this direction is accepted. The goal here is that a different engineer can read this and understand *what* we are building, *why* `contenteditable` cannot get us there, and *which trades we have already settled*.
+This document is the philosophy and the decision record. It deliberately omits a backlog and per-ticket implementation breakdown; those will be split out once this direction is accepted. The goal here is that a different engineer can read this and understand _what_ we are building, _why_ `contenteditable` cannot get us there, and _which trades we have already settled_.
 
 ## 2. The Product Thesis
 
@@ -108,17 +108,17 @@ This document is the philosophy and the decision record. It deliberately omits a
 IDCO targets two distinct artifacts, and they are not "big and small" versions of one thing:
 
 - **Static book.** Imported EPUB/PDF down the line. Finished, read-dominant, machine-sharded at import. There is "no fancy" here; the heaviness has been designed out by the importer.
-- **Live book.** Native authoring, and the real target. The defining move is that the author brings their **actual working context into the page** — their GraphQL schema, their data tables, parts of their toolchain — as first-class blocks, not screenshots. The document becomes a place where tooling *lives*.
+- **Live book.** Native authoring, and the real target. The defining move is that the author brings their **actual working context into the page** — their GraphQL schema, their data tables, parts of their toolchain — as first-class blocks, not screenshots. The document becomes a place where tooling _lives_.
 
 Both models flow through **one** authoring surface (decision §6, confirmed). The static book is that surface in a read-dominant configuration; the live book is the same surface with the full object and editing capability set.
 
-The static book is the *floor* of difficulty. Sizing the engine against imported static content is a category error: it is the model with the weight removed. The live book is heavier **by design**, because density of integrated tooling is the product, not an accident.
+The static book is the _floor_ of difficulty. Sizing the engine against imported static content is a category error: it is the model with the weight removed. The live book is heavier **by design**, because density of integrated tooling is the product, not an accident.
 
 ### 2.2 Why Mainstream Editors Break And We Intend Not To
 
 Mainstream wiki-style editors (the large enterprise document/collaboration tools, typically built on `contenteditable` engines such as ProseMirror) collapse on exactly the workload IDCO is aiming at: a long document dense with interactive, integrated objects. This is not a tuning problem; it is the consequence of an architectural bet. These editors keep their embedded widgets/macros **live at rest** inside one `contenteditable` surface, so a document full of them is a document full of always-mounted, always-interactive subtrees that the browser must keep in the editable DOM.
 
-IDCO's differentiation is to be good at the precise thing that foundation is worst at. That has a hard implication: **we cannot inherit that foundation and expect a different outcome.** A `contenteditable` rich editor (ProseMirror, Lexical, Slate, TipTap) buys IME, accessibility, selection, and native find "for free" by making the DOM the document — and the price of that free lunch is that the whole document must stay in the DOM, which is definitionally incompatible with virtualization. The mainstream made that trade correctly for *their* market (comments, chat, short docs); it is the wrong trade for a book platform.
+IDCO's differentiation is to be good at the precise thing that foundation is worst at. That has a hard implication: **we cannot inherit that foundation and expect a different outcome.** A `contenteditable` rich editor (ProseMirror, Lexical, Slate, TipTap) buys IME, accessibility, selection, and native find "for free" by making the DOM the document — and the price of that free lunch is that the whole document must stay in the DOM, which is definitionally incompatible with virtualization. The mainstream made that trade correctly for _their_ market (comments, chat, short docs); it is the wrong trade for a book platform.
 
 ## 3. Current-State Findings
 
@@ -143,13 +143,13 @@ Interpretation: this static-import data is comfortably inside Phase 0 + standard
 
 `packages/editor/src/large-document/**` implemented the docs/009 section shell: offscreen → placeholder, visible-inactive → `content-renderer`, active → a **separate** Lexical root swapped in on click, with `setTimeout`-based scroll correction. It is retired by this plan. Its quirks — read↔edit DOM swap and layout drift, click-to-edit, one-section-at-a-time, multiple editor instances — are exactly what this engine is designed to avoid. docs/009 itself flagged this as the risky UX bet and named "ship Phase 0 and stop there" as the honest fallback.
 
-The **pure helpers are salvaged**, not deleted wholesale: `signatures.ts`, `height-cache.ts`, sectionization/ID utilities, and `virtual-range.ts` feed the new engine's virtualizer and bake-signature caches. Nothing about the model layer is thrown away; the editor *runtime* is.
+The **pure helpers are salvaged**, not deleted wholesale: `signatures.ts`, `height-cache.ts`, sectionization/ID utilities, and `virtual-range.ts` feed the new engine's virtualizer and bake-signature caches. Nothing about the model layer is thrown away; the editor _runtime_ is.
 
 ## 4. The Core Problem
 
 ### 4.1 contenteditable Owns The DOM, So It Cannot Virtualize
 
-In a `contenteditable` editor the DOM *is* the document. The browser's caret and `Selection` live inside DOM nodes. The moment you unmount an offscreen block, you destroy the nodes that selection points into: a selection spanning that region corrupts, "select all" sees only mounted DOM, Backspace at a boundary deletes the wrong node, IME composition lands in the wrong place. Virtualizing an editable `contenteditable` means mutating the very tree the browser believes is the document, on every scroll, while keeping a live selection across gaps of nodes that no longer exist.
+In a `contenteditable` editor the DOM _is_ the document. The browser's caret and `Selection` live inside DOM nodes. The moment you unmount an offscreen block, you destroy the nodes that selection points into: a selection spanning that region corrupts, "select all" sees only mounted DOM, Backspace at a boundary deletes the wrong node, IME composition lands in the wrong place. Virtualizing an editable `contenteditable` means mutating the very tree the browser believes is the document, on every scroll, while keeping a live selection across gaps of nodes that no longer exist.
 
 This is why **no mainstream `contenteditable` editor virtualizes a live editing surface.** It is not an oversight; `contenteditable`, editing, and virtualization are at war over who owns selection. (Read-only virtualization with `contenteditable=false` offscreen is fine — but that is reading, not editing.)
 
@@ -160,6 +160,8 @@ The input layer keeps its own text buffer and selection offsets, decoupled from 
 This is precisely the CodeMirror 6 / Monaco architecture — a hidden input surface plus a model-owned selection — with native EditContext treated as an optional platform backend rather than the whole design. It is not a novel research bet; it is the proven approach to virtualized editing, adapted to IDCO's rich-document model.
 
 Browser support (June 2026): native EditContext exists in Chrome/Edge/Opera 121+ (~69% global). Not in Firefox or Safari, with no committed timeline, and the native path still has behavior gaps a real editor must verify. The engine therefore standardizes on **one central input substrate** (§5.5, §6.7) instead of maintaining "native" and "polyfill" as separate editor implementations.
+
+**Decision (June 2026): keep native EditContext, but demote it.** The hidden-textarea backend is the **baseline** that must be fully correct on its own on every browser; native EditContext is an **opt-in optimization on Chromium**, kept _only_ because it hands ~69% of users vendor-grade OS IME (composition, candidate-window placement) and accessibility for free — not because the engine depends on it. Remove native tomorrow and the editor stays correct everywhere; it simply paints and handles more itself. We considered going textarea-everywhere (the pure Monaco/CodeMirror model) and rejected it for exactly that 69%: declining native would hand our IME engine to Chromium users who would otherwise get the browser's, and IME is the costliest surface to own (§11).
 
 ### 4.3 The Bake Model Makes Rest Cheap By Design
 
@@ -218,7 +220,7 @@ Note: there is currently no Zod/content-api integration coupling the editor to a
 
 ### 5.5 Input Substrate: One Central Engine, Multiple Backends
 
-> **Architecture note: stop treating this as "the polyfill path."** The hidden-textarea bridge is not an embarrassing workaround; it is the standard substrate used by serious virtualized editors because the real input element captures keyboard, IME, clipboard, autocorrect, and platform text services while the editor owns the model and rendering. In IDCO this becomes the **central input engine**. Native EditContext is a backend we use when it is reliable; the hidden textarea is a backend we own when the platform API is missing or too inconsistent. The editor must not grow two behavior stacks called "native" and "polyfill."
+> **Architecture note: stop treating this as "the polyfill path."** The hidden-textarea bridge is not an embarrassing workaround; it is the standard substrate used by serious virtualized editors because the real input element captures keyboard, IME, clipboard, autocorrect, and platform text services while the editor owns the model and rendering. In IDCO this becomes the **central input engine**. The hidden-textarea backend is the **baseline**: it defines correctness and runs on every browser. Native EditContext is an **opt-in optimization** layered on Chromium for the IME and accessibility quality the OS gives a true editing host for free — used only where it passes the same behavior suite as the baseline, and droppable without losing correctness. The editor must not grow two behavior stacks called "native" and "polyfill"; native is a backend swap behind one contract, never a second implementation with features of its own.
 
 The active editing region talks to one input-controller interface. That controller may be backed by native `EditContext`, by a hidden `<textarea>` bridge, or by a platform-specific active-block fallback. The output is always the same: model-offset text updates, composition ranges, selection changes, bounds requests, clipboard/shortcut commands, and focus state. The rest of the engine never asks which backend produced them.
 
@@ -262,11 +264,11 @@ The decision (§6.6) is to target parity on the central input engine, not on a s
 
 The engine is the **editor tier** of docs/006's three tiers. The same node renders three ways, and the bake pipeline is the bridge:
 
-| Tier | Source it renders from | Interactivity |
-| --- | --- | --- |
-| Editor (this engine) | live model + live object surfaces | full authoring |
-| Digital reader (`content-renderer`) | persisted JSON + baked fields | opt-in enhancement (sort/filter, pan) |
-| Export (EPUB/PDF worker) | baked static fields only | none; no heavy libraries |
+| Tier                                | Source it renders from            | Interactivity                         |
+| ----------------------------------- | --------------------------------- | ------------------------------------- |
+| Editor (this engine)                | live model + live object surfaces | full authoring                        |
+| Digital reader (`content-renderer`) | persisted JSON + baked fields     | opt-in enhancement (sort/filter, pan) |
+| Export (EPUB/PDF worker)            | baked static fields only          | none; no heavy libraries              |
 
 The engine's resting blocks render the **same baked representation** the reader and export consume. There is one static representation per object, authored at edit time and baked into the node, used everywhere the object is not actively being edited. That single fact is what removes the read↔edit drift class of bug entirely.
 
@@ -276,13 +278,13 @@ The engine's resting blocks render the **same baked representation** the reader 
 
 **Decision:** the long-term engine owns the document model and uses the central input engine for input; it does not use `contenteditable` as the source of truth.
 
-**Why:** §4.1–4.2. `contenteditable` makes the DOM the document, which forbids virtualization of a live editing surface. The live-book thesis (§2) *is* the workload that breaks the `contenteditable` bet. Owning the model is the only path that gets virtualized live editing, correct cross-virtual selection/copy, and clean object focus isolation. It is also the substrate that leaves collaboration possible later (§12) at no cost now.
+**Why:** §4.1–4.2. `contenteditable` makes the DOM the document, which forbids virtualization of a live editing surface. The live-book thesis (§2) _is_ the workload that breaks the `contenteditable` bet. Owning the model is the only path that gets virtualized live editing, correct cross-virtual selection/copy, and clean object focus isolation. It is also the substrate that leaves collaboration possible later (§12) at no cost now.
 
 ### 6.2 Reuse The View And The Model, Not Lexical's Engine
 
 **Decision:** reuse the persisted JSON model and `content-renderer` (as the view layer); do not reuse Lexical's editing engine for this surface.
 
-**Why:** EditContext and Lexical are mutually exclusive for one surface — Lexical *is* a `contenteditable` reconciler and cannot have EditContext slid underneath it without forking its input layer (forbidden by docs/009). Choosing EditContext means leaving Lexical's engine behind for the owned-model surface. The cost is smaller than it sounds: the model already exists, and `content-renderer` already paints it. "Reuse" shifts from "reuse Lexical" to "reuse the model + the renderer," with the new work being input glue, model↔block mapping, selection overlay, and the virtualizer. Lexical remains the engine for the **standard** small-document editor.
+**Why:** EditContext and Lexical are mutually exclusive for one surface — Lexical _is_ a `contenteditable` reconciler and cannot have EditContext slid underneath it without forking its input layer (forbidden by docs/009). Choosing EditContext means leaving Lexical's engine behind for the owned-model surface. The cost is smaller than it sounds: the model already exists, and `content-renderer` already paints it. "Reuse" shifts from "reuse Lexical" to "reuse the model + the renderer," with the new work being input glue, model↔block mapping, selection overlay, and the virtualizer. Lexical remains the engine for the **standard** small-document editor.
 
 ### 6.3 Let The Browser Lay Out And Hit-Test Text
 
@@ -294,7 +296,7 @@ The engine's resting blocks render the **same baked representation** the reader 
 
 **Decision:** at most one heavy object is in live-edit mode at a time; all others render baked. The active-object surface is a **slot abstraction**, not a hardcoded singular.
 
-**Why:** the text layer is always live, but heavy objects are the expensive, interaction-heavy parts. With bake making rest cheap, allowing only one live object reduces focus/selection/IME arbitration to a single surface, which is tractable; N simultaneous live surfaces is a research project. The slot keeps "allow several live" as a future relaxation rather than a rewrite, so we can walk there if product demand appears. Reader-tier opt-in interactivity (docs/006 §5.7) is a *separate* downstream tier and does not affect the authoring engine's one-active rule.
+**Why:** the text layer is always live, but heavy objects are the expensive, interaction-heavy parts. With bake making rest cheap, allowing only one live object reduces focus/selection/IME arbitration to a single surface, which is tractable; N simultaneous live surfaces is a research project. The slot keeps "allow several live" as a future relaxation rather than a rewrite, so we can walk there if product demand appears. Reader-tier opt-in interactivity (docs/006 §5.7) is a _separate_ downstream tier and does not affect the authoring engine's one-active rule.
 
 ### 6.5 Block-Atomic Selection Across Objects
 
@@ -312,13 +314,13 @@ The engine's resting blocks render the **same baked representation** the reader 
 
 **Decision:** own the input substrate in the editor package. Start by vendoring or forking `@neftaly/editcontext-polyfill`, but treat it as the seed of IDCO's input engine, not as a replaceable third-party fallback.
 
-**Why:** it is small (~2.5k LOC), permissively licensed, and already covers much of the input plumbing we should not rediscover: hidden textarea, IME, mouse selection, command interception, focus redirection, and native/parity tests. But IDCO also needs fixes that are outside the upstream package's scope: rich-block model mapping, cross-virtual selection/copy, final-newline geometry, caret visual quality, shortcut semantics, and story/native-backend switching. Vendoring or forking lets us merge upstream input work while keeping those editor-owned fixes in one place. When native EditContext improves, it becomes another backend of this substrate; it does not delete the engine, because the engine is the model, selection, virtualization, and backend contract.
+**Why:** it is small (~2.5k LOC), permissively licensed, and already covers much of the input plumbing we should not rediscover: hidden textarea, IME, mouse selection, command interception, focus redirection, and native/parity tests. But IDCO also needs fixes that are outside the upstream package's scope: rich-block model mapping, cross-virtual selection/copy, final-newline geometry, caret visual quality, shortcut semantics, and story/native-backend switching. Vendoring or forking lets us merge upstream input work while keeping those editor-owned fixes in one place. When native EditContext improves, it becomes another backend of this substrate; it does not delete the engine, because the engine is the model, selection, virtualization, and backend contract. Native EditContext stays as a **demoted, opt-in backend** (the ~69% Chromium IME/a11y win, §4.2), gated behind the same conformance suite as the baseline: an optimization the engine can drop without losing correctness, never the path correctness is defined against.
 
 ### 6.8 Rejected And Deferred Options
 
 - **Rejected — keep the section shell.** Its read↔edit swap, click-to-edit, and multi-editor model are the quirks this engine exists to remove (§3.3).
 - **Rejected — switch to ProseMirror/TipTap for scale.** They are `contenteditable` engines and mount the whole document; same ceiling as Lexical. docs/009's ProseMirror endorsement was for product segmentation (the retired section model), not for virtualization.
-- **Rejected — build on CodeMirror 6 directly.** CM6 virtualizes uniform code lines beautifully but fights arbitrary nested rich blocks, tables, and media. Adopt its *architecture* (hidden input + model-owned selection), not its codebase.
+- **Rejected — build on CodeMirror 6 directly.** CM6 virtualizes uniform code lines beautifully but fights arbitrary nested rich blocks, tables, and media. Adopt its _architecture_ (hidden input + model-owned selection), not its codebase.
 - **Rejected — fork Lexical or wait for upstream large-document internals.** High maintenance, and upstream work would still not deliver rich-text viewport rendering or the product features (virtualized search, object focus model).
 - **Rejected — custom canvas/text-layout engine.** We let the browser lay out text (§6.3); reimplementing glyph layout, bidi, and accessibility is exactly the multi-year trap to avoid.
 - **Deferred — many simultaneously-live objects.** Possible later via the slot (§6.4); not first-release.
@@ -327,7 +329,7 @@ The engine's resting blocks render the **same baked representation** the reader 
 
 ## 7. Engine Internals
 
-This section pins the runtime internals that were settled during design so later work does not drift. It is the *how*; §5–6 are the *what* and *why*. The MDN EditContext HTML-editor demo (external references) is a working, primary-source validation of the spine below: it instantiates an `EditContext` as the **model**, treats its editable element as the **view**, re-renders a **tokenized** view on `textupdate`, and positions IME/selection by feeding `Range` geometry back through `updateControlBounds` / `updateSelectionBounds` / `updateCharacterBounds`. Our engine is that pattern scaled to a virtualized, block-structured rich document.
+This section pins the runtime internals that were settled during design so later work does not drift. It is the _how_; §5–6 are the _what_ and _why_. The MDN EditContext HTML-editor demo (external references) is a working, primary-source validation of the spine below: it instantiates an `EditContext` as the **model**, treats its editable element as the **view**, re-renders a **tokenized** view on `textupdate`, and positions IME/selection by feeding `Range` geometry back through `updateControlBounds` / `updateSelectionBounds` / `updateCharacterBounds`. Our engine is that pattern scaled to a virtualized, block-structured rich document.
 
 ### 7.1 Stack: Framework-Agnostic Core, React View
 
@@ -336,15 +338,15 @@ The decisive split is **not** "React vs Lit." It is **engine core (plain TypeScr
 - **Core — zero framework imports:** the document model, the EditContext input controller, the selection model, the virtual-range/height logic, the command/transaction layer, and bake orchestration. This is data, math, and DOM-event plumbing. It is how CodeMirror 6 and Lexical are built (agnostic core, thin bindings), and it is the hedge that makes the view-framework choice low-stakes.
 - **View — React:** renders the visible block window, paints the selection overlay, and hosts object chrome. React is chosen because the reuse depends on it: `content-renderer` (the view layer, §6.2), `@idco/ui`, and the React Aria toolbar/object-chrome/flyout (docs/006) are all React. Choosing Lit would discard that reuse and fork the entire chrome stack for an encapsulation win the engine does not need.
 
-| Layer | Choice |
-| --- | --- |
-| Engine core | **Vanilla TypeScript** — model, EditContext controller, selection, virtual-range, commands, bake orchestration |
-| Input | Central input substrate: native EditContext backend where reliable, hidden-textarea backend elsewhere, bound by the core |
-| View / chrome | **React** — reuse `content-renderer`, `@idco/ui`, React Aria toolbar/popovers |
-| Model→view binding | model as **external store** via `useSyncExternalStore`; the model never lives in React state |
-| Off-thread work | **Web Worker** for index/search/serialize/recalc and pure-compute bake (§7.5) |
-| WASM/Rust | **Deferred** — only behind a profiled worker hotspot |
-| Lit / web components | **No** — would discard React reuse; revisit only if objects become genuinely third-party |
+| Layer                | Choice                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Engine core          | **Vanilla TypeScript** — model, EditContext controller, selection, virtual-range, commands, bake orchestration           |
+| Input                | Central input substrate: native EditContext backend where reliable, hidden-textarea backend elsewhere, bound by the core |
+| View / chrome        | **React** — reuse `content-renderer`, `@idco/ui`, React Aria toolbar/popovers                                            |
+| Model→view binding   | model as **external store** via `useSyncExternalStore`; the model never lives in React state                             |
+| Off-thread work      | **Web Worker** for index/search/serialize/recalc and pure-compute bake (§7.5)                                            |
+| WASM/Rust            | **Deferred** — only behind a profiled worker hotspot                                                                     |
+| Lit / web components | **No** — would discard React reuse; revisit only if objects become genuinely third-party                                 |
 
 The one React rule that must not be violated: **the document model does not live in React state.** It lives in the engine; the view subscribes via `useSyncExternalStore` to only the slices it paints (the visible id-list and per-block content). If the model goes into `useState`/context, a book-scale document re-render-storms on every keystroke.
 
@@ -354,9 +356,9 @@ A correction that must be recorded so the rationale does not drift: **Lexical's 
 
 Decided model:
 
-- **Store: normalized and id-addressed.** The document is an **ordered list of top-level block ids** plus a **`Map<blockId, BlockModel>`**. The `id` field is **optional in the persisted schema** (`model/schema.ts`), so the engine runs an idempotent **ID-ensure pass on ingest** (docs/009 R1-A, `ensureDocumentNodeIds`) — documents from older saves or external/EPUB import can arrive without ids and must be backfilled before the store is built. Once ensured, *the model is also the virtualization index*: rendering a window is "take the visible id slice, O(1) lookup each." Editing block X replaces X's map entry and touches nothing else. Because ingest may add ids, the output contract is **deep-equal after normalization**, not byte-identical (see §14).
+- **Store: normalized and id-addressed.** The document is an **ordered list of top-level block ids** plus a **`Map<blockId, BlockModel>`**. The `id` field is **optional in the persisted schema** (`model/schema.ts`), so the engine runs an idempotent **ID-ensure pass on ingest** (docs/009 R1-A, `ensureDocumentNodeIds`) — documents from older saves or external/EPUB import can arrive without ids and must be backfilled before the store is built. Once ensured, _the model is also the virtualization index_: rendering a window is "take the visible id slice, O(1) lookup each." Editing block X replaces X's map entry and touches nothing else. Because ingest may add ids, the output contract is **deep-equal after normalization**, not byte-identical (see §14).
 - **Two granularities, deliberately.** Top-level blocks are the coarse, id-addressed units (for virtualization, move/delete/copy). A block's inline content (text runs + marks) is a small subtree, immutable with structural sharing, so a block's identity changes only when its content does — which lets the view skip re-rendering unchanged visible blocks by reference equality.
-- **Mutations are invertible transactions ("steps"), modeled on ProseMirror.** A command produces an **invertible delta** applied to the store. Invertibility is the upgrade that yields **partial update, cheap undo, and collaboration-readiness from one mechanism**: undo stores *inverse steps*, not whole-document snapshots — precisely the memory trap Lexical's snapshot history falls into. This is a small command→step→store loop in the core; do not import Redux.
+- **Mutations are invertible transactions ("steps"), modeled on ProseMirror.** A command produces an **invertible delta** applied to the store. Invertibility is the upgrade that yields **partial update, cheap undo, and collaboration-readiness from one mechanism**: undo stores _inverse steps_, not whole-document snapshots — precisely the memory trap Lexical's snapshot history falls into. This is a small command→step→store loop in the core; do not import Redux.
 - **No full-JSON on the hot path, ever.** Host serialization is debounced on the `idle`/`debounced` lane (§7.3). Undo is inverse steps. History is bounded by step count, not snapshot size.
 - **Per-block reactive subscriptions.** A keystroke in block X notifies only X's subscribers → X re-renders and the selection overlay repaints; nothing else does. "One update never re-renders the editor" is enforced by subscription topology, not by discipline.
 
@@ -370,24 +372,24 @@ Decided model:
 Decisions:
 
 - **Promote the generic core into the engine core; leave the Lexical bridge with the standard editor.** The split follows the seam that already exists.
-- **One process-wide scheduler, shared by both editors.** A single main thread means a single budget is the *correct* model. Both the standard Lexical editor and the new engine register into the same singleton → one budget accounting, one `__IDCO_EDITOR_PERF__` dashboard, one docs/008 contract covering both.
-- **The lane vocabulary becomes the engine's heartbeat.** In Lexical the scheduler only managed *derived* work beside the editor; here the engine owns the hot path, and the lanes map almost one-to-one onto its work:
+- **One process-wide scheduler, shared by both editors.** A single main thread means a single budget is the _correct_ model. Both the standard Lexical editor and the new engine register into the same singleton → one budget accounting, one `__IDCO_EDITOR_PERF__` dashboard, one docs/008 contract covering both.
+- **The lane vocabulary becomes the engine's heartbeat.** In Lexical the scheduler only managed _derived_ work beside the editor; here the engine owns the hot path, and the lanes map almost one-to-one onto its work:
 
-| Lane | Engine work |
-| --- | --- |
-| `sync` | input → model step (immediate, this turn) |
-| `frame` | render the visible window + paint the selection overlay (rAF, coalesce `latest`) |
-| `idle` | measure block heights, build search/TOC indexes, prefetch neighbor blocks |
-| `debounced` | emit `onChange` to host, bake objects, serialize |
+| Lane        | Engine work                                                                      |
+| ----------- | -------------------------------------------------------------------------------- |
+| `sync`      | input → model step (immediate, this turn)                                        |
+| `frame`     | render the visible window + paint the selection overlay (rAF, coalesce `latest`) |
+| `idle`      | measure block heights, build search/TOC indexes, prefetch neighbor blocks        |
+| `debounced` | emit `onChange` to host, bake objects, serialize                                 |
 
-- **docs/008's budget gate graduates in meaning.** An over-budget **`frame`-lane** run is now a *dropped frame* — directly user-visible — not just a slow derived listener. Extend the metrics (visible block count, render time, selection-paint time) alongside the existing snapshot; do not replace it.
+- **docs/008's budget gate graduates in meaning.** An over-budget **`frame`-lane** run is now a _dropped frame_ — directly user-visible — not just a slow derived listener. Extend the metrics (visible block count, render time, selection-paint time) alongside the existing snapshot; do not replace it.
 - **One rAF loop; batch store-notifies into the frame lane.** The scheduler's `frame` lane and React's renderer must not fight. The flow is: model step (`sync`) → mark dirty → one coalesced `frame` task → notify the external store → React renders only the visible slice. Notifies are batched into the frame lane so `useSyncExternalStore` does not trigger a synchronous re-render per keystroke.
 
 ### 7.4 Selection And Caret Overlay
 
-An **unproven, load-bearing hypothesis** the MDN demo suggests: attaching an `EditContext` makes the element a focusable **editing host**, and an editing host may get a **native, browser-painted caret driven by the ordinary DOM `Selection`** — without `contenteditable`. The demo sets the selection (it uses `setBaseAndExtent`; we use `addRange` instead, see below) and the browser paints over it. **But whether Chromium paints a *blinking caret* for a collapsed `addRange` on a non-`contenteditable` EditContext host is exactly what Phase 2 must prove** — it cannot be asserted from the demo or the upstream compatibility package source. Treat this as a hypothesis with a fallback, not a fact:
+An **unproven, load-bearing hypothesis** the MDN demo suggests: attaching an `EditContext` makes the element a focusable **editing host**, and an editing host may get a **native, browser-painted caret driven by the ordinary DOM `Selection`** — without `contenteditable`. The demo sets the selection (it uses `setBaseAndExtent`; we use `addRange` instead, see below) and the browser paints over it. **But whether Chromium paints a _blinking caret_ for a collapsed `addRange` on a non-`contenteditable` EditContext host is exactly what Phase 2 must prove** — it cannot be asserted from the demo or the upstream compatibility package source. Treat this as a hypothesis with a fallback, not a fact:
 
-> The **model** owns *what* is selected. **If** native DOM `Selection` renders the common case (mounted blocks on an EditContext host, to be confirmed in Phase 2), use it; **otherwise the engine hand-paints the caret and selection itself** — the same overlay it already needs for the gaps. Either way the engine hand-paints what native selection cannot express.
+> The **model** owns _what_ is selected. **If** native DOM `Selection` renders the common case (mounted blocks on an EditContext host, to be confirmed in Phase 2), use it; **otherwise the engine hand-paints the caret and selection itself** — the same overlay it already needs for the gaps. Either way the engine hand-paints what native selection cannot express.
 
 If Phase 2 shows the native caret does not appear for a collapsed `addRange`, the fallback is to hand-paint the caret unconditionally (exactly what the hidden-textarea backend already does), and the "native-where-possible" optimization simply does not apply on the native path — no architectural change, only more painting.
 
@@ -404,15 +406,15 @@ Concretely:
 - **IME preedit formatting is engine-painted.** Native EditContext emits `textformatupdate` while an IME is composing; a custom renderer must apply those ranges itself (for example underlining Vietnamese/Telex preedit text) because the browser will not draw them for a fully owned view. The hidden-textarea backend must emit an equivalent event from its composition range. DOM spans are acceptable in the Phase 2 one-block spike; the CSS Custom Highlight API remains the preferred scalable primitive once the multi-block overlay exists.
 - **Feed geometry back to EditContext.** Call `updateControlBounds()` (editable region), `updateSelectionBounds()` (current range rect), and `updateCharacterBounds()` (on `characterboundsupdate`) so the OS IME candidate window lands in the right place. The selection layer and the input layer are coupled here by design; this is a concrete reason EditContext is the right substrate, and the MDN demo exercises all three calls.
 - **Caret affinity.** At a soft-wrap or bidi boundary a caret offset can render at the end of line N or the start of line N+1. On the native-selection path the browser resolves this; the engine only owns an affinity/bias bit on the hand-painted/offscreen path. Smaller than a full custom concern, but still real where we paint.
-- **Two input modes, one rule** (a consequence of the mobile-parity decision, §5.8/§6.6). On the native-EditContext backend the browser *may* paint the in-host caret/selection (Phase 2 to confirm; else the engine paints it); on the native-`contenteditable`-active-block path (mobile fallback) the browser paints the caret/selection *within the active block*. Either way, the engine always hand-paints **cross-block** selection and offscreen edges. The rule: **the engine always owns cross-block selection and the authoritative model; intra-host/intra-block caret painting belongs to whoever owns input there (browser, hidden-textarea backend, or engine fallback).**
+- **Two input modes, one rule** (a consequence of the mobile-parity decision, §5.8/§6.6). On the native-EditContext backend the browser _may_ paint the in-host caret/selection (Phase 2 to confirm; else the engine paints it); on the native-`contenteditable`-active-block path (mobile fallback) the browser paints the caret/selection _within the active block_. Either way, the engine always hand-paints **cross-block** selection and offscreen edges. The rule: **the engine always owns cross-block selection and the authoritative model; intra-host/intra-block caret painting belongs to whoever owns input there (browser, hidden-textarea backend, or engine fallback).**
 
 ### 7.5 Web Worker Boundary
 
 A Web Worker is used, scoped precisely:
 
-- **Worker:** search/text-index build, serialization of large documents, data-grid recalc, and *pure-compute* bake. This is the docs/008 spirit — expensive derived work off the editing path.
+- **Worker:** search/text-index build, serialization of large documents, data-grid recalc, and _pure-compute_ bake. This is the docs/008 spirit — expensive derived work off the editing path.
 - **Main thread, always:** input → step → render, caret, selection, and virtualization. These must be synchronous with input at sub-frame latency; a worker round-trip would add jank, not remove it.
-- **The worker is a compute *service*, not a second scheduler.** The `idle`/`debounced` lanes call into it and await results; the main scheduler owns main-thread lanes only. Do not build a distributed cross-thread scheduler.
+- **The worker is a compute _service_, not a second scheduler.** The `idle`/`debounced` lanes call into it and await results; the main scheduler owns main-thread lanes only. Do not build a distributed cross-thread scheduler.
 - **Not all bake is worker-able.** Pure compute (recalc, index, serialize) is. DOM/SVG-rendering bake (mermaid, charts) needs the DOM, so it stays main-thread or uses `OffscreenCanvas` only where the renderer supports it. Promise "pure-compute bake and indexing in a worker," not "all bake in a worker."
 
 ## 8. Philosophy And Principles
@@ -420,8 +422,8 @@ A Web Worker is used, scoped precisely:
 - **The model is the document; the DOM is a view.** Every capability that historically depended on DOM presence (selection, copy, find, TOC, search) reads the model or a derived index instead. This is the inversion the whole plan turns on.
 - **Bake is the differentiator, not the engine alone.** docs/006's "static at rest, live on activation" is what makes a tooling-dense document cheap to hold and possible to export. The engine virtualizes and edits; bake is why rest is affordable.
 - **Stay on the browser's happy path for the deep things.** Text layout and hit-testing are the browser's job; platform text input belongs to the central input substrate. We own orchestration — model, selection, virtualization, focus — not primitives we have no business reimplementing.
-- **One surface, configured, not many surfaces.** Static vs live, desktop vs mobile, read vs edit are *configurations* of one engine and one model, never separate code paths that drift.
-- **The output contract is sacred; the runtime is disposable.** Anything saved must remain readable by `content-renderer` and rollback-compatible with the Lexical path. We are free to reinvent how editing feels; we are not free to change what a document *is*.
+- **One surface, configured, not many surfaces.** Static vs live, desktop vs mobile, read vs edit are _configurations_ of one engine and one model, never separate code paths that drift.
+- **The output contract is sacred; the runtime is disposable.** Anything saved must remain readable by `content-renderer` and rollback-compatible with the Lexical path. We are free to reinvent how editing feels; we are not free to change what a document _is_.
 - **Honesty about cost.** This is a real engine, not a plugin. We accept that nothing here is free; the justification is that the product's core workload is the one no `contenteditable` foundation can serve.
 
 ## 9. Relationship To Existing Work
@@ -450,9 +452,9 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 ### 10.2 Loop Discipline (anti-drift protocol)
 
 - **One phase per loop segment.** Do not start phase N+1 until phase N's done-when gate passes in full.
-- **A phase is DONE only when:** all its ACs pass *and* all global invariants hold *and* its verify commands are green. Partial is not done.
+- **A phase is DONE only when:** all its ACs pass _and_ all global invariants hold _and_ its verify commands are green. Partial is not done.
 - **Hard stop on failure.** If a phase cannot meet its gate, stop and report the specific failing AC and command output. Do not weaken an AC, do not stub a test to pass, do not skip ahead, do not edit this document's ACs to fit the code.
-- **Scope fence.** Touch only files in the current phase's *may touch* list. If another file genuinely must change, stop and report why before doing it.
+- **Scope fence.** Touch only files in the current phase's _may touch_ list. If another file genuinely must change, stop and report why before doing it.
 - **Update the ledger** (§10.3) when, and only when, a phase's gate passes.
 
 ### 10.3 Phase Status Ledger (update on completion)
@@ -503,17 +505,24 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 
 #### Phase 3 — Model + transactions (medium–large; headless spine)
 
-- **Goal:** the document model and mutation layer, fully testable without UI.
+- **Goal:** the document model and mutation layer, fully testable without UI. The runtime model is **Lexical-free** — it does not import `lexical`/`@lexical/*` and does not reuse Lexical's node shape as its in-memory representation; Lexical-flavored `RichTextEditorDocument` JSON is a **serialization target at the boundary only** (§5.4).
 - **May touch:** `owned-model/core/**`, `tests/owned-model/**`.
-- **Must not:** import React; render anything; add virtualization; touch heavy objects.
+- **Must not:** import React; import `lexical`/`@lexical/*`; reuse `RichTextEditorNode` as the runtime model (it is a serializer target, not the editing representation); render anything; add virtualization; touch heavy objects.
+- **Model shape (decided — the efficient, non-Lexical representation):**
+  - **Typed `BlockModel` discriminated union** (`paragraph | heading | list | listitem | quote | code-block | callout | media | post-ref | embed | table | table-of-contents | glossary | …`), not a `[key: string]: unknown` bag — exhaustively typed, no megamorphic property access.
+  - **Range-based inline formatting:** each text-bearing block holds one `text: string` plus `marks: { start; end; kind }[]` (links/glossary carried as ranges too). This is the decisive win over Lexical, which fragments a styled line into many text nodes; here editing and model-offset mapping are O(text length), not O(node count). Marks expand to the `format` bitmask + split text nodes **only** in the serializer.
+  - **Flat per-block text string now**, with the rope/piece-table option deferred to a single block type (`code-block`) later, addable without touching the store or step layer.
+  - **Invertible diff steps over the normalized store** (AC2/AC3) with structural sharing (AC1) — also what keeps CRDT collaboration possible later (§12) at no cost now.
+  - _Rejected:_ a model mirroring `RichTextEditorNode` (reintroduces Lexical's node-splitting and weak-undo costs); a rope-per-block from day one (block-partitioned text is small, so the asymptotic win never triggers — premature complexity).
 - **Acceptance criteria:**
   - AC1 the store is normalized (ordered id list + `Map<blockId, BlockModel>`); a test proves editing one block leaves every other block's object identity unchanged (reference equality).
   - AC2 every step type is invertible: a property test asserts `apply(state, inverse(step)) === pre-step state` for generated edits.
   - AC3 undo/redo across N random edits returns a document deep-equal to the pre-edit document.
   - AC4 a golden round-trip: a known edit sequence serializes to `RichTextEditorDocument` JSON that deep-equals a committed golden **and** loads/renders identically via `content-renderer` (this is G1's enforcing test).
-  - AC5 the import-boundary check (G3) is green for all new core files.
-- **Verify:** `pnpm test`; `pnpm typecheck`.
-- **Done when:** AC1–AC5 pass and G1–G6 hold.
+  - AC5 the import-boundary check (G3) is green for all new core files; a grep proves no `lexical`/`@lexical/*` import and no use of `RichTextEditorNode` as a runtime type under `owned-model/core/**`.
+  - AC6 inline formatting round-trips losslessly: range-based `marks` ↔ serialized `format` bitmask + split text nodes is proven reversible by a property test over generated overlapping/adjacent mark ranges.
+- **Verify:** `pnpm test`; `pnpm typecheck`; `grep -rn "@lexical\|from \"lexical\"" packages/editor/src/owned-model` is empty.
+- **Done when:** AC1–AC6 pass and G1–G6 hold.
 - **Out of scope:** React, rendering, virtualization, scheduler wiring.
 
 #### Phase 4 — React view + scheduler/frame loop (medium–large)
@@ -598,7 +607,7 @@ The shape of the bet: Phases 1–2 cost little and retire the foundational risk;
 
 The phases above describe the engine's spine. A production editor needs the following, which the spine does not imply and which must be slotted into the named phase rather than discovered late. `[blocking-for-v1]` items must ship before the engine is offered even as opt-in; `[defer-but-named]` items may follow, but the design must not foreclose them.
 
-- **Paste pipeline — `[blocking-for-v1]`, Phase 3/8.** Clipboard *read*: an HTML/plain-text→model parser with explicit format priority (internal model format > HTML > plain), and an internal high-fidelity clipboard format for intra-app paste. The copy side (§5.7) is only half of clipboard.
+- **Paste pipeline — `[blocking-for-v1]`, Phase 3/8.** Clipboard _read_: an HTML/plain-text→model parser with explicit format priority (internal model format > HTML > plain), and an internal high-fidelity clipboard format for intra-app paste. The copy side (§5.7) is only half of clipboard.
 - **Sanitization / XSS boundary — `[blocking-for-v1]`, Phase 3/6.** Pasted HTML and **baked HTML/SVG fields** (mermaid SVG, grid output) are rendered by `content-renderer` on every tier including export. Define the single sanitization boundary; nothing author- or paste-derived reaches a rendered tier unsanitized.
 - **Find-in-page — `[blocking-for-v1]`, Phase 5/8.** Virtualization removes offscreen text from the DOM, so native Ctrl/Cmd+F is broken by construction. The JSON search index (§8/§13) must be wired to an **in-editor find UI that is the Ctrl+F replacement** (intercept the shortcut), not just a side panel.
 - **Autosave / dirty-state / save-failure — `[blocking-for-v1]`, Phase 4/8.** A dirty-state model, debounced persistence (the `debounced` lane), save-failure recovery, and a minimum two-tabs/stale-write guard. Core for a "live book platform," not optional.
@@ -612,6 +621,8 @@ The phases above describe the engine's spine. A production editor needs the foll
 ## 11. Risks, Edge Cases, And Failure Modes
 
 - **Mobile-Safari IME on the hidden-textarea backend.** The hidden-textarea bridge versus iOS predictive text, autocorrect, and the selection loupe is the single highest-risk surface. The upstream package is young and has known IME-fuzz limits, so our owned substrate must vendor and harden it; retain the native-`contenteditable`-on-active-block option (§5.8/§6.6); treat IME as a first-class test target.
+- **IME engagement is the platform's call, not ours (Firefox + Windows IME-toggle).** Captured from the Phase 2 spike: with the hidden-textarea backend on Firefox, if the user switches keyboard language mid-document (en↔vi↔en), the Windows IME stops entering composition and emits plain `insertText` for the next word — so Vietnamese Telex "xin chào" lands as "xin o". Traced conclusively: the hidden textarea keeps focus throughout (`taIsActive` stays true) and the model is never corrupted (it faithfully reflects whatever the IME emits) — the IME simply declines to compose. It is reproducible in any plain `<textarea>` in Firefox and there is **no web-platform signal** for an IME language switch, so the backend cannot detect or recover from it without breaking legitimate plain typing. Keeping the VI keyboard active throughout composes correctly. Native EditContext on Chromium does not exhibit it — another point for the keep-native decision (§4.2). Accepted, not a blocker; revisit only if a backend-level workaround proves safe.
+- **Owning composition correctness for complex scripts is the price of the baseline.** Because the hidden-textarea backend is the baseline, IDCO owns IME composition correctness for CJK, Vietnamese/Telex, and dead-keys on every browser where native is not used — all of Firefox/Safari, and Chromium if a regression forces the baseline. This is a recurring, platform-matrixed cost, not a one-off (the Microsoft-Telex-on-Firefox composition bug, fixed during the Phase 2 spike, is the representative case: a trailing `insertCompositionText` after `compositionend` that duplicated committed text). Native EditContext is precisely the mitigation that hands Chromium users vendor-grade composition for free — the reason it is kept (§4.2/§6.7) — but the baseline must be independently correct, and CJK is harder than Telex. There is no off-the-shelf CJK IME test framework; the proof strategy is assembled (§13).
 - **Caret-from-click accuracy at wrap/bidi boundaries.** `caretPositionFromPoint` resolution varies; mapping pixel → text offset → model offset must be verified on wrapped lines, RTL runs, and around inline marks.
 - **Scroll drift on late-resizing content.** Images, baked SVGs, and tables that settle height after first paint shift everything below. Heights must be conservative and measured-authoritative; scroll-to-target corrects after measure; a top→bottom→top drift assertion guards regressions.
 - **Selection overlay across partially-mounted ranges.** Painting only on mounted blocks while the model holds the full range must stay visually correct as blocks mount/unmount during autoscroll selection.
@@ -634,13 +645,13 @@ The phases above describe the engine's spine. A production editor needs the foll
 
 ## 13. Verification Philosophy
 
-Concrete tickets are out of scope here; the *shape* of proof is not:
+Concrete tickets are out of scope here; the _shape_ of proof is not:
 
 - **Prove the inversion, not the pixels.** Tests assert that selection, copy, search, and TOC operate from the model with offscreen blocks unmounted — i.e. that DOM presence is not required for correctness.
 - **Virtualization is bounded.** A 5,000-block document mounts viewport + overscan, not the whole document; scrolling does not mount everything; the top→bottom→top scroll position is stable.
 - **Cross-virtual copy is correct.** Copying a range that spans unmounted blocks (including code) yields the full model content, not just on-screen text.
 - **Object lifecycle is honest.** Activation bakes/live-swaps in place with no layout drift; deactivation re-bakes; an unbakeable object surfaces an error rather than corrupting the document.
-- **IME is first-class.** Composition (desktop and mobile, native-EditContext and hidden-textarea backends) is fuzzed against expected text/selection outcomes, since it is the riskiest surface.
+- **IME and complex scripts are first-class, proven by an assembled suite (no turnkey tool exists).** Two halves. (1) _Script shaping / segmentation_ — caret-by-grapheme, word selection, delete-by-cluster — is verified deterministically against Unicode UAX #29 data (`GraphemeBreakTest` / `WordBreakTest`) over `Intl.Segmenter`, in CI on every browser; this catches the "don't split a Hangul syllable / Thai cluster / emoji ZWJ" class without an IME. (2) _Composition_ has no framework, so it is proven by capturing real IME event streams once and replaying them as cross-browser regressions (the technique already used for Microsoft Telex), plus CDP `Input.imeSetComposition` for Chromium composition, ported WPT `input-events` ordering cases, and a thin manual real-device matrix (CJK + Vietnamese). The native-EditContext and hidden-textarea backends run the **same** composition cases; native is used only where it passes them.
 - **Output is unchanged.** Round-tripping any document through the new engine yields JSON that `content-renderer` renders identically and that the Lexical path can still load (rollback safety).
 
 ## 14. Completion Criteria
