@@ -29,3 +29,29 @@ export {
   type VirtualRange,
   type VirtualRangeInput,
 } from "./virtual-range";
+
+// Phase 2 input + caret + selection spike (docs/010 P2).
+export {
+  caretPointFromCoordinates,
+  offsetWithinText,
+  type CaretPoint,
+} from "./caret-from-point";
+export {
+  createEditContextHost,
+  type EditContextHost,
+  type EditContextLike,
+  type CreateEditContextHostOptions,
+} from "./editcontext-host";
+export {
+  createSelectionOverlay,
+  type SelectionOverlay,
+  type SelectionModel,
+  type OverlayRenderInfo,
+} from "./selection-overlay";
+export {
+  createTextInputController,
+  type TextInputController,
+  type TextInputState,
+  type OwnedInputDiagnostics,
+  type CreateTextInputControllerOptions,
+} from "./text-input-controller";
