@@ -100,6 +100,19 @@ function polyfillTextarea(page: Page) {
   return page.locator("[data-owned-host] textarea");
 }
 
+async function emulateIpadTextareaPlatform(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, "platform", {
+      configurable: true,
+      get: () => "MacIntel",
+    });
+    Object.defineProperty(window.navigator, "maxTouchPoints", {
+      configurable: true,
+      get: () => 5,
+    });
+  });
+}
+
 /**
  * Capture browser focus styling from the visible host, not the hidden input
  * sink. Native EditContext focuses the host; the API polyfill must therefore
@@ -495,6 +508,318 @@ async function replayMicrosoftTelexCompositionTextDeltaPath(
       ["c", "h", "a", "o", "o"],
       "o",
     );
+  });
+}
+
+/**
+ * WebKit + desktop UniKey can commit the romanized base through ordinary
+ * `insertText` first, then start composition at the caret and report only the
+ * transformed Vietnamese suffix/current syllable. Without retargeting the
+ * model composition range backward, the forced polyfill appends that suffix:
+ * "chao" + "ào" -> "chaoào".
+ */
+async function replayWebKitUnikeyCommittedBasePath(page: Page): Promise<void> {
+  await polyfillTextarea(page).evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    const insertText = (data: string) => {
+      const notPrevented = textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+      if (!notPrevented) return;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? start;
+      textarea.value =
+        textarea.value.slice(0, start) + data + textarea.value.slice(end);
+      const caret = start + data.length;
+      textarea.setSelectionRange(caret, caret);
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+    };
+
+    const composeCommittedBase = (
+      beforeinputData: string,
+      scratchValue: string,
+      trailingEcho?: string,
+    ) => {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+      textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: false,
+          data: beforeinputData,
+          inputType: "insertCompositionText",
+          isComposing: true,
+        }),
+      );
+      textarea.value = scratchValue;
+      textarea.setSelectionRange(scratchValue.length, scratchValue.length);
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data: beforeinputData,
+          inputType: "insertCompositionText",
+          isComposing: true,
+        }),
+      );
+      textarea.dispatchEvent(
+        new CompositionEvent("compositionend", { data: scratchValue }),
+      );
+      if (trailingEcho) insertText(trailingEcho);
+    };
+
+    insertText("xin ");
+    insertText("chao");
+    composeCommittedBase("o", "ào", "o");
+    insertText(" ");
+    insertText("ca");
+    composeCommittedBase("ả", "ả");
+    insertText(" ");
+    insertText("nha");
+    composeCommittedBase("à", "à");
+    insertText(" ");
+    insertText("ye");
+    composeCommittedBase("u", "êu", "u");
+    insertText(" ");
+    insertText("cua");
+    composeCommittedBase("a", "ủa", "a");
+    insertText(" kem");
+  });
+}
+
+/**
+ * A second WebKit + UniKey shape seen in headed Playwright: the transformed
+ * Vietnamese text can arrive as plain `insertText`, outside composition. The
+ * model still has to treat it as a rewrite of the romanized syllable before
+ * the caret instead of an append at the caret.
+ */
+async function replayWebKitUnikeyPlainInsertPath(page: Page): Promise<void> {
+  await polyfillTextarea(page).evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    const insertText = (data: string) => {
+      const notPrevented = textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+      if (!notPrevented) return;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? start;
+      textarea.value =
+        textarea.value.slice(0, start) + data + textarea.value.slice(end);
+      const caret = start + data.length;
+      textarea.setSelectionRange(caret, caret);
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+    };
+
+    insertText("xin ");
+    insertText("chao");
+    insertText("ào");
+    insertText(" ");
+    insertText("ca");
+    insertText("ả");
+    insertText(" ");
+    insertText("nha");
+    insertText("à");
+    insertText(" ");
+    insertText("ye");
+    insertText("êu");
+    insertText(" ");
+    insertText("cua");
+    insertText("ủa");
+    insertText(" kem");
+  });
+}
+
+/**
+ * Headed WebKit + desktop UniKey can send the raw Telex key through cancelable
+ * `beforeinput`, then still fire the matching `input` with the transformed
+ * Vietnamese text. The polyfill owns the `beforeinput`, so this replay
+ * intentionally dispatches the echoing `input` even though default was
+ * prevented.
+ */
+async function replayWebKitUnikeyInputEchoPath(page: Page): Promise<void> {
+  await polyfillTextarea(page).evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    const insertText = (data: string) => {
+      const notPrevented = textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+      if (!notPrevented) return;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? start;
+      textarea.value =
+        textarea.value.slice(0, start) + data + textarea.value.slice(end);
+      const caret = start + data.length;
+      textarea.setSelectionRange(caret, caret);
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+    };
+
+    const insertRawThenEchoVietnamese = (
+      rawData: string,
+      transformedData: string,
+    ) => {
+      textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data: rawData,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+      textarea.value = transformedData;
+      textarea.setSelectionRange(
+        transformedData.length,
+        transformedData.length,
+      );
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          data: transformedData,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+    };
+
+    insertText("xin ");
+    insertText("chao");
+    insertRawThenEchoVietnamese("o", "ào");
+    insertText(" ");
+    insertText("ban");
+    insertRawThenEchoVietnamese("n", "ạn");
+    insertText(" ");
+    insertText("nhe");
+    insertRawThenEchoVietnamese("s", "é");
+  });
+}
+
+/**
+ * Emulate the iOS/iPadOS polyfill path where the software keyboard mutates a
+ * real mirrored textarea. This catches the regression caused by the desktop
+ * Telex scratchpad fix: an empty textarea gives iOS no surrounding text for
+ * Vietnamese composition or word-delete semantics.
+ */
+async function replayIpadVietnameseAndWordDelete(page: Page): Promise<void> {
+  await polyfillTextarea(page).evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    const fireInput = (
+      type: "beforeinput" | "input",
+      inputType: string,
+      data: string | null,
+      isComposing: boolean,
+    ) =>
+      textarea.dispatchEvent(
+        new InputEvent(type, {
+          bubbles: true,
+          cancelable: type === "beforeinput",
+          data,
+          inputType,
+          isComposing,
+        }),
+      );
+
+    const replaceSelection = (text: string) => {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      textarea.value =
+        textarea.value.slice(0, start) + text + textarea.value.slice(end);
+      const caret = start + text.length;
+      textarea.setSelectionRange(caret, caret);
+    };
+
+    const insertText = (text: string) => {
+      const notPrevented = fireInput("beforeinput", "insertText", text, false);
+      if (!notPrevented) return;
+      replaceSelection(text);
+      fireInput("input", "insertText", text, false);
+    };
+
+    const composeWord = (values: readonly string[]) => {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+      const prefix = textarea.value.slice(0, textarea.selectionStart);
+      for (const value of values) {
+        fireInput(
+          "beforeinput",
+          "insertCompositionText",
+          value.at(-1) ?? value,
+          true,
+        );
+        textarea.value = `${prefix}${value}`;
+        textarea.setSelectionRange(
+          textarea.value.length,
+          textarea.value.length,
+        );
+        fireInput(
+          "input",
+          "insertCompositionText",
+          value.at(-1) ?? value,
+          true,
+        );
+      }
+      textarea.dispatchEvent(
+        new CompositionEvent("compositionend", {
+          data: values[values.length - 1] ?? "",
+        }),
+      );
+    };
+
+    insertText("cái gì ");
+    composeWord(["d", "dd", "đ", "đâ", "đây", "đấy"]);
+    const beforeDelete = fireInput(
+      "beforeinput",
+      "deleteWordBackward",
+      null,
+      false,
+    );
+    if (!beforeDelete) return;
+    textarea.value = "cái gì ";
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    fireInput("input", "deleteWordBackward", null, false);
   });
 }
 
@@ -1007,6 +1332,92 @@ test("polyfill reads scratch preedit when insertCompositionText data is only a k
       ),
     )
     .toBe("xin chào");
+});
+
+test("polyfill retargets WebKit UniKey composition over committed Vietnamese bases", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  await replayWebKitUnikeyCommittedBasePath(page);
+
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("xin chào cả nhà yêu của kem");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin chào cả nhà yêu của kem");
+});
+
+test("polyfill retargets WebKit UniKey plain Vietnamese inserts over committed bases", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  await replayWebKitUnikeyPlainInsertPath(page);
+
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("xin chào cả nhà yêu của kem");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin chào cả nhà yêu của kem");
+});
+
+test("polyfill repairs WebKit UniKey Vietnamese echoes after owned raw inserts", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  await replayWebKitUnikeyInputEchoPath(page);
+
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("xin chào bạn nhé");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin chào bạn nhé");
+});
+
+test("iPadOS polyfill mirrors textarea context for Vietnamese composition and word delete", async ({
+  page,
+}) => {
+  await emulateIpadTextareaPlatform(page);
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  await replayIpadVietnameseAndWordDelete(page);
+
+  await expect.poll(async () => (await diagnostics(page)).text).toBe("cái gì ");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("cái gì ");
+  await expect
+    .poll(() =>
+      polyfillTextarea(page).evaluate(
+        (element) => (element as HTMLTextAreaElement).value,
+      ),
+    )
+    .toBe("cái gì ");
 });
 
 test("native and API polyfill expose the same focused host outline", async ({

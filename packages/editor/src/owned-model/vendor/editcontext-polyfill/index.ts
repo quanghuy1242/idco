@@ -189,6 +189,7 @@ type MaybePolyfilledEditContextConstructor = Function & {
 
 const HOST_BINDINGS = new WeakMap<Element, PolyfillBinding>();
 const FOCUS_OUTLINE_STYLE_ID = "idco-editcontext-polyfill-focus-outline";
+const DEBUG_LOG_KEY = "__IDCO_EDITCONTEXT_POLYFILL_LOG__";
 let forcedInstallCount = 0;
 let forcedGlobalTarget: Record<string, unknown> | null = null;
 let forcedHadEditContext = false;
@@ -340,6 +341,7 @@ class PolyfillBinding {
   readonly #ctx: EditContext;
   readonly #textarea: HTMLTextAreaElement;
   readonly #shadowRoot: ShadowRoot;
+  readonly #usesMirroredTextarea: boolean;
   #composing = false;
   #compositionStart = 0;
   #compositionEnd = 0;
@@ -347,10 +349,13 @@ class PolyfillBinding {
   #compositionNeedsPostCommitSuppress = false;
   #suppressNextPostCompositionInsertText = false;
   #clearPostCompositionSuppressTimer: number | null = null;
+  #lastOwnedPlainInsert: { start: number; end: number; text: string } | null =
+    null;
 
   constructor(host: HTMLElement, ctx: EditContext) {
     this.#host = host;
     this.#ctx = ctx;
+    this.#usesMirroredTextarea = shouldUseMirroredTextarea(host);
     this.#shadowRoot =
       host.shadowRoot ??
       host.attachShadow({ mode: "open", delegatesFocus: true });
@@ -390,9 +395,10 @@ class PolyfillBinding {
       whiteSpace: "pre-wrap",
       userSelect: "none",
     } satisfies Partial<CSSStyleDeclaration>);
-    // The textarea is a transient composition scratchpad, never a mirror of the
-    // document — see `syncSelection`. It starts empty; the model owns the text.
-    textarea.value = "";
+    // Desktop polyfill mode keeps the textarea as a transient composition
+    // scratchpad; iOS/iPadOS needs the real surrounding text so the software
+    // keyboard can perform word deletion and Vietnamese composition correctly.
+    textarea.value = this.#usesMirroredTextarea ? ctx.text : "";
     this.#ensureFocusOutlineStyle();
     this.#ensureSlot();
     this.#shadowRoot.append(textarea);
@@ -419,6 +425,16 @@ class PolyfillBinding {
   syncSelection(): void {
     // Never disturb the field mid-composition; the IME owns it then.
     if (this.#composing || this.#ctx.isComposing) return;
+    if (this.#usesMirroredTextarea) {
+      if (this.#textarea.value !== this.#ctx.text) {
+        this.#textarea.value = this.#ctx.text;
+      }
+      this.#textarea.setSelectionRange(
+        this.#ctx.selectionStart,
+        this.#ctx.selectionEnd,
+      );
+      return;
+    }
     if (this.#textarea.value !== "") this.#textarea.value = "";
     this.#textarea.setSelectionRange(0, 0);
   }
@@ -498,21 +514,37 @@ class PolyfillBinding {
    */
   readonly #onBeforeInput = (event: Event): void => {
     if (!(event instanceof InputEvent)) return;
+    this.#recordDebugEvent("beforeinput:before", event);
     const type = event.inputType;
+    if (this.#usesMirroredTextarea) {
+      // iOS software keyboards need the native textarea edit to happen against
+      // the mirrored buffer. The following `input` event mirrors the result back
+      // into EditContext/model state.
+      event.stopPropagation();
+      this.#recordDebugEvent("beforeinput:mirrored", event);
+      return;
+    }
     if (type === "insertText" && this.#suppressNextPostCompositionInsertText) {
       if (event.cancelable) event.preventDefault();
       this.#suppressNextPostCompositionInsertText = false;
+      this.#lastOwnedPlainInsert = null;
       this.syncSelection();
+      this.#recordDebugEvent("beforeinput:suppressed", event);
       return;
     }
     if (type === "insertCompositionText") {
       event.stopPropagation();
+      this.#lastOwnedPlainInsert = null;
       this.#beginComposition();
       this.#replaceCompositionText(event.data ?? "");
       this.#emitCompositionFormat();
+      this.#recordDebugEvent("beforeinput:composition", event);
       return;
     }
-    if (this.#composing) return;
+    if (this.#composing) {
+      this.#recordDebugEvent("beforeinput:ignored-composing", event);
+      return;
+    }
 
     // Every non-composition edit is owned: applied to the MODEL at the model
     // selection, never read back from the scratch textarea. The textarea selection
@@ -523,9 +555,15 @@ class PolyfillBinding {
     const start = Math.min(this.#ctx.selectionStart, this.#ctx.selectionEnd);
     const end = Math.max(this.#ctx.selectionStart, this.#ctx.selectionEnd);
     const edit = this.#modelEditFor(type, event.data, start, end);
-    if (!edit || !event.cancelable) return;
+    if (!edit || !event.cancelable) {
+      this.#recordDebugEvent("beforeinput:ignored", event);
+      return;
+    }
     event.preventDefault();
     this.#applyModelEdit(edit.start, edit.end, edit.text);
+    this.#lastOwnedPlainInsert =
+      type === "insertText" || type === "insertReplacementText" ? edit : null;
+    this.#recordDebugEvent("beforeinput:owned", event);
   };
 
   /**
@@ -541,7 +579,15 @@ class PolyfillBinding {
     switch (type) {
       case "insertText":
       case "insertReplacementText":
-        return typeof data === "string" ? { start, end, text: data } : null;
+        if (typeof data !== "string") return null;
+        return {
+          start:
+            start === end
+              ? (vietnameseRewriteStart(this.#ctx.text, start, data) ?? start)
+              : start,
+          end,
+          text: data,
+        };
       case "insertLineBreak":
       case "insertParagraph":
         return { start, end, text: "\n" };
@@ -592,9 +638,23 @@ class PolyfillBinding {
 
   readonly #onInput = (event: Event): void => {
     if (!(event instanceof InputEvent)) return;
+    this.#recordDebugEvent("input:before", event);
+    if (this.#usesMirroredTextarea) {
+      event.stopPropagation();
+      this.#mirrorTextareaToContext();
+      if (this.#composing || this.#ctx.isComposing || event.isComposing) {
+        this.#emitCompositionFormat();
+      }
+      this.#recordDebugEvent("input:mirrored", event);
+      return;
+    }
     const inComposition =
       this.#composing || this.#ctx.isComposing || event.isComposing;
-    if (event.inputType === "insertCompositionText" && !inComposition) return;
+    if (!inComposition) {
+      this.#correctPlainVietnameseInputEcho(event);
+      this.#recordDebugEvent("input:idle", event);
+      return;
+    }
 
     // Some IMEs, including Microsoft Vietnamese Telex in Firefox, mutate the
     // scratch textarea through composing `input` events where `event.data` is a
@@ -603,6 +663,7 @@ class PolyfillBinding {
     // the active composing word during this session.
     if (inComposition) {
       this.#beginComposition();
+      this.#lastOwnedPlainInsert = null;
       this.#compositionUsedScratchInput = true;
       const eventText = event.data ?? "";
       if (
@@ -613,15 +674,36 @@ class PolyfillBinding {
       }
       this.#replaceCompositionText(this.#textarea.value);
       this.#emitCompositionFormat();
+      this.#recordDebugEvent("input:composition", event);
     }
   };
 
   readonly #onCompositionStart = (): void => {
+    this.#recordDebugEvent("compositionstart:before");
+    this.#lastOwnedPlainInsert = null;
     this.#beginComposition();
+    this.#recordDebugEvent("compositionstart:after");
   };
 
   readonly #onCompositionEnd = (event: CompositionEvent): void => {
+    this.#recordDebugEvent("compositionend:before", event);
     if (!this.#composing) return;
+    if (this.#usesMirroredTextarea) {
+      this.#mirrorTextareaToContext();
+      this.#composing = false;
+      this.#ctx.isComposing = false;
+      this.#ctx.compositionStart = this.#ctx.selectionStart;
+      this.#ctx.compositionEnd = this.#ctx.selectionEnd;
+      this.#compositionStart = this.#ctx.selectionStart;
+      this.#compositionEnd = this.#ctx.selectionEnd;
+      this.syncSelection();
+      this.#ctx.dispatchEvent(
+        new PolyfilledTextFormatUpdateEvent("textformatupdate", []),
+      );
+      this.#ctx.dispatchEvent(new Event("compositionend"));
+      this.#recordDebugEvent("compositionend:mirrored", event);
+      return;
+    }
     const finalText = event.data ?? "";
     const activeText = this.#ctx.text.slice(
       this.#compositionStart,
@@ -660,7 +742,84 @@ class PolyfillBinding {
       new PolyfilledTextFormatUpdateEvent("textformatupdate", []),
     );
     this.#ctx.dispatchEvent(new Event("compositionend"));
+    this.#recordDebugEvent("compositionend:after", event);
   };
+
+  /**
+   * Some WebKit + UniKey desktop paths send the raw Telex key through
+   * cancelable `beforeinput`, then still fire a plain `input` with the
+   * transformed Vietnamese text in `event.data` or the scratch textarea. The
+   * normal desktop rule is to ignore idle `input` events because Firefox Telex
+   * can desync the textarea selection onto previous words. This correction keeps
+   * that rule narrow: it only runs when the idle `input` contains Vietnamese
+   * transformed text and there was a just-owned plain insert to repair.
+   */
+  #correctPlainVietnameseInputEcho(event: InputEvent): void {
+    if (
+      event.inputType !== "insertText" &&
+      event.inputType !== "insertReplacementText" &&
+      event.inputType !== "insertCompositionText"
+    ) {
+      this.#lastOwnedPlainInsert = null;
+      return;
+    }
+
+    const candidate = vietnameseInputCandidate(
+      event.data,
+      this.#textarea.value,
+    );
+    if (!candidate || !this.#lastOwnedPlainInsert) return;
+
+    const start =
+      vietnameseRewriteStart(
+        this.#ctx.text,
+        this.#lastOwnedPlainInsert.start,
+        candidate,
+      ) ??
+      vietnameseRewriteStart(
+        this.#ctx.text,
+        this.#ctx.selectionStart,
+        candidate,
+      );
+    if (start === null) return;
+
+    const end = Math.max(start, this.#ctx.selectionStart);
+    this.#lastOwnedPlainInsert = null;
+    this.#applyModelEdit(start, end, candidate);
+  }
+
+  #recordDebugEvent(label: string, event?: Event): void {
+    const view = this.#host.ownerDocument.defaultView;
+    if (!view) return;
+    const target = view as unknown as Record<string, unknown>;
+    const log = Array.isArray(target[DEBUG_LOG_KEY])
+      ? (target[DEBUG_LOG_KEY] as unknown[])
+      : [];
+    target[DEBUG_LOG_KEY] = log;
+    const input = event instanceof InputEvent ? event : null;
+    const composition = event instanceof CompositionEvent ? event : null;
+    const entry = {
+      label,
+      type: event?.type ?? label,
+      inputType: input?.inputType ?? "",
+      data: input?.data ?? composition?.data ?? "",
+      isComposing: input?.isComposing ?? false,
+      cancelable: event?.cancelable ?? false,
+      defaultPrevented: event?.defaultPrevented ?? false,
+      modelText: this.#ctx.text,
+      modelSelection: `${this.#ctx.selectionStart}-${this.#ctx.selectionEnd}`,
+      modelComposition: `${this.#ctx.compositionStart}-${this.#ctx.compositionEnd}`,
+      composing: this.#composing || this.#ctx.isComposing,
+      textareaValue: this.#textarea.value,
+      textareaSelection: `${this.#textarea.selectionStart}-${this.#textarea.selectionEnd}`,
+      lastOwnedPlainInsert: this.#lastOwnedPlainInsert
+        ? `${this.#lastOwnedPlainInsert.start}-${this.#lastOwnedPlainInsert.end}:${this.#lastOwnedPlainInsert.text}`
+        : "",
+    };
+    log.push(entry);
+    if (log.length > 200) log.splice(0, log.length - 200);
+    view.console.debug("[idco editcontext polyfill]", entry);
+  }
 
   /**
    * Start a composition from the current logical selection (idempotent within a
@@ -674,6 +833,16 @@ class PolyfillBinding {
     this.#composing = true;
     this.#compositionUsedScratchInput = false;
     this.#compositionNeedsPostCommitSuppress = false;
+    if (this.#usesMirroredTextarea) {
+      this.#ctx.selectionStart = clampOffset(
+        this.#textarea.selectionStart,
+        this.#ctx.text.length,
+      );
+      this.#ctx.selectionEnd = clampOffset(
+        this.#textarea.selectionEnd,
+        this.#ctx.text.length,
+      );
+    }
     this.#compositionStart = Math.min(
       this.#ctx.selectionStart,
       this.#ctx.selectionEnd,
@@ -694,6 +863,7 @@ class PolyfillBinding {
    * so this rewrites the tracked composition range instead of appending deltas.
    */
   #replaceCompositionText(text: string): void {
+    this.#retargetCompositionRangeForCommittedBase(text);
     const rangeStart = this.#compositionStart;
     const rangeEnd = this.#compositionEnd;
     const next = `${this.#ctx.text.slice(0, rangeStart)}${text}${this.#ctx.text.slice(rangeEnd)}`;
@@ -713,6 +883,26 @@ class PolyfillBinding {
         updateRangeEnd: rangeEnd,
       }),
     );
+  }
+
+  /**
+   * WebKit + desktop UniKey can first commit the romanized syllable through
+   * normal `insertText` ("chao"), then start composition at the caret and report
+   * only the transformed Vietnamese suffix ("ào"). A scratchpad composition
+   * range that stays collapsed at the caret appends that suffix ("chaoào").
+   * When the first transformed update matches the word before the range, move
+   * the model range backward so the IME rewrite replaces the romanized base.
+   */
+  #retargetCompositionRangeForCommittedBase(text: string): void {
+    if (this.#usesMirroredTextarea) return;
+    const nextStart = vietnameseRewriteStart(
+      this.#ctx.text,
+      this.#compositionStart,
+      text,
+    );
+    if (nextStart === null) return;
+    this.#compositionStart = nextStart;
+    this.#ctx.compositionStart = this.#compositionStart;
   }
 
   /**
@@ -766,6 +956,47 @@ class PolyfillBinding {
     );
     this.#clearPostCompositionSuppressTimer = null;
   }
+
+  /**
+   * Mobile Safari's software keyboard needs a real textarea buffer for context:
+   * word deletion, suggestions, and Vietnamese composition all inspect the
+   * surrounding text. In mirrored mode the browser mutates the textarea first;
+   * this method mirrors that result back into the EditContext contract.
+   */
+  #mirrorTextareaToContext(): void {
+    const previous = this.#ctx.text;
+    const next = this.#textarea.value;
+    const selectionStart = clampOffset(
+      this.#textarea.selectionStart,
+      next.length,
+    );
+    const selectionEnd = clampOffset(this.#textarea.selectionEnd, next.length);
+    const diff = textDiff(previous, next);
+
+    this.#ctx.text = next;
+    this.#ctx.selectionStart = selectionStart;
+    this.#ctx.selectionEnd = selectionEnd;
+    if (this.#composing || this.#ctx.isComposing) {
+      this.#ctx.isComposing = true;
+      this.#ctx.compositionStart = this.#compositionStart;
+      this.#compositionEnd = Math.max(
+        this.#compositionStart,
+        selectionStart,
+        selectionEnd,
+      );
+      this.#ctx.compositionEnd = this.#compositionEnd;
+    }
+
+    this.#ctx.dispatchEvent(
+      new PolyfilledTextUpdateEvent("textupdate", {
+        text: diff.text,
+        selectionStart,
+        selectionEnd,
+        updateRangeStart: diff.start,
+        updateRangeEnd: diff.end,
+      }),
+    );
+  }
 }
 
 /** Re-align the polyfill input sink for a host after engine-driven nav. */
@@ -776,6 +1007,115 @@ export function syncPolyfillSelection(host: Element): void {
 function clampOffset(offset: number, length: number): number {
   if (!Number.isFinite(offset)) return 0;
   return Math.min(Math.max(0, Math.floor(offset)), length);
+}
+
+/**
+ * iOS/iPadOS software keyboards need the hidden textarea to contain the real
+ * text. Desktop keeps the empty scratchpad because Windows Vietnamese Telex can
+ * otherwise reconvert previously committed words through stale textarea state.
+ */
+function shouldUseMirroredTextarea(host: HTMLElement): boolean {
+  const view = host.ownerDocument.defaultView;
+  const navigator = view?.navigator;
+  if (!navigator) return false;
+  const platform = navigator.platform;
+  return (
+    /iP(?:ad|hone|od)/.test(navigator.userAgent) ||
+    (platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+function textDiff(
+  previous: string,
+  next: string,
+): { start: number; end: number; text: string } {
+  let start = 0;
+  while (
+    start < previous.length &&
+    start < next.length &&
+    previous[start] === next[start]
+  ) {
+    start += 1;
+  }
+
+  let previousEnd = previous.length;
+  let nextEnd = next.length;
+  while (
+    previousEnd > start &&
+    nextEnd > start &&
+    previous[previousEnd - 1] === next[nextEnd - 1]
+  ) {
+    previousEnd -= 1;
+    nextEnd -= 1;
+  }
+
+  return {
+    start,
+    end: previousEnd,
+    text: next.slice(start, nextEnd),
+  };
+}
+
+function hasVietnameseTransform(value: string): boolean {
+  return value !== "" && foldVietnameseInput(value) !== value.toLowerCase();
+}
+
+function vietnameseInputCandidate(
+  eventData: string | null,
+  textareaValue: string,
+): string | null {
+  if (eventData && hasVietnameseTransform(eventData)) return eventData;
+  if (hasVietnameseTransform(textareaValue)) return textareaValue;
+  return null;
+}
+
+function foldVietnameseInput(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase();
+}
+
+function currentWordStart(text: string, offset: number): number {
+  let start = clampOffset(offset, text.length);
+  while (start > 0 && !/\s/.test(text[start - 1] ?? "")) {
+    start -= 1;
+  }
+  return start;
+}
+
+function vietnameseRewriteStart(
+  text: string,
+  offset: number,
+  replacement: string,
+): number | null {
+  if (!hasVietnameseTransform(replacement)) return null;
+
+  const rangeStart = clampOffset(offset, text.length);
+  const wordStart = currentWordStart(text, rangeStart);
+  if (wordStart === rangeStart) return null;
+
+  const word = text.slice(wordStart, rangeStart);
+  const foldedWord = foldVietnameseInput(word);
+  const foldedText = foldVietnameseInput(replacement);
+  if (!foldedWord || !foldedText) return null;
+
+  if (
+    foldedWord === foldedText ||
+    foldedText.startsWith(foldedWord) ||
+    (foldedWord.startsWith("dd") && foldedText.startsWith("d"))
+  ) {
+    return wordStart;
+  }
+  if (foldedWord.endsWith(foldedText)) {
+    return rangeStart - Math.min(foldedText.length, word.length);
+  }
+  if (foldedWord.endsWith("e") && foldedText.startsWith("eu")) {
+    return rangeStart - 1;
+  }
+  return null;
 }
 
 /** Previous offset, stepping over a surrogate pair so we never split a char. */

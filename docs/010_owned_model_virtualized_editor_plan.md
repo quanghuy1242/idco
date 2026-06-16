@@ -10,7 +10,7 @@
 > - `packages/editor/src/RichTextEditorComposer.tsx` — extracted composer; current `DecoratorVirtualizationContext` host.
 > - `packages/editor/src/nodes/decorator-virtualization.tsx` — Phase 0 decorator-body virtualization (retained, polished).
 > - `packages/editor/src/large-document/**` — the section-shell virtualization (retired by this plan; pure helpers salvaged).
-> - `packages/editor/src/model/schema.ts` — persisted `RichTextEditorDocument` shape (the frozen output contract).
+> - `packages/editor/src/model/schema.ts` — existing `RichTextEditorDocument` shape (the compatibility output contract).
 > - `packages/content-renderer/src/index.tsx` — read-side renderer; becomes the view layer of the new engine.
 > - `packages/lib/src/rich-text.ts` — pure rich-text/TOC helpers shared by editor and renderer.
 > - future `packages/editor/src/owned-model/**` — the new editor runtime.
@@ -34,8 +34,9 @@
 >
 > Assumptions:
 >
-> - The persisted value remains one `RichTextEditorDocument` JSON tree. The editing runtime may be replaced freely; the saved document and its baked fields may not.
-> - `@idco/content-renderer` already understands the persisted JSON and is the correct base for the engine's view layer.
+> - The official engine model is an app-owned `OwnedDocument`, not Lexical state and not the loose `RichTextEditorDocument` tree. The runtime may serialize to JSON for storage, but JSON is a wire format, not the model authority.
+> - `RichTextEditorDocument` remains a mandatory compatibility projection while the standard editor, `@idco/content-renderer`, and downstream consumers still read it. The projection must preserve baked fields and remain rollback-compatible until a deliberate persistence migration exists.
+> - `@idco/content-renderer` already understands the compatibility JSON and is the correct initial base for the engine's view layer; it can later learn to consume `OwnedDocument` directly without changing the editor runtime.
 > - docs/006's heavy-object / bake model is accepted product direction and is the foundation this engine builds on, not a competing idea.
 > - The standard whole-document Lexical editor (`RichTextEditor`) and Phase 0 decorator virtualization remain shipped and supported for small/static documents during and after this work.
 > - Real-time collaboration is explicitly out of scope; the architecture must merely not foreclose it.
@@ -57,10 +58,10 @@
   - [4.3 The Bake Model Makes Rest Cheap By Design](#43-the-bake-model-makes-rest-cheap-by-design)
   - [4.4 What The Engine Actually Has To Solve](#44-what-the-engine-actually-has-to-solve)
 - [5. Target Model](#5-target-model)
-  - [5.1 Three Layers](#51-three-layers)
+  - [5.1 Four Layers](#51-four-layers)
   - [5.2 The Text Layer](#52-the-text-layer)
   - [5.3 The Object Layer](#53-the-object-layer)
-  - [5.4 The Frozen Output Contract](#54-the-frozen-output-contract)
+  - [5.4 The Compatibility Output Contract](#54-the-compatibility-output-contract)
   - [5.5 Input Substrate: One Central Engine, Multiple Backends](#55-input-substrate-one-central-engine-multiple-backends)
   - [5.6 Virtualization Model](#56-virtualization-model)
   - [5.7 Selection And Focus Model](#57-selection-and-focus-model)
@@ -68,7 +69,7 @@
   - [5.9 Render-Tier Mapping](#59-render-tier-mapping)
 - [6. Architecture Decisions](#6-architecture-decisions)
   - [6.1 Own The Model Instead Of Fighting contenteditable](#61-own-the-model-instead-of-fighting-contenteditable)
-  - [6.2 Reuse The View And The Model, Not Lexical's Engine](#62-reuse-the-view-and-the-model-not-lexicals-engine)
+  - [6.2 Reuse The View And Semantics, Not Lexical's Engine](#62-reuse-the-view-and-semantics-not-lexicals-engine)
   - [6.3 Let The Browser Lay Out And Hit-Test Text](#63-let-the-browser-lay-out-and-hit-test-text)
   - [6.4 One Live-Edit Object At A Time, Behind A Slot](#64-one-live-edit-object-at-a-time-behind-a-slot)
   - [6.5 Block-Atomic Selection Across Objects](#65-block-atomic-selection-across-objects)
@@ -127,7 +128,7 @@ IDCO's differentiation is to be good at the precise thing that foundation is wor
 - **Standard editor.** `RichTextEditor.tsx` mounts one `LexicalComposer` for the whole document, with the full plugin/toolbar stack and a debounced controlled `onChange`. This is the correct, shipped path for small and static documents and is retained.
 - **Phase 0 decorator virtualization.** `nodes/decorator-virtualization.tsx` keeps the single Lexical root but renders a decorator block's React body only near the viewport; offscreen bodies collapse to a measured, height-reserved placeholder. It uses one shared `IntersectionObserver`, a height cache keyed by node id + content signature, and publishes `window.__IDCO_DECORATOR_VIRT__`. It is toggled by the `decoratorVirtualization` prop via `DecoratorVirtualizationContext` in `RichTextEditorComposer.tsx`. It is self-contained and has **no dependency on the section shell**.
 - **The bake model (docs/006).** Heavy objects (code block, media, table, mermaid, data grid) already have a committed interaction shape: resting state shows a **baked static, publish-ready** representation; editing happens **in place**; configuration lives in a chrome popover. Every heavy object must produce a baked static snapshot because the export tier runs no heavy libraries. This is load-bearing for everything below.
-- **content-renderer.** `packages/content-renderer/src/index.tsx` already walks the persisted JSON and renders every node read-side. It is product-neutral and contract-aligned.
+- **content-renderer.** `packages/content-renderer/src/index.tsx` already walks the compatibility JSON and renders every node read-side. It is product-neutral and contract-aligned.
 
 ### 3.2 What The Real Data Says
 
@@ -184,23 +185,25 @@ It explicitly does **not** have to build a text-layout engine; the browser still
 
 ## 5. Target Model
 
-### 5.1 Three Layers
+### 5.1 Four Layers
 
 ```text
 Owned-Model Editor
-├── Text layer        (owned model · virtualized render · per-platform input · model-owned selection)
+├── App document      (OwnedDocument · settings · registered block/object definitions)
+│     body order + block map · document settings · no arbitrary unknown blocks
+├── Text layer        (virtualized render · per-platform input · model-owned selection)
 │     paragraphs, headings, lists, inline marks — the connective tissue, always live
 ├── Object layer      (heavy objects, atomic in the text flow)
 │     baked static at rest · one live-edit at a time behind a slot · docs/006 bake pipeline
-└── Frozen output     (one RichTextEditorDocument JSON + baked fields)
-      content-renderer and every consumer read this unchanged; runtime swaps behind it
+└── Compatibility output
+      RichTextEditorDocument adapter + baked fields for content-renderer/rollback
 ```
 
 ### 5.2 The Text Layer
 
 The text flow is **always live**: the caret moves freely through paragraphs, headings, and list items, and selection is continuous within text. This is the base owned-model surface and the thing EditContext is genuinely for (text input, IME, composition, selection).
 
-The model is the document tree we already persist. The text layer maps model text ranges to rendered block elements and back. Rendering is the view layer (§6.2): `content-renderer` block components, mounted only for the visible slice plus overscan, with offscreen blocks reserved by cached height.
+The model is the app-owned document store described in §7.2. It is not the `RichTextEditorDocument` tree and it is not a mirror of Lexical nodes. The text layer maps model text ranges to rendered block elements and back. Rendering is the view layer (§6.2): `content-renderer` block components or their owned-model adapters, mounted only for the visible slice plus overscan, with offscreen blocks reserved by cached height.
 
 ### 5.3 The Object Layer
 
@@ -212,11 +215,16 @@ Heavy objects (code, media, table, mermaid, data grid) are **atomic** within the
 
 The object layer owns the **focus hand-off**: when an object goes live, the text layer's caret suspends and the engine records "object X active"; when it deactivates, the object re-bakes and the text caret resumes. The "active surface" is a **slot** (§6.4), so allowing several live objects later is a relaxation, not a rewrite.
 
-### 5.4 The Frozen Output Contract
+### 5.4 The Compatibility Output Contract
 
-The persisted value stays one `RichTextEditorDocument` (`model/schema.ts`) with the docs/006 baked fields. This is the **frozen boundary**: the editing runtime may be replaced wholesale, but the saved JSON — node types, structure, and baked snapshots — must remain what `content-renderer` and every downstream consumer already read.
+The official engine representation is `OwnedDocument` (§7.2). `RichTextEditorDocument` (`model/schema.ts`) remains the **compatibility boundary**: every phase must be able to project the owned model into the shape the standard editor, `content-renderer`, and every downstream consumer already read. That projection carries the docs/006 baked fields, so rollback to the Lexical path and read/export parity remain possible while the new engine matures.
 
-Note: there is currently no Zod/content-api integration coupling the editor to a host schema, so this contract is **internal to the idco packages** — the shape `content-renderer` reads and the engine writes. That makes the rewrite fully contained to the editor runtime and makes rollback to the Lexical path trivial, because the data is identical on both sides.
+This deliberately separates two questions:
+
+- **Model authority:** `OwnedDocument` is the app's document structure. It owns settings, body order, typed text blocks, registered object blocks, baked snapshots, and transaction semantics.
+- **Compatibility output:** `RichTextEditorDocument` is an adapter target. It is still tested as a deep-equal-after-normalization projection until consumers are migrated, but it is not the runtime model and must not leak back into `owned-model/core/**` as an editing type.
+
+Note: there is currently no Zod/content-api integration coupling the editor to a host schema, so this compatibility contract is **internal to the idco packages** — the shape `content-renderer` reads and the engine projects. That keeps the rewrite contained to the editor runtime and makes rollback to the Lexical path possible, because the projection remains identical on both sides.
 
 ### 5.5 Input Substrate: One Central Engine, Multiple Backends
 
@@ -264,11 +272,11 @@ The decision (§6.6) is to target parity on the central input engine, not on a s
 
 The engine is the **editor tier** of docs/006's three tiers. The same node renders three ways, and the bake pipeline is the bridge:
 
-| Tier                                | Source it renders from            | Interactivity                         |
-| ----------------------------------- | --------------------------------- | ------------------------------------- |
-| Editor (this engine)                | live model + live object surfaces | full authoring                        |
-| Digital reader (`content-renderer`) | persisted JSON + baked fields     | opt-in enhancement (sort/filter, pan) |
-| Export (EPUB/PDF worker)            | baked static fields only          | none; no heavy libraries              |
+| Tier                                | Source it renders from                     | Interactivity                         |
+| ----------------------------------- | ------------------------------------------ | ------------------------------------- |
+| Editor (this engine)                | live model + live object surfaces          | full authoring                        |
+| Digital reader (`content-renderer`) | compatibility projection + baked fields    | opt-in enhancement (sort/filter, pan) |
+| Export (EPUB/PDF worker)            | baked static fields only                   | none; no heavy libraries              |
 
 The engine's resting blocks render the **same baked representation** the reader and export consume. There is one static representation per object, authored at edit time and baked into the node, used everywhere the object is not actively being edited. That single fact is what removes the read↔edit drift class of bug entirely.
 
@@ -280,11 +288,11 @@ The engine's resting blocks render the **same baked representation** the reader 
 
 **Why:** §4.1–4.2. `contenteditable` makes the DOM the document, which forbids virtualization of a live editing surface. The live-book thesis (§2) _is_ the workload that breaks the `contenteditable` bet. Owning the model is the only path that gets virtualized live editing, correct cross-virtual selection/copy, and clean object focus isolation. It is also the substrate that leaves collaboration possible later (§12) at no cost now.
 
-### 6.2 Reuse The View And The Model, Not Lexical's Engine
+### 6.2 Reuse The View And Semantics, Not Lexical's Engine
 
-**Decision:** reuse the persisted JSON model and `content-renderer` (as the view layer); do not reuse Lexical's editing engine for this surface.
+**Decision:** reuse the existing document semantics and `content-renderer` as the first view layer, but give the new surface its own `OwnedDocument` model. Do not reuse Lexical's editing engine, and do not treat `RichTextEditorDocument` as the runtime model for this surface.
 
-**Why:** EditContext and Lexical are mutually exclusive for one surface — Lexical _is_ a `contenteditable` reconciler and cannot have EditContext slid underneath it without forking its input layer (forbidden by docs/009). Choosing EditContext means leaving Lexical's engine behind for the owned-model surface. The cost is smaller than it sounds: the model already exists, and `content-renderer` already paints it. "Reuse" shifts from "reuse Lexical" to "reuse the model + the renderer," with the new work being input glue, model↔block mapping, selection overlay, and the virtualizer. Lexical remains the engine for the **standard** small-document editor.
+**Why:** EditContext and Lexical are mutually exclusive for one surface — Lexical _is_ a `contenteditable` reconciler and cannot have EditContext slid underneath it without forking its input layer (forbidden by docs/009). Choosing EditContext means leaving Lexical's engine behind for the owned-model surface. The cost is smaller than it sounds: the semantic node set and read renderer already exist. "Reuse" shifts from "reuse Lexical" to "reuse the semantics + renderer adapters," with the new work being input glue, owned-model↔block mapping, selection overlay, transactions, and the virtualizer. Lexical remains the engine for the **standard** small-document editor.
 
 ### 6.3 Let The Browser Lay Out And Hit-Test Text
 
@@ -356,11 +364,50 @@ A correction that must be recorded so the rationale does not drift: **Lexical's 
 
 Decided model:
 
-- **Store: normalized and id-addressed.** The document is an **ordered list of top-level block ids** plus a **`Map<blockId, BlockModel>`**. The `id` field is **optional in the persisted schema** (`model/schema.ts`), so the engine runs an idempotent **ID-ensure pass on ingest** (docs/009 R1-A, `ensureDocumentNodeIds`) — documents from older saves or external/EPUB import can arrive without ids and must be backfilled before the store is built. Once ensured, _the model is also the virtualization index_: rendering a window is "take the visible id slice, O(1) lookup each." Editing block X replaces X's map entry and touches nothing else. Because ingest may add ids, the output contract is **deep-equal after normalization**, not byte-identical (see §14).
-- **Two granularities, deliberately.** Top-level blocks are the coarse, id-addressed units (for virtualization, move/delete/copy). A block's inline content (text runs + marks) is a small subtree, immutable with structural sharing, so a block's identity changes only when its content does — which lets the view skip re-rendering unchanged visible blocks by reference equality.
-- **Mutations are invertible transactions ("steps"), modeled on ProseMirror.** A command produces an **invertible delta** applied to the store. Invertibility is the upgrade that yields **partial update, cheap undo, and collaboration-readiness from one mechanism**: undo stores _inverse steps_, not whole-document snapshots — precisely the memory trap Lexical's snapshot history falls into. This is a small command→step→store loop in the core; do not import Redux.
-- **No full-JSON on the hot path, ever.** Host serialization is debounced on the `idle`/`debounced` lane (§7.3). Undo is inverse steps. History is bounded by step count, not snapshot size.
-- **Per-block reactive subscriptions.** A keystroke in block X notifies only X's subscribers → X re-renders and the selection overlay repaints; nothing else does. "One update never re-renders the editor" is enforced by subscription topology, not by discipline.
+- **Official document snapshot: app-owned and JSON-serializable.** The engine's official structure is an `OwnedDocument`, not `RichTextEditorDocument`. It can still be stored as JSON, but it is a domain schema rather than an editor-engine snapshot:
+
+  ```ts
+  type OwnedDocumentSnapshot = {
+    readonly version: 1;
+    readonly body: {
+      readonly order: readonly BlockId[];
+      readonly blocks: Readonly<Record<BlockId, BlockModel>>;
+    };
+    readonly settings?: DocumentSettings;
+  };
+  ```
+
+  The runtime store loads this snapshot into `order: BlockId[]` plus `Map<BlockId, BlockModel>` for O(1) lookup and per-block subscriptions. Persistence and host emission serialize snapshots on the `debounced` lane; they are not part of the keystroke hot path.
+- **Store: normalized and id-addressed.** Top-level blocks are the coarse, id-addressed units (for virtualization, move/delete/copy). The `id` field is optional in the compatibility schema (`model/schema.ts`), so the engine runs an idempotent **ID-ensure pass on ingest** (docs/009 R1-A, `ensureDocumentNodeIds`) before building the store. Once ensured, _the model is also the virtualization index_: rendering a window is "take the visible id slice, O(1) lookup each." Editing block X replaces X's map entry or mutates it through a controlled store operation and touches nothing else. Because ingest may add ids, the compatibility output contract is **deep-equal after normalization**, not byte-identical (see §14).
+- **Text blocks use text + ranges.** Text-bearing blocks hold one `text: string` plus normalized range marks for inline formatting, links, glossary references, and comments. Marks expand into split text nodes and Lexical-style `format` bitmasks only in the compatibility serializer. This is not claimed as "Lexical is bad at mutation"; it is the app-owned shape that makes offsets, Markdown conversion, search, paste, and migrations straightforward.
+- **Object blocks are registry-owned, not arbitrary JSON.** Heavy/custom blocks use a generic object envelope in the core, but their `data` is accepted only through a registered definition. Unknown data exists only at parse boundaries:
+
+  ```ts
+  type ObjectBlock<Data = unknown> = {
+    readonly id: BlockId;
+    readonly kind: string;
+    readonly data: Data;
+    readonly baked?: BakedSnapshot;
+    readonly status?: "ready" | "dirty" | "invalid" | "unresolved";
+  };
+
+  type BlockDefinition<Data> = {
+    readonly kind: string;
+    readonly parse: (value: unknown) => Data | null;
+    readonly normalize: (value: Data) => Data;
+    readonly toCompatibilityValue: (block: ObjectBlock<Data>) => unknown;
+    readonly fromCompatibilityValue?: (value: unknown) => ObjectBlock<Data> | null;
+    readonly bake?: (block: ObjectBlock<Data>) => Promise<BakedSnapshot>;
+    readonly isExportComplete?: (block: ObjectBlock<Data>) => boolean;
+    readonly toMarkdown?: (block: ObjectBlock<Data>) => string;
+  };
+  ```
+
+  A `mermaid`, `data-grid`, `chart`, `record-ref`, or future host block is valid only if its definition exists. The engine does not preserve and render unknown blocks by accident; it drops, flattens, or refuses them according to an explicit policy surfaced by the registry.
+- **Document settings are first-class.** Publication/page settings from docs/006 live on `OwnedDocumentSnapshot.settings`, not as body blocks and not as ad hoc fields on the compatibility tree. The compatibility adapter must preserve settings while consumers migrate, even if a given renderer/export target ignores them.
+- **Mutations are invertible transactions ("steps"), modeled on ProseMirror.** A command produces an **invertible delta** applied to the store. Invertibility yields partial update, cheap undo, and collaboration-readiness from one mechanism: undo stores _inverse steps_, not whole-document snapshots. This is a small command→step→store loop in the core; do not import Redux.
+- **No full-document rebuild on the hot path.** A keystroke, mark toggle, object config change, block move, or settings edit updates only the affected block/order/settings slice and records an inverse step. Full compatibility JSON generation, Markdown export, search indexing, and bake work run on `idle`/`debounced` lanes (§7.3) or in a worker (§7.5).
+- **Per-block reactive subscriptions.** A keystroke in block X notifies only X's subscribers -> X re-renders and the selection overlay repaints; nothing else does. "One update never re-renders the editor" is enforced by subscription topology, not by discipline.
 
 ### 7.3 Scheduler And Frame Loop
 
@@ -423,7 +470,7 @@ A Web Worker is used, scoped precisely:
 - **Bake is the differentiator, not the engine alone.** docs/006's "static at rest, live on activation" is what makes a tooling-dense document cheap to hold and possible to export. The engine virtualizes and edits; bake is why rest is affordable.
 - **Stay on the browser's happy path for the deep things.** Text layout and hit-testing are the browser's job; platform text input belongs to the central input substrate. We own orchestration — model, selection, virtualization, focus — not primitives we have no business reimplementing.
 - **One surface, configured, not many surfaces.** Static vs live, desktop vs mobile, read vs edit are _configurations_ of one engine and one model, never separate code paths that drift.
-- **The output contract is sacred; the runtime is disposable.** Anything saved must remain readable by `content-renderer` and rollback-compatible with the Lexical path. We are free to reinvent how editing feels; we are not free to change what a document _is_.
+- **The compatibility output is sacred; the runtime is disposable.** Anything projected to existing consumers must remain readable by `content-renderer` and rollback-compatible with the Lexical path. We are free to reinvent how editing feels and to define the app-owned model; we are not free to silently drop data or break the current projection.
 - **Honesty about cost.** This is a real engine, not a plugin. We accept that nothing here is free; the justification is that the product's core workload is the one no `contenteditable` foundation can serve.
 
 ## 9. Relationship To Existing Work
@@ -442,7 +489,7 @@ Risk-first within the dependency order. Phases are sized so each ends in somethi
 
 These hold for the lifetime of the work. A phase is not done if any is violated, regardless of its own ACs.
 
-- **G1 — Frozen output.** Anything the engine emits is a `RichTextEditorDocument` whose shape is unchanged; it loads in the standard `RichTextEditor` and renders identically through `@idco/content-renderer`. A golden round-trip test enforces this as **deep-equal after normalization** (the ingest ID-ensure pass, §7.2, may add `id`s; that is the only permitted delta).
+- **G1 — Compatibility output.** Anything the engine emits to existing consumers is a `RichTextEditorDocument` projection whose shape is unchanged; it loads in the standard `RichTextEditor` and renders identically through `@idco/content-renderer`. A golden round-trip test enforces this as **deep-equal after normalization** (the ingest ID-ensure pass, §7.2, may add `id`s; that is the only permitted delta). The internal `OwnedDocument` is authoritative, but the projection is the compatibility gate until a deliberate persistence migration exists.
 - **G2 — Standard paths untouched.** `RichTextEditor` (Lexical) and decorator virtualization keep working; `tests/e2e/editor-backspace.perf.spec.ts`, `tests/e2e/editor-decorator-virtualization.perf.spec.ts`, `tests/e2e/editor-typing-latency.perf.spec.ts` (all three brought under the `test:e2e:editor` script in Phase 1 AC3), and all existing `tests/editor/**` unit tests stay green.
 - **G3 — Core purity.** `owned-model/core/**` imports neither React nor Lexical. Enforced by an import-boundary check that fails CI.
 - **G4 — No new runtime deps** except the vendored input substrate (no external runtime dependency added; `pnpm advise:dupes` shows no new duplication clusters introduced by copy-paste).
@@ -505,24 +552,31 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 
 #### Phase 3 — Model + transactions (medium–large; headless spine)
 
-- **Goal:** the document model and mutation layer, fully testable without UI. The runtime model is **Lexical-free** — it does not import `lexical`/`@lexical/*` and does not reuse Lexical's node shape as its in-memory representation; Lexical-flavored `RichTextEditorDocument` JSON is a **serialization target at the boundary only** (§5.4).
+- **Goal:** the app-owned document model, block registry boundary, and mutation layer, fully testable without UI. The runtime model is **Lexical-free** — it does not import `lexical`/`@lexical/*` and does not reuse Lexical's node shape as its in-memory representation; Lexical-flavored `RichTextEditorDocument` JSON is a **compatibility projection at the boundary only** (§5.4).
 - **May touch:** `owned-model/core/**`, `tests/owned-model/**`.
-- **Must not:** import React; import `lexical`/`@lexical/*`; reuse `RichTextEditorNode` as the runtime model (it is a serializer target, not the editing representation); render anything; add virtualization; touch heavy objects.
-- **Model shape (decided — the efficient, non-Lexical representation):**
-  - **Typed `BlockModel` discriminated union** (`paragraph | heading | list | listitem | quote | code-block | callout | media | post-ref | embed | table | table-of-contents | glossary | …`), not a `[key: string]: unknown` bag — exhaustively typed, no megamorphic property access.
-  - **Range-based inline formatting:** each text-bearing block holds one `text: string` plus `marks: { start; end; kind }[]` (links/glossary carried as ranges too). This is the decisive win over Lexical, which fragments a styled line into many text nodes; here editing and model-offset mapping are O(text length), not O(node count). Marks expand to the `format` bitmask + split text nodes **only** in the serializer.
+- **Must not:** import React; import `lexical`/`@lexical/*`; reuse `RichTextEditorNode` as the runtime model (it is a compatibility target, not the editing representation); render anything; add virtualization; implement mermaid/data-grid/chart UI or real bake pipelines. Phase 3 may define the generic object-block and registry contracts those later features will use.
+- **Model shape (decided — app-owned, registry-ready, non-Lexical):**
+  - **`OwnedDocumentSnapshot` as the official structure:** `{ version, body: { order, blocks }, settings }`, JSON-serializable for storage but not shaped like Lexical/editor state.
+  - **Runtime store as ordered ids + `Map<blockId, BlockModel>`:** editing one block/order/settings slice touches only that slice and notifies only relevant subscribers.
+  - **Typed text blocks:** `paragraph | heading | listitem | quote | callout | code-block | ...` carry `text: string` plus range `marks` for inline format/link/glossary/comment references.
+  - **Registered object blocks:** object data is accepted only through a `BlockDefinition` registry with parse/normalize/compatibility-export/import/export-completeness hooks. Unknown objects are dropped, flattened, or refused by explicit policy; no silent passthrough.
+  - **Baked snapshot slots:** the generic object block includes `baked` and `status` fields so docs/006 heavy objects have a place before Phase 6 implements real bakers.
+  - **Document settings:** publication/page settings live on the document, not in the body stream, and must survive normalization and compatibility projection.
   - **Flat per-block text string now**, with the rope/piece-table option deferred to a single block type (`code-block`) later, addable without touching the store or step layer.
-  - **Invertible diff steps over the normalized store** (AC2/AC3) with structural sharing (AC1) — also what keeps CRDT collaboration possible later (§12) at no cost now.
-  - _Rejected:_ a model mirroring `RichTextEditorNode` (reintroduces Lexical's node-splitting and weak-undo costs); a rope-per-block from day one (block-partitioned text is small, so the asymptotic win never triggers — premature complexity).
+  - **Invertible diff steps over the normalized store** (AC2/AC3) with structural sharing/subscriber isolation (AC1) — also what keeps CRDT collaboration possible later (§12) at no cost now.
+  - _Rejected:_ a model mirroring `RichTextEditorNode`; arbitrary `[key: string]: unknown` blocks in the normalized store; a pure immutable `Record` update path that clones or walks the entire document per edit; a rope-per-block from day one (block-partitioned text is small, so the asymptotic win never triggers — premature complexity).
 - **Acceptance criteria:**
   - AC1 the store is normalized (ordered id list + `Map<blockId, BlockModel>`); a test proves editing one block leaves every other block's object identity unchanged (reference equality).
   - AC2 every step type is invertible: a property test asserts `apply(state, inverse(step)) === pre-step state` for generated edits.
   - AC3 undo/redo across N random edits returns a document deep-equal to the pre-edit document.
-  - AC4 a golden round-trip: a known edit sequence serializes to `RichTextEditorDocument` JSON that deep-equals a committed golden **and** loads/renders identically via `content-renderer` (this is G1's enforcing test).
+  - AC4 a golden compatibility round-trip: a known edit sequence serializes to `RichTextEditorDocument` JSON that deep-equals a committed golden **and** loads/renders identically via `content-renderer` (this is G1's enforcing test).
   - AC5 the import-boundary check (G3) is green for all new core files; a grep proves no `lexical`/`@lexical/*` import and no use of `RichTextEditorNode` as a runtime type under `owned-model/core/**`.
   - AC6 inline formatting round-trips losslessly: range-based `marks` ↔ serialized `format` bitmask + split text nodes is proven reversible by a property test over generated overlapping/adjacent mark ranges.
+  - AC7 the block registry rejects or normalizes unknown object data by explicit policy; a fixture for a fake registered object proves `baked`/`status` round-trip through `OwnedDocumentSnapshot` and compatibility projection without implementing a real heavy object.
+  - AC8 document-level settings survive ingest -> store -> snapshot -> compatibility projection -> ingest; they are never flattened into body blocks or dropped by normalization.
+  - AC9 a hot-path test/instrumentation proves a text edit does not serialize or walk every block; only the changed block/order/settings subscriber set is notified.
 - **Verify:** `pnpm test`; `pnpm typecheck`; `grep -rn "@lexical\|from \"lexical\"" packages/editor/src/owned-model` is empty.
-- **Done when:** AC1–AC6 pass and G1–G6 hold.
+- **Done when:** AC1–AC9 pass and G1–G6 hold.
 - **Out of scope:** React, rendering, virtualization, scheduler wiring.
 
 #### Phase 4 — React view + scheduler/frame loop (medium–large)
@@ -564,7 +618,7 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
   - AC1 at rest, a heavy object mounts its baked static view, not a live editor subtree (asserted: no editor instance for resting objects).
   - AC2 activating object B while A is live commits and deactivates A first; at most one live object is asserted in state and DOM.
   - AC3 the object's bounding box shifts ≤ 2px between resting and active (no-drift property).
-  - AC4 editing an object regenerates its baked field and updates the document JSON; an object with no valid bake surfaces a recoverable error rather than emitting an unbakeable node (docs/006 §9).
+  - AC4 editing an object regenerates its baked field and updates the `OwnedDocument` store plus compatibility projection; an object with no valid bake surfaces a recoverable error rather than emitting an unbakeable node (docs/006 §9).
   - AC5 the text caret suspends on object activation and resumes on deactivation without stranding an in-flight IME composition.
   - AC6 a pure-compute bake/index runs in the Web Worker (asserted via a worker round-trip; main thread not blocked).
 - **Verify:** `pnpm test`; `pnpm exec playwright test tests/e2e/owned-model-objects.spec.ts`; the mixed-book Ladle story.
@@ -575,7 +629,7 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 
 - **Goal:** turn the cross-browser gate into a guarantee on the hard surfaces.
 - **May touch:** `owned-model/**` (input modes, a11y, bounds), the vendored input substrate, tests, Playwright config (mobile emulation, a11y scan).
-- **Must not:** regress any earlier phase's ACs; change the persisted contract for mobile.
+- **Must not:** regress any earlier phase's ACs; change the model or compatibility contract for mobile.
 - **Acceptance criteria:**
   - AC1 an IME fuzz suite passes ≥ 99% of seeds on chromium/webkit/firefox; remaining failures are enumerated as documented known-failures.
   - AC2 mobile (webkit emulation): touch selection and on-screen-keyboard editing work; if the native-`contenteditable`-active-block path is used, a round-trip test proves the model stays authoritative.
@@ -591,7 +645,7 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 - **May touch:** `owned-model/**`, derived-index modules, toolbar/object-chrome wiring (docs/006), `packages/editor/src/index.ts` (new opt-in export), tests, stories.
 - **Must not:** make the engine a default; alter the standard editor's behavior (G6).
 - **Acceptance criteria:**
-  - AC1 TOC, JSON text search, and comment indexes build from the document; navigating to an offscreen heading/result scrolls to and reveals it under virtualization.
+  - AC1 TOC, model text search, and comment indexes build from the document; navigating to an offscreen heading/result scrolls to and reveals it under virtualization.
   - AC2 the docs/006 toolbar and object chrome operate on the engine's model selection/focus (formatting commands apply to the model selection, not DOM).
   - AC3 a parity checklist versus the standard editor passes for the live-book surface: lists, marks, tables, links, glossary, comments — each has a passing test.
   - AC4 the engine is exposed as an explicit opt-in API; a test confirms existing callers and the default `RichTextEditor` are unchanged (G6).
@@ -609,7 +663,7 @@ The phases above describe the engine's spine. A production editor needs the foll
 
 - **Paste pipeline — `[blocking-for-v1]`, Phase 3/8.** Clipboard _read_: an HTML/plain-text→model parser with explicit format priority (internal model format > HTML > plain), and an internal high-fidelity clipboard format for intra-app paste. The copy side (§5.7) is only half of clipboard.
 - **Sanitization / XSS boundary — `[blocking-for-v1]`, Phase 3/6.** Pasted HTML and **baked HTML/SVG fields** (mermaid SVG, grid output) are rendered by `content-renderer` on every tier including export. Define the single sanitization boundary; nothing author- or paste-derived reaches a rendered tier unsanitized.
-- **Find-in-page — `[blocking-for-v1]`, Phase 5/8.** Virtualization removes offscreen text from the DOM, so native Ctrl/Cmd+F is broken by construction. The JSON search index (§8/§13) must be wired to an **in-editor find UI that is the Ctrl+F replacement** (intercept the shortcut), not just a side panel.
+- **Find-in-page — `[blocking-for-v1]`, Phase 5/8.** Virtualization removes offscreen text from the DOM, so native Ctrl/Cmd+F is broken by construction. The model search index (§8/§13) must be wired to an **in-editor find UI that is the Ctrl+F replacement** (intercept the shortcut), not just a side panel.
 - **Autosave / dirty-state / save-failure — `[blocking-for-v1]`, Phase 4/8.** A dirty-state model, debounced persistence (the `debounced` lane), save-failure recovery, and a minimum two-tabs/stale-write guard. Core for a "live book platform," not optional.
 - **Image/file drag-drop & paste → upload → media node — `[blocking-for-v1]`, Phase 6.** Author drops/pastes an image; engine routes to the host upload binding and inserts a media node.
 - **Native-path spellcheck story — `[defer-but-named]`, Phase 7.** The hidden-textarea backend disables spellcheck/autocorrect by design; the native EditContext surface does not get native spellcheck for free. Decide the desktop spellcheck approach or explicitly accept its absence — do not claim parity (§5.8) without it.
@@ -633,10 +687,11 @@ The phases above describe the engine's spine. A production editor needs the foll
 - **Caret affinity at wrap/bidi boundaries.** On the native DOM `Selection` path the browser resolves affinity; on the hand-painted/offscreen path the selection model must carry an affinity/bias bit (§7.4), or the caret renders on the wrong visual line at soft-wrap and RTL boundaries. Scoped to where we paint — budgeted, not discovered.
 - **IME bounds feedback correctness.** `updateControlBounds`/`updateSelectionBounds`/`updateCharacterBounds` must keep the OS IME candidate window correctly placed across platforms and during scroll/relayout; getting this wrong is most visible on mobile-Safari via the hidden-textarea backend.
 - **Scheduler vs React double-scheduling.** The `frame` lane and React's renderer must share one rAF and batch store-notifies (§7.3); a regression here shows up as re-render storms or dropped frames on keystroke.
-- **Two engines in the codebase.** The standard Lexical editor and the owned-model engine coexist; node definitions, bake fields, and the persisted contract must stay shared so the two never diverge on what a document is.
+- **Two engines in the codebase.** The standard Lexical editor and the owned-model engine coexist; node definitions, bake fields, and compatibility adapters must stay shared so the two never diverge on what a document means.
 
 ## 12. Open Decisions
 
+- **Persistence format migration.** Phase 3 defines `OwnedDocument` as the app model, but existing consumers still require `RichTextEditorDocument` compatibility output. Whether storage eventually flips to `OwnedDocumentSnapshot`, stores both during a migration window, or keeps `RichTextEditorDocument` as the durable interchange format is a separate migration decision, not part of the engine hot path.
 - **Many simultaneously-live objects.** Currently one-at-a-time (§6.4). Whether and when to relax via the slot is unresolved and should be driven by real author behavior, not anticipated.
 - **Reader-tier interactive surface sharing.** How much of the live object surface (e.g. a sortable grid) is shared with the digital-reader tier versus re-implemented from baked fields is an open boundary between this engine and `content-renderer`.
 - **Collaboration.** No plan now. The owned model and existing stable IDs keep CRDT possible later at no extra cost; we will not design collab plumbing until it is real, but we will avoid model decisions that are collab-hostile.
@@ -652,7 +707,7 @@ Concrete tickets are out of scope here; the _shape_ of proof is not:
 - **Cross-virtual copy is correct.** Copying a range that spans unmounted blocks (including code) yields the full model content, not just on-screen text.
 - **Object lifecycle is honest.** Activation bakes/live-swaps in place with no layout drift; deactivation re-bakes; an unbakeable object surfaces an error rather than corrupting the document.
 - **IME and complex scripts are first-class, proven by an assembled suite (no turnkey tool exists).** Two halves. (1) _Script shaping / segmentation_ — caret-by-grapheme, word selection, delete-by-cluster — is verified deterministically against Unicode UAX #29 data (`GraphemeBreakTest` / `WordBreakTest`) over `Intl.Segmenter`, in CI on every browser; this catches the "don't split a Hangul syllable / Thai cluster / emoji ZWJ" class without an IME. (2) _Composition_ has no framework, so it is proven by capturing real IME event streams once and replaying them as cross-browser regressions (the technique already used for Microsoft Telex), plus CDP `Input.imeSetComposition` for Chromium composition, ported WPT `input-events` ordering cases, and a thin manual real-device matrix (CJK + Vietnamese). The native-EditContext and hidden-textarea backends run the **same** composition cases; native is used only where it passes them.
-- **Output is unchanged.** Round-tripping any document through the new engine yields JSON that `content-renderer` renders identically and that the Lexical path can still load (rollback safety).
+- **Output is unchanged.** Round-tripping any document through the new engine yields compatibility JSON that `content-renderer` renders identically and that the Lexical path can still load (rollback safety).
 
 ## 14. Completion Criteria
 
@@ -663,9 +718,9 @@ The engine is "done enough to adopt for the live-book workload" when:
 - Heavy objects render baked at rest, go live in place one at a time, re-bake on edit, and never drift from their baked form.
 - Cross-virtual selection and copy are correct; search and TOC navigate to and reveal offscreen targets.
 - Desktop and mobile reach authoring parity per §5.8, with read/review working everywhere from day one.
-- The persisted document is deep-equal-after-normalization to the existing `RichTextEditorDocument` contract (ingest may add optional `id`s; no other delta) and rollback-compatible with the Lexical path.
+- The compatibility projection is deep-equal-after-normalization to the existing `RichTextEditorDocument` contract (ingest may add optional `id`s; no other delta) and rollback-compatible with the Lexical path; the app-owned `OwnedDocument` remains the authoritative model.
 - The standard editor and Phase 0 remain intact for small/static documents.
 
 ## 15. Final Model
 
-The scalable IDCO editor is not a bigger `contenteditable`. It is an **owned-model engine**: the document model is the source of truth, a central input substrate feeds text/composition/selection by model offset, the browser still lays out and hit-tests text, and selection is model-based so the editor can virtualize blocks without the DOM fighting back. Native EditContext and hidden textarea are backends of that substrate, not separate editor implementations. Heavy objects sit atomic in the text flow, baked static at rest and live one-at-a-time on activation — which is what makes a tooling-dense document cheap to hold and possible to export, and which is the precise place the incumbent `contenteditable` foundation fails. The persisted document never changes; only the runtime does. This is the editor a live technical book platform needs, and it is the one no mainstream `contenteditable` engine can become.
+The scalable IDCO editor is not a bigger `contenteditable`. It is an **owned-model engine**: `OwnedDocument` is the source of truth, a central input substrate feeds text/composition/selection by model offset, the browser still lays out and hit-tests text, and selection is model-based so the editor can virtualize blocks without the DOM fighting back. Native EditContext and hidden textarea are backends of that substrate, not separate editor implementations. Heavy objects sit atomic in the text flow, baked static at rest and live one-at-a-time on activation — which is what makes a tooling-dense document cheap to hold and possible to export, and which is the precise place the incumbent `contenteditable` foundation fails. The legacy rich-text JSON remains a compatibility projection until consumers migrate; the app model, not that JSON tree, is the authority. This is the editor a live technical book platform needs, and it is the one no mainstream `contenteditable` engine can become.
