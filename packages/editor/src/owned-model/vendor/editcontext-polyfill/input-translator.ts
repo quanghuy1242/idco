@@ -328,9 +328,7 @@ export function createInputTranslator(
   // MB-scale single buffers. If EditContext is ever bound to a whole (large)
   // document, bound both scans to a window around the selection
   // (textarea.selectionStart/End) to make this O(edit-size).
-  function reconcileModelToTextarea(
-    editContext: EditContextPolyfill,
-  ): boolean {
+  function reconcileModelToTextarea(editContext: EditContextPolyfill): boolean {
     const oldText = editContext.text;
     const newText = textarea.value;
     if (oldText === newText) return false;

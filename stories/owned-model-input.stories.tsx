@@ -276,7 +276,8 @@ function InputSpike({ force }: { readonly force: boolean }) {
             publishRef.current();
             const text = JSON.stringify(
               (window as unknown as Record<string, unknown>)[TRACE_KEY] ?? {
-                error: "no trace yet — type into the box above, then Copy trace",
+                error:
+                  "no trace yet — type into the box above, then Copy trace",
               },
               null,
               2,
