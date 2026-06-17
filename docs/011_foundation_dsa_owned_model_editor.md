@@ -61,6 +61,28 @@ The whole design turns on one inversion: the model is the document, and the DOM 
 
 One theme repeats: the block partition is itself the most important data structure. Because the document is a tree of small nodes, every per-node cost (string copy, mark shift, DOM patch) is bounded by one small node, never the book. Most "is this expensive?" questions dissolve once you hold that the blast radius of an edit is one node.
 
+### 0.1 Vocabulary, because several words name different things on different layers
+
+The same content exists in three representations — the **model** (the source of truth), the **input buffer** (what captures keystrokes), and the **rendered DOM** (what the user sees). Most terms belong to exactly one layer, and **"node" is the worst offender**: in the model it is a block; in the DOM it is a formatting run. Hold the layer and the rest of the document stops equivocating.
+
+| Term | Layer | Means |
+| --- | --- | --- |
+| **node** | model | a node in the document graph — a block (paragraph, heading, list item, container). **Not a DOM node.** |
+| **block** | model | a top-level structural node; the unit of virtualization, move, copy (§2.6) |
+| **(text) leaf** | model | a node that holds `text` + marks + inline atoms and no child nodes (§2.3, §3) |
+| **mark** | model | a formatting range (`bold`, `link`, …) over a leaf's `text`, stored as offsets; invisible to the input buffer (§4) |
+| **inline atom** | model | a non-text inline (glossary chip, inline image), one `￼` in `text` (§4.3) |
+| **point** | model | a position, node-relative: `{ node, offset }` (§5) |
+| **object / atomic object** | model | a heavy block (table, `code-block`, media) whose internals are opaque to the outer engine (§2.4, §2.7) |
+| **store** | runtime | the one mutable container holding nodes, order, selection, history (§6.8) |
+| **step / transaction / command** | mutation | the invertible primitive / its bundle / the high-level intent (§6) |
+| **active leaf** | model + input | the one leaf currently being edited; snapshot-pinned, patched imperatively (§3.3, §11.2) |
+| **input buffer / capture host** | input | the single hidden `<textarea>` / `EditContext` for the active leaf; holds the flat-string projection of that one leaf, no marks (§8.4, §9) |
+| **run** | rendered DOM | one styled slice of a rendered leaf (`<strong>…</strong>`, a plain text node); one per formatting segment. This is the "DOM node" §3.4 patches |
+| **overlay rects** | rendered DOM | engine-painted caret/selection rectangles, the baseline painter (§8.5) |
+
+The recurring trap, stated once: one paragraph is **one block (one model node)**, captured by **one input buffer (one flat string, no marks)**, but rendered as **several runs (several DOM nodes)** — one run per formatting segment. Typing patches the single run you typed into; the marks shift as model offsets; nothing else in the DOM is rebuilt (§3.4, §3.5).
+
 ---
 
 ## 1. The Foundational Stance
