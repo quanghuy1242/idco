@@ -26,6 +26,7 @@ type ImeTraceEvent = {
   readonly data?: string | null;
   readonly inputType?: string;
   readonly isComposing?: boolean;
+  readonly cancelable?: boolean;
   readonly defaultPrevented?: boolean;
   readonly model?: Pick<
     OwnedInputDiagnostics,
@@ -73,9 +74,10 @@ function hiddenTextarea(host: HTMLElement): HTMLTextAreaElement | null {
 
 function inputEventFields(
   event: Event,
-): Pick<ImeTraceEvent, "data" | "inputType" | "isComposing"> {
+): Pick<ImeTraceEvent, "data" | "inputType" | "isComposing" | "cancelable"> {
   if (!(event instanceof InputEvent)) return {};
   return {
+    cancelable: event.cancelable,
     data: event.data,
     inputType: event.inputType,
     isComposing: event.isComposing,
@@ -98,6 +100,7 @@ function InputSpike({ force }: { readonly force: boolean }) {
   const countRef = useRef<HTMLOutputElement>(null);
   const traceRef = useRef<ImeTraceEvent[]>([]);
   const recordingRef = useRef(false);
+  const dumpRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -258,7 +261,44 @@ function InputSpike({ force }: { readonly force: boolean }) {
         <output ref={countRef} data-owned-trace-count="">
           0
         </output>
+        <button
+          data-owned-trace-copy=""
+          type="button"
+          onClick={() => {
+            const text = JSON.stringify(
+              (window as unknown as Record<string, unknown>)[TRACE_KEY] ?? {
+                error: "no trace yet — tap Start trace, type, then Stop trace",
+              },
+              null,
+              2,
+            );
+            if (dumpRef.current) {
+              dumpRef.current.value = text;
+              dumpRef.current.focus();
+              dumpRef.current.select();
+            }
+            // Clipboard may be unavailable on non-secure origins (Firefox
+            // Android over http); the textarea below is the manual fallback.
+            void navigator.clipboard?.writeText(text).catch(() => {});
+          }}
+        >
+          Copy trace
+        </button>
       </div>
+      <textarea
+        ref={dumpRef}
+        data-owned-trace-dump=""
+        readOnly
+        aria-label="Recorded IME trace dump"
+        placeholder="Tap 'Copy trace' to dump recorded events here, then long-press → Select all → Copy."
+        style={{
+          minHeight: "12rem",
+          padding: "0.5rem",
+          font: "12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace",
+          whiteSpace: "pre",
+          overflow: "auto",
+        }}
+      />
       <div
         ref={hostRef}
         data-owned-host=""
