@@ -42,6 +42,7 @@
 - [14. The Cost Ledger](#14-the-cost-ledger)
 - [15. What This Corrects In docs/010](#15-what-this-corrects-in-docs010)
 - [16. Genuinely Open Sub-Decisions](#16-genuinely-open-sub-decisions)
+- [17. Collaboration-Readiness: The Day-One Footprint And Why It Lands Now](#17-collaboration-readiness-the-day-one-footprint-and-why-it-lands-now)
 
 ---
 
@@ -50,7 +51,7 @@
 The whole design turns on one inversion: the model is the document, and the DOM is a disposable view of it. Every structure below exists to make that inversion cheap and correct. Read each section as the answer to one question.
 
 - §2 asks what the document is made of. A normalized tree of nodes.
-- §3 asks how the text of one node is stored. An immutable string, while the active one lives in the browser's input buffer.
+- §3 asks how the text of one node is stored. An immutable, identity-bearing sequence (a string with character ids, §3.7), while the active one lives in the browser's input buffer.
 - §4 asks how formatting is stored over that text. Sorted range marks plus inline atoms, remapped by the edit itself.
 - §5 asks how a location is named. A node-relative point, UTF-16, with affinity.
 - §6 asks how the document changes. Invertible steps through a single chokepoint.
@@ -70,9 +71,9 @@ The same content exists in three representations — the **model** (the source o
 | **node** | model | a node in the document graph — a block (paragraph, heading, list item, container). **Not a DOM node.** |
 | **block** | model | a top-level structural node; the unit of virtualization, move, copy (§2.6) |
 | **(text) leaf** | model | a node that holds `text` + marks + inline atoms and no child nodes (§2.3, §3) |
-| **mark** | model | a formatting range (`bold`, `link`, …) over a leaf's `text`, stored as offsets; invisible to the input buffer (§4) |
+| **mark** | model | a formatting range (`bold`, `link`, …) over a leaf's `text`, anchored to character ids and resolved to offsets (§3.7, §4.4); invisible to the input buffer |
 | **inline atom** | model | a non-text inline (glossary chip, inline image), one `￼` in `text` (§4.3) |
-| **point** | model | a position, node-relative: `{ node, offset }` (§5) |
+| **point** | model | a position, node-relative: `{ node, anchor, offset }`, durable identity is `node` + character-id `anchor`, `offset` resolved (§5) |
 | **object / atomic object** | model | a heavy block (table, `code-block`, media) whose internals are opaque to the outer engine (§2.4, §2.7) |
 | **store** | runtime | the one mutable container holding nodes, order, selection, history (§6.8) |
 | **step / transaction / command** | mutation | the invertible primitive / its bundle / the high-level intent (§6) |
@@ -134,6 +135,8 @@ Editing a text node in a deeply nested cell must not rebuild its ancestor chain.
 
 Structural sharing falls out of id-addressing for free. A deep object tree (`{type, children: [{...}]}`) would mint a new object for every ancestor on every keystroke, which is the rejected walk-the-whole-document path.
 
+A `NodeId` is globally unique, opaque, and minted by the client, never a per-document index or array position. Single-user this looks like over-specification, but it is the one identity decision that is irreversible once books are persisted: every saved document bakes its ids and every cross-reference (selection anchors, marks, the body order, `parentOf`) resolves through them, so a later switch from a document-local id to a global id is a data migration across every stored book, not a code change. It is also the precondition for the future collaboration seam, where two clients must mint non-colliding ids offline. We pay the global-id discipline on day one and the format never has to move (§17).
+
 ### 2.3 Node kind to layer assignment (the master table)
 
 This table is the synthesis that dissolves the flatten contortions. Each compat node type maps to exactly one role.
@@ -188,14 +191,14 @@ Opaque to the outer mutation engine does not mean invisible to document services
 
 A runtime "if the block grows past N chars, switch its structure" rule is a mode with a boundary, and boundaries breed bugs. We reject it. The text DSA is chosen by node type at design time and never changes for a given node.
 
-- Prose text leaves use an immutable string, always.
+- Prose text leaves use an immutable, identity-bearing character sequence, always: a run-encoded string where each character has a stable id (§3.7). For all single-user cost reasoning below, read this as "an immutable string," since a write-once paragraph is one run; the character ids are the durable anchor that makes marks and positions collaboration-ready (§17) and add about 1 to 2 percent at rest.
 - `code-block` uses a piece-table inside the object's `data`, always (§3.6).
 
 A paragraph never becomes a code block. A 5,000-char paragraph is not a trigger to switch structures. It is malformed content, a wall of text with no breaks, and ingest splits or rejects it the way it would a 2 GB image.
 
 ### 3.2 Why a plain immutable string for prose, and why not a rope everywhere
 
-The block partition means every prose leaf is one paragraph, tens to low hundreds of UTF-16 units. At that size a plain immutable string is the actual optimum.
+The block partition means every prose leaf is one paragraph, tens to low hundreds of UTF-16 units. At that size a plain immutable string is the actual optimum. Read "string" in this section as the cost model for the run-encoded sequence of §3.7: a write-once paragraph is a single run, so its insert/delete/index/overhead costs are exactly the string costs analyzed here, and the character ids ride along for about 1 to 2 percent. The string-versus-rope reasoning below is what decides the per-leaf structure; the character ids are an addressing layer on top of it, not a different structure.
 
 | Structure | insert/delete | index | per-small-block overhead | right for |
 | --- | --- | --- | --- | --- |
@@ -210,15 +213,15 @@ The only cost of this choice is eating an O(n) string copy on a degenerate huge 
 
 ### 3.3 The active leaf's text lives in the browser's input buffer
 
-While a leaf is being edited, its authoritative mutable text is an `ActiveLeafDraft` backed by the browser's input buffer (the hidden `<textarea>` or `EditContext`). That buffer is a native, gap-buffer-grade mutable text structure the platform maintains for free. The frozen node object stays pinned for React (§11.2), but the store's read path is still current: reads of the active leaf return `draft.currentText`; reads of inactive leaves return the frozen node string.
+While a leaf is being edited, its authoritative mutable text is an `ActiveLeafDraft` backed by the browser's input buffer (the hidden `<textarea>` or `EditContext`). That buffer is a native, gap-buffer-grade mutable text structure the platform maintains for free. The frozen node object stays pinned for React (§11.2), but the store's read path is still current: reads of the active leaf return `draft.currentText`; reads of inactive leaves return the frozen leaf content, the run-encoded character sequence of §3.7 (its text is a string; its durable form carries character ids).
 
 Three consequences follow.
 
-- We do not replace the frozen node string per keystroke. Each input event hands us a diff `(at, removed, inserted)`, and `dispatch` records the corresponding `ReplaceText` step immediately.
+- We do not replace the frozen leaf content per keystroke. Each input event hands us a diff `(at, removed, inserted)`, and `dispatch` records the corresponding `ReplaceText` step immediately.
 - Marks, atoms, history, and selection remap off that diff (§4.5, §8.8), so the model is current after every keystroke even though React still sees the pinned snapshot.
-- The immutable node string materializes from the draft on deactivation, on a discrete structural command that needs a rerender, or when a non-active reader/serializer asks for the canonical snapshot.
+- The immutable leaf content (the run-encoded sequence, §3.7) materializes from the draft on deactivation, on a discrete structural command that needs a rerender, or when a non-active reader/serializer asks for the canonical snapshot.
 
-Per-keystroke frozen-string cost during active editing rounds to zero. Inactive leaves stay immutable strings, optimal for reading, structural sharing, and serialization.
+Per-keystroke frozen-content cost during active editing rounds to zero. Inactive leaves stay immutable run-encoded sequences (§3.7), optimal for reading, structural sharing, and serialization.
 
 ### 3.4 DOM update: locate the exact styling node, patch it, bypass the framework
 
@@ -250,6 +253,18 @@ Total cost we control rounds to sub-microsecond, about five orders of magnitude 
 ### 3.6 `code-block` uses a piece-table inside the object, always
 
 Code is large by nature, since a 5,000-line listing is one big string. The `code-block` atomic object holds its body as a piece-table in `data.code`: an immutable original buffer plus an append buffer, with a balanced tree of immutable pieces. Insert and delete run O(log n), the original is never mutated (undo-friendly, since pieces are immutable spans), and offset-to-piece runs O(log n). This is the VS Code model scoped to the one node type that needs it. It is a different node type with a different, statically chosen DSA, not a runtime switch of a prose leaf. Internal viewport virtualization of a very large single listing is deferred (010 §6.8) and lives behind this same node.
+
+### 3.7 Character identity under prose leaves, the collaboration-ready substrate
+
+The prose leaf's durable substrate is not a bare string. It is a run-encoded character sequence in which every character has a stable id, while the offset stays the working coordinate for input, rendering, and the offset-to-node map. This is the one place the model addresses text by identity instead of by integer, and it is the load-bearing change for collaboration-readiness (§17). It does not violate the §3.1 rule, since it is the statically chosen structure for the prose-leaf type, not a runtime mode switch, and it is not a rope smeared over the whole document.
+
+The shape, stated once.
+
+- A character id is `{client, clock}`, where `clock` is a per-client monotonic counter. Single-user there is one client, so ids are a local counter, with no network and no rebasing. The id of the k-th character in a run is `{client, startClock + k}` by arithmetic, so a run stores one id and a length, not an id per character.
+- Sequential typing appends to the current run and bumps the counter, so a write-once paragraph is one run, not one struct per character. Editing at a new position splits a run, one extra run per distinct edit point, bounded by the leaf's edit history, and adjacent runs from the same client with consecutive clocks merge back.
+- The offset is derived from the sequence at use, so §3.3 (active leaf in the input buffer), §3.4 (patch the precise styling node), §5.2 (UTF-16 storage, grapheme navigation), and the offset-to-node map are unchanged. The character id is added as the durable anchor for marks (§4.4) and stored points (§5.1); the offset remains the transient coordinate the browser speaks.
+
+The cost is about 1 to 2 percent of a leaf's memory at rest for ordinary write-once prose, one run header plus character-id mark boundaries, on the order of a megabyte across a 10,000-block book. Per keystroke is a wash, since 011 already keeps the active leaf's text in the browser buffer (§3.3) and commits on the diff, so neither a string nor a sequence is copied per key. The one genuinely new cost is tombstones, the id-range placeholder a deleted run leaves until the deletion is causally stable; single-user collects them on every commit, so they never accumulate, and the collaborative case bounds them by edits in flight, not document age. The full cost reasoning and the build-it-ourselves decision live in docs/014.
 
 ---
 
@@ -301,11 +316,13 @@ In `text`, each atom occupies exactly one `￼` (OBJECT REPLACEMENT CHARACTER, o
 
 ### 4.4 Mark storage: a sorted array of absolute offsets, with per-kind boundary rules
 
-Marks for a leaf form a flat array sorted by `from`, holding absolute UTF-16 offsets. Boundary semantics (what happens when you type exactly at an edge) are fixed per kind, so two implementers cannot diverge.
+Marks for a leaf form a flat array sorted by `from`. A boundary's durable anchor is a character id plus a stickiness side (§3.7), resolved to an absolute UTF-16 offset at use; the sorted array and every algorithm below operate on those resolved offsets, so this is an addressing change at the boundary, not an algorithm change. Boundary semantics (what happens when you type exactly at an edge) are fixed per kind, so two implementers cannot diverge, and under the character-id anchor each kind's rule is simply which side the anchor sticks to.
 
-- Formats (`bold` through `highlight`) are closed-start, open-end. Typing at the end of a bold run continues bold; typing immediately before it does not retroactively bold.
+- Formats (`bold` through `highlight`) are closed-start, open-end: the start sticks after its character and the end sticks after the last character, so typing at the end of a bold run continues bold and typing immediately before it does not retroactively bold.
 - `link` is closed-start, closed-end. Typing at either edge does not extend the link.
 - Deletion spanning a boundary clamps the mark; deletion that empties a mark drops it; the destroyed marks ride in the inverse (§4.5).
+
+Anchoring to character ids is what makes §4.5's "drift is structurally impossible" hold across a remote edit and not only within the local step that caused it: a boundary that is a character id cannot point at the wrong character no matter what concurrent edits happen, which is the Peritext result (docs/014). Single-user the offset remap of §4.5 and the id anchor agree; the id anchor is the form that survives collaboration.
 
 ### 4.5 Marks remap as part of the step, which is why they never drift
 
@@ -338,8 +355,10 @@ The model-string to compat split-text-nodes mapping is a pure, idempotent functi
 ### 5.1 Node-relative points, not flat-integer document positions
 
 ```
-Point = { node: NodeId; offset: number /* UTF-16 */; assoc?: -1 | 1 }
+Point = { node: NodeId; anchor: CharId; offset: number /* UTF-16, resolved */; assoc?: -1 | 1 }
 ```
+
+A point's durable identity is `node` plus a character-id `anchor` (§3.7); the `offset` is the working coordinate resolved from the anchor against the leaf's current sequence, and every comparator and remap below runs on that resolved offset. A transient caret produced from a hit-test starts as an offset and resolves to an anchor when it is stored in the selection. The `anchor` is why a stored position survives a remote edit, the same reason marks anchor to ids (§4.4); single-user the anchor and offset agree, and the anchor costs nothing because the leaf already carries character ids. The `assoc` affinity bit (§5.3) is independent of the anchor and disambiguates wrap and bidi boundaries.
 
 Two candidate coordinate systems compete.
 
@@ -397,8 +416,11 @@ Transaction = {
   inverse:         Step[]        // inverse steps, reverse order
   selectionBefore: Selection
   selectionAfter:  Selection
+  origin:          "local"       // who produced it; always "local" in Phase 3 (§17)
 }
 ```
+
+`origin` is always `"local"` single-user and is the one collaboration field that lands in Phase 3, because retrofitting it is a history-layer rewrite. It is what a future history filters on to undo only local steps, and what the dispatch loop checks to avoid echoing a remote step back to its sender. A free field now; an expensive seam if added after the history is built (§17).
 
 ### 6.2 The step set
 
@@ -417,7 +439,7 @@ Split and merge (Enter at a boundary, Backspace joining blocks) are composite tr
 
 ### 6.3 Invertibility contract
 
-Each step type provides `invert(step, docBefore) → step`, property-tested so that `apply(apply(doc, s), invert(s, doc)) ≡ doc` over generated edits. `invert` takes the pre-edit document because it must capture what the step destroys: the removed text, its marks, its atoms, the old attr or data value. Steps are closed under mapping (`mapStep(step, over)`), which is what selection-remap (§8.6) and future collaboration rebasing build on.
+Each step type provides `invert(step, docBefore) → step`, property-tested so that `apply(apply(doc, s), invert(s, doc)) ≡ doc` over generated edits. `invert` takes the pre-edit document because it must capture what the step destroys: the removed text, its marks, its atoms, the old attr or data value. Steps are closed under mapping (`mapStep(step, over)`), which is what selection-remap (§8.6) and future collaboration rebasing build on. `mapStep` is the day-one rebase hook: Phase 3 builds it for selection-remap, and collaboration reuses the same closure to rebase a remote step over local ones, so the rebase seam exists from the start rather than being bolted on (§17). Every step type must implement it, since a step that cannot be mapped cannot be rebased.
 
 ### 6.4 Normalization is appended steps, never a side effect
 
@@ -1038,3 +1060,25 @@ The choices below are recommended here but not yet locked. Each is isolated enou
 - iOS active-block `contenteditable` fallback. Whether to restore the iOS loupe via native `contenteditable` on the single active block (§8.7) or accept its absence is a product call, deferred but designed-for.
 - Periodic history checkpoints. Whether to cap bulk-undo replay with a snapshot every K transactions (§7.3) is a lever named, not pulled.
 - **The intra-transaction `Mapping` in node-relative coordinates (the internal-core open item, with a recommended default).** The transaction builder (§6.10) maps a position through earlier steps in the same transaction, so a multi-step command can target a post-edit position. Same-node `ReplaceText` uses the §8.8 rule. Structural mapping should default to: points follow a `MoveNode` by id; points inside a removed node or removed ancestor relocate to the deletion boundary by bias; split/merge commands must provide explicit point redirects for the newly minted or absorbed node ids; and commands may not depend on an implicit "point inside removed structure" rule beyond that boundary relocation. Keep this open only until the first split/merge implementation lands, then lock it with property tests for split, merge, move, delete, undo, and redo.
+
+---
+
+## 17. Collaboration-Readiness: The Day-One Footprint And Why It Lands Now
+
+Collaboration is not built in Phase 3 and is not designed in this document; docs/014 holds that brainstorm and 010 §12 keeps it a gated decision. What lands in Phase 3 is a small set of format and addressing changes that make a later collaboration addition bounded instead of a teardown. They are gathered here so the reasoning lives in one place; the mechanical changes are folded into the sections named below.
+
+The one principle that sorts what lands now from what waits: behavior is free to add later, addressing is forever. A merge rule, a rebase policy, a conflict resolution is a function written the week collaboration is built, and it touches no saved bytes. The way a node, a mark boundary, or a stored caret is addressed is baked into every persisted book and into every line of code that reads a position, so getting it wrong means rewriting that code and migrating that data. Only the addressing-and-format items make this list, and the test for each is that it is cheap now and expensive-or-impossible to retrofit.
+
+The five items.
+
+1. **Global node ids (§2.2).** `NodeId` is globally unique, opaque, and client-minted, never a per-document index. Irreversible because every saved doc bakes its ids and cross-references; also the precondition for two clients minting non-colliding ids offline.
+2. **Character identity under prose leaves (§3.1, §3.7).** The prose-leaf substrate is a run-encoded sequence of identity-bearing characters, not a bare string. This is the one change that prevents the rewrite, because the mark, position, selection, and input code all get written once against ids rather than written against offsets and rewritten against ids. The offset stays the working coordinate; the id is the durable anchor. Cost at rest is about 1 to 2 percent (§3.7).
+3. **Marks anchored to character ids (§4.4).** A mark boundary is a character id plus stickiness, resolved to an offset. The open-and-closed-sides rules become the anchor's stickiness. This is what makes "drift is structurally impossible" (§4.5) hold across remote edits, the Peritext result.
+4. **Positions anchored to character ids (§5.1).** A stored `Point`'s durable identity is `node` plus a character-id anchor; the offset is resolved. A transient hit-test point resolves to an anchor when it enters the selection.
+5. **A transaction `origin` slot (§6.1).** Always `"local"` in Phase 3. The field a future history filters on and the dispatch loop checks to avoid echoing remote steps; a history-layer rewrite if added later.
+
+What needs nothing, and why structure is already done. The tree is identity-addressed already, since containers hold `children: NodeId[]`, so `InsertNode`, `RemoveNode`, and `MoveNode` stay index-based in Phase 3 and rebase later through `mapStep` (§6.3). Only text needed the posture change, because text was the one place the model still addressed content by integer. `mapStep` itself is built in Phase 3 for selection-remap, so the rebase seam exists from day one rather than being bolted on.
+
+What we deliberately do not build in Phase 3: rebasing, awareness and presence, multi-peer tombstone GC, the concurrent-move conflict rule, any network or provider. Single-user tombstone GC is collect-on-commit, since there are no peers to wait for. The hard problems that any CRDT choice would face, concurrent tree-move, heavy-object merge semantics, selective undo, interleaving, projection determinism, are catalogued with recommended leans in docs/014 §7; none blocks Phase 3, and the single-user model forecloses none of them.
+
+The build-versus-buy call, recorded: we own the minimal run-encoded sequence rather than embedding a CRDT library for it. We are already building the model, steps, history, selection, and input; taking a foundational dependency on a library, plus its formatting assumptions we do not want, to get one data structure is the wrong trade. A CRDT library stays available later as a replication adapter under the owned model, the posture docs/013's rejection approved, never as the authoritative document.

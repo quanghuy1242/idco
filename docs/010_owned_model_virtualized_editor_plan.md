@@ -290,7 +290,7 @@ The engine's resting blocks render the **same baked representation** the reader 
 
 **Decision:** the long-term engine owns the document model and uses the central input engine for input; it does not use `contenteditable` as the source of truth.
 
-**Why:** §4.1–4.2. `contenteditable` makes the DOM the document, which forbids virtualization of a live editing surface. The live-book thesis (§2) _is_ the workload that breaks the `contenteditable` bet. Owning the model is the only path that gets virtualized live editing, correct cross-virtual selection/copy, and clean object focus isolation. It is also the substrate that leaves collaboration possible later (§12) at no cost now.
+**Why:** §4.1–4.2. `contenteditable` makes the DOM the document, which forbids virtualization of a live editing surface. The live-book thesis (§2) _is_ the workload that breaks the `contenteditable` bet. Owning the model is the only path that gets virtualized live editing, correct cross-virtual selection/copy, and clean object focus isolation. It is also the substrate that leaves collaboration possible later (§12), for a small, deliberate day-one cost folded into Phase 3 (011 §17, docs/014).
 
 ### 6.2 Reuse The View And Semantics, Not Lexical's Engine
 
@@ -566,7 +566,8 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
   - **Registered object blocks:** object data is accepted only through a `BlockDefinition` registry with parse/normalize/compatibility-export/import/export-completeness hooks, and an **invertibility obligation** (011 §6.5: `SetObjectData` or `applyEdit`/`invertPatch`). Unknown objects are dropped, flattened, or refused by explicit policy; no silent passthrough.
   - **Baked snapshot slots:** the generic object block includes `baked` and `status` fields so docs/006 heavy objects have a place before Phase 6 implements real bakers.
   - **Document settings:** publication/page settings live on the document, not in the body stream, and must survive normalization and compatibility projection.
-  - **Invertible steps over the node graph (→ 011 §6–§7)** with structural sharing via node identity (011 §6.8) and subscriber isolation (AC1) — also what keeps CRDT collaboration possible later (§12) at no cost now. The intra-transaction position `Mapping` for split/merge is the one open algorithm (011 §16); land it early with the property tests 011 names.
+  - **Invertible steps over the node graph (→ 011 §6–§7)** with structural sharing via node identity (011 §6.8) and subscriber isolation (AC1). The intra-transaction position `Mapping` for split/merge is the one open algorithm (011 §16); land it early with the property tests 011 names.
+  - **Collaboration-readiness footprint (→ 011 §17, docs/014).** Phase 3 lands the addressing and format decisions that are cheap now and a teardown to retrofit, and builds no collaboration machinery: globally-unique opaque client-minted node ids (011 §2.2); the character-identity prose-leaf substrate (011 §3.7), about 1 to 2 percent at rest; marks and stored points anchored to character ids (011 §4.4, §5.1); and a `"local"` transaction `origin` slot (011 §6.1). Tree structure needs nothing here, since `children: NodeId[]` is identity-addressed already. Do not build rebasing, awareness, multi-peer GC, or move-conflict resolution; single-user tombstone GC is collect-on-commit.
   - _Rejected:_ a model mirroring `RichTextEditorNode`; a **flat `order: BlockId[]` of `text` blocks as the runtime model** (011 §1.1); arbitrary `[key: string]: unknown` blocks in the store; a pure immutable `Record` update path that clones or walks the whole document per edit (011 §6.8); a rope-per-block from day one (block-partitioned text is small, so the asymptotic win never triggers — premature complexity).
 - **Acceptance criteria:**
   - AC1 the store is the normalized node graph (011 §6.8: `Map<NodeId, Node>`, containers holding `children` by id, top-level `order` index, `parentOf` reverse index); a test proves editing one node leaves every other node's object identity unchanged (reference equality), and a `parentOf` invariant test asserts each node's entry matches its actual parent after every transaction (011 §5.4).
@@ -578,8 +579,9 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
   - AC7 the block registry rejects or normalizes unknown object data by explicit policy; a fixture for a fake registered object proves `baked`/`status` round-trip through `OwnedDocumentSnapshot` and compatibility projection without implementing a real heavy object.
   - AC8 document-level settings survive ingest -> store -> snapshot -> compatibility projection -> ingest; they are never flattened into body blocks or dropped by normalization.
   - AC9 a hot-path test/instrumentation proves a text edit does not serialize or walk every block; only the changed block/order/settings subscriber set is notified.
+  - AC10 the collaboration-readiness footprint holds (011 §17, docs/014), proven by tests, with no collaboration machinery built: node ids are globally unique and opaque (a generated id is not a document-local index); a prose leaf carries character identity (a stored mark and a stored point survive a sequence of edits by their character-id anchor, not by re-derived offsets); and every transaction carries an `origin` field. A grep proves no rebasing, awareness, or multi-peer GC code exists under `owned-model/core/**` this phase.
 - **Verify:** `pnpm test`; `pnpm typecheck`; `grep -rn "@lexical\|from \"lexical\"" packages/editor/src/owned-model` is empty.
-- **Done when:** AC1–AC9 pass and G1–G6 hold.
+- **Done when:** AC1–AC10 pass and G1–G6 hold.
 - **Out of scope:** React, rendering, virtualization, scheduler wiring.
 
 #### Phase 4 — React view + scheduler/frame loop (medium–large)
@@ -656,7 +658,7 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 - **Done when:** AC1–AC4 pass and G1–G6 hold.
 - **Out of scope:** auto-default, collaboration.
 
-**Future (gated, not committed):** make the engine the default for chosen workloads, and collaboration groundwork. These are §12 open decisions, decided from data after Phase 8, not scheduled now.
+**Future (gated, not committed):** make the engine the default for chosen workloads, and collaboration groundwork. These are §12 open decisions, decided from data after Phase 8, not scheduled now. The collaboration groundwork has a worked-through brainstorm (docs/014) and a day-one footprint already required in Phase 3 (AC10); what stays gated is the collaboration build itself, not the readiness.
 
 The shape of the bet: Phases 1–2 cost little and retire the foundational risk; Phases 3–4 are the runtime; Phase 5 is the payoff; Phase 6 is the differentiation; Phase 7 is the long tail. If Phase 2 ever returned fatal, the spend would be days, not months — which is where the risk belongs.
 
@@ -697,7 +699,7 @@ The phases above describe the engine's spine. A production editor needs the foll
 - **Persistence format migration.** Phase 3 defines `OwnedDocument` as the app model, but existing consumers still require `RichTextEditorDocument` compatibility output. Whether storage eventually flips to `OwnedDocumentSnapshot`, stores both during a migration window, or keeps `RichTextEditorDocument` as the durable interchange format is a separate migration decision, not part of the engine hot path.
 - **Many simultaneously-live objects.** Currently one-at-a-time (§6.4). Whether and when to relax via the slot is unresolved and should be driven by real author behavior, not anticipated.
 - **Reader-tier interactive surface sharing.** How much of the live object surface (e.g. a sortable grid) is shared with the digital-reader tier versus re-implemented from baked fields is an open boundary between this engine and `content-renderer`.
-- **Collaboration.** No plan now. The owned model and existing stable IDs keep CRDT possible later at no extra cost; we will not design collab plumbing until it is real, but we will avoid model decisions that are collab-hostile.
+- **Collaboration.** No build now, and no collab plumbing until it is real. The earlier "at no extra cost" was too strong: docs/014 works the question through and finds a small, deliberate day-one cost that buys collaboration-readiness, namely that prose leaves carry character identity and marks anchor to it from the start rather than being retrofitted. That day-one footprint is folded into 011 §17 (global node ids, character-identity prose substrate, character-id-anchored marks and positions, a transaction `origin` slot) and is required by Phase 3 below. Everything beyond that footprint, the concurrent-move rule, heavy-object merge semantics, selective undo, awareness, the network, stays deferred with recommended leans in docs/014 §7. The posture is fixed: 011 stays authoritative and any CRDT is a replication layer underneath it, never the document (docs/013 is the rejected inversion of that posture).
 - **Code-block internal virtualization.** Deferred; revisit when a single listing is large enough to matter.
 - **When the engine becomes the default.** Whether/when the owned-model engine supersedes the standard editor for non-live documents is left for after it is proven on the live-book workload.
 
