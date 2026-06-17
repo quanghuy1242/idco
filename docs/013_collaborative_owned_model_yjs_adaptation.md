@@ -1,10 +1,14 @@
-# 013 - Collaborative Owned-Model: Adapting docs/011 To Yjs
+# 013 - Rejected: Collaborative Owned-Model Yjs Adaptation
 
-> Status: design foundation for collaboration (pre-implementation, owner-drafted; revisit before committing)
+> Status: rejected proposal. Do not implement as written.
 >
 > Date: 2026-06-17
 >
-> This document specifies, at the depth of docs/011, every change the owned-model foundation needs in order to adopt Yjs as the collaborative substrate. It is a delta on 011, not a replacement: where a section is unmentioned, 011 stands unchanged. The single most important reframing is that collaboration is not a layer added beside the model; it inverts which structure is authoritative. Reading 011 first is assumed.
+> Rejection date: 2026-06-17
+>
+> This document is retained as a rejected design record. It should not be treated as the collaboration foundation, a Phase 3/4 backlog, or an accepted delta on docs/011. The body below is useful only as an analysis of one possible Yjs-native direction and as a source of individual constraints that may be salvaged into a different adapter plan.
+>
+> Rejected thesis: the original proposal specified, at the depth of docs/011, every change the owned-model foundation would need in order to adopt Yjs as the collaborative substrate. It claimed to be a delta on 011, not a replacement, while also making the `Y.Doc` authoritative. That authority inversion is the reason this proposal is rejected.
 >
 > Scope:
 >
@@ -33,15 +37,41 @@
 > - Subdocuments: <https://docs.yjs.dev/api/subdocuments>
 > - Providers: `y-websocket`, `y-webrtc`, `y-indexeddb`; managed alternatives Hocuspocus / Liveblocks / PartyKit / y-sweet.
 >
-> Assumptions:
+> Original assumptions from the rejected proposal, not accepted project assumptions:
 >
 > - Collaboration is added within ~1 year, after 011's single-user Phase 3 spine exists, not before. This document is the forward contract that keeps that addition bounded, plus the cheap day-one insurance that must land even in the single-user build.
 > - Yjs (not Automerge, not OT/ShareDB) is the chosen CRDT, because the owned model is ProseMirror-shaped (011 §6) and the `y-prosemirror` binding is the closest existing blueprint, and because Yjs leads on performance and editor-binding ecosystem.
 > - The owned model's §6.1 single chokepoint exists and is inviolable. Without it this adaptation is not bounded and this document does not hold.
 > - The compatibility projection `RichTextEditorDocument` (010 G1) remains a required output; under collaboration it becomes a derived export of the `Y.Doc`, never a second source of truth.
 
+## 0. Rejection Decision
+
+Reject this proposal as the collaboration foundation. It replaces too much of the owned-model architecture with Yjs-native authority and would turn docs/011 into a projection layer rather than the editor's model contract.
+
+The decisive issue is not whether Yjs is a competent CRDT library. Yjs can synchronize text, maps, updates, relative positions, undo scopes, awareness, and subdocuments. The issue is fit. IDCO's owned editor is deliberately not a generic rich-text editor: docs/010 and docs/011 make the model, not the DOM, the source of truth so a book-scale document can virtualize; docs/012 already proves that model-owned selection, copy, paste, search, active-leaf input, and bounded mounting can work in a basic FlowSpike; docs/006 adds heavy objects, author-time baking, export-only static snapshots, data grids, mermaid, object chrome, strict renderer parity, and host schema boundaries. A Yjs-native document foundation does not carry those semantics. It would have to be wrapped until it behaves like the owned model, at which point Yjs is no longer the foundation; it is only an adapter candidate.
+
+Strong reasons for rejection:
+
+- It makes `Y.Doc` the authoritative document and demotes the docs/011 node graph to a derived read-model. That gives up the core owned-model premise: editor semantics live in our normalized model, not in a foreign shared-type graph.
+- It replaces the docs/011 mark model with `Y.Text` attributes and accepts Yjs formatting boundary behavior in place of our specified range-mark semantics. That is not an adapter; it changes text-format correctness.
+- It replaces the planned local history model with `Y.UndoManager` before proving equivalent single-user behavior. Collaborative undo is a separate requirement, but it should not erase the carefully scoped local history design.
+- It pushes code-block and object internals toward `Y.Text`, `Y.Map`, or subdocuments in ways that conflict with docs/006's heavy-object contract: resting baked output, in-place edit mode, mandatory export completeness, and object-owned validation.
+- It treats virtualization as a projection above Yjs. Yjs does not provide the FlowSpike property we need: offscreen content must remain selectable, searchable, copyable, pasteable, and editable through the owned model while only a bounded DOM window mounts. Yjs can sync data, but it does not prove that architecture.
+- It recommends Yjs update history as the durable truth and demotes `RichTextEditorDocument` to export. That is premature and cuts across the strict schema, renderer, host-union, and export contracts already established for book content.
+- It stacks a second hard bet on top of the new EditContext/hidden-textarea input architecture. The proven Yjs editor ecosystem is built around generic bindings and editor assumptions that are not the same as IDCO's active-leaf, overlay-painted, virtualized book editor.
+
+What may be salvaged into a future collaboration plan:
+
+- Globally unique node ids.
+- The absolute mutation chokepoint.
+- Provider-agnostic awareness as an optional remote-presence channel.
+- Relative positions as an adapter boundary for remote cursors, if they preserve owned-model selection semantics.
+- Headless two-client convergence tests.
+- A small Yjs spike shaped like FlowSpike, where the owned model remains authoritative and Yjs is only a replication adapter. If the existing FlowSpike invariants cannot remain green unchanged, the adapter does not fit.
+
 ## Table Of Contents
 
+- [0. Rejection Decision](#0-rejection-decision)
 - [1. Goal](#1-goal)
 - [2. System Summary: The One Inversion](#2-system-summary-the-one-inversion)
 - [3. Current-State Findings: What Helps, What Fights](#3-current-state-findings-what-helps-what-fights)
@@ -589,4 +619,8 @@ Collaboration is foundationally adopted when all hold:
 
 ## 17. Final Model
 
-The owned model was built single-user but collaboration-shaped, and that was deliberate (010 §12, 011 §16). Adopting Yjs is therefore one inversion plus a bounded set of swaps, not a rewrite: the `Y.Doc` becomes the document, the node graph becomes its derived read-model, and 011's one chokepoint becomes the one binding seam. Three foundations change — history becomes local-only `Y.UndoManager`, positions gain relative-position rebasing, marks become `Y.Text` formatting — and everything above the store (the painter, the input host, the view, the SPI) survives untouched. The danger is not in the parts this document changes; it is in the one cheap thing that must land before any of it (globally unique ids) and the one hard thing that must be spiked before it can be trusted (remote edits during IME composition). Land the day-one insurance in the single-user Phase 3, sequence the rest by convergence risk, and the year-later addition is weeks of bounded work rather than a teardown.
+Final verdict: reject this model.
+
+The owned model was built single-user but collaboration-aware, and that remains the right direction. The mistake in this proposal is treating Yjs as the collaborative foundation rather than as a possible adapter below the owned-model contract. The proposal's central inversion - `Y.Doc` becomes the document, the node graph becomes a derived read-model, marks become `Y.Text` formatting, history becomes `Y.UndoManager`, and persistence trends toward Yjs updates - is too large a replacement of docs/011.
+
+The future collaboration direction should keep docs/011 authoritative. A valid plan may borrow narrow pieces from this rejected proposal, but it must start from the opposite premise: IDCO's owned model, selection model, object lifecycle, bake/export contract, and virtualization invariants remain the source of truth. Any CRDT, including Yjs, has to prove itself as a bounded replication layer under those invariants, not redefine them.
