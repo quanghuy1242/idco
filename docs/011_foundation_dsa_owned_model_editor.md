@@ -19,7 +19,7 @@
 >
 > - `caretPositionFromPoint` / `caretRangeFromPoint` for pixel to text position.
 > - `Range.getClientRects()` / `getBoundingClientRect()` for text position to pixel geometry.
-> - CSS Custom Highlight API (`Highlight`, `CSS.highlights`, `::highlight()`) for native range painting without contenteditable.
+> - Engine-painted overlay rects from `Range.getClientRects()` for range painting without contenteditable (CSS Custom Highlight is an optional future optimization over the same ranges, not a contract this design stands on).
 > - `Intl.Segmenter` (UAX #29) for grapheme, word, and sentence segmentation.
 > - Hidden `<textarea>` / native `EditContext` for keyboard, IME, and clipboard capture plus an accessibility anchor.
 
@@ -426,7 +426,7 @@ dispatch(transaction):
   commit (doc', selectionAfter) to history                 // §7
   notify subscribers (per-node + selection)
     → changed leaves re-render; their offset↔node map rebuilds (§3.4)
-    → the selection view re-derives Ranges, repaints Highlight + caret (§8.5)
+    → the selection view re-derives Ranges, repaints overlay rects + caret (§8.5)
 ```
 
 `comparePoints` keeps document order truthful, `mapSelection` keeps the selection valid, and the per-leaf offset↔node map serves both the edit patch and the paint. The chokepoint (§6.1) guarantees the whole sequence runs on every change, so no path mutates the document and forgets to remap the selection or repaint. Miss one step and you get the classic owned-model failure: a selection that points at a node that no longer exists, or a highlight painted over stale geometry. The notify step is where the scheduler (docs/008) takes over: the model step lands on the `sync` lane, and the render and repaint coalesce onto one `frame` task (§7.3 of 010), so a keystroke never triggers a synchronous per-subscriber re-render.
@@ -736,7 +736,7 @@ The tractability invariant is exactly one active text leaf, and every input even
 
 ### 9.4 The IME composition state machine
 
-The sequence is `compositionstart` then N times `compositionupdate`/`textupdate` with a preedit range then `compositionend`. Mutations during composition are provisional; only `compositionend` commits a model step; preedit formatting (underline) is engine-painted (Custom Highlight ranges, §8.5), because a fully owned view gets no browser-drawn preedit. Backend quirks are the platform's behavior, to tolerate rather than fix by guessing: the Microsoft-Telex-on-Firefox trailing-`insertCompositionText` duplication (fixed in the spike) and the Firefox IME-language-switch dropping to plain `insertText` (010 §11, accepted) are both characterized, not patched by guessing.
+The sequence is `compositionstart` then N times `compositionupdate`/`textupdate` with a preedit range then `compositionend`. Mutations during composition are provisional; only `compositionend` commits a model step; preedit formatting (underline) is engine-painted (overlay rects / DOM spans over the preedit range, §8.5), because a fully owned view gets no browser-drawn preedit. Backend quirks are the platform's behavior, to tolerate rather than fix by guessing: the Microsoft-Telex-on-Firefox trailing-`insertCompositionText` duplication (fixed in the spike) and the Firefox IME-language-switch dropping to plain `insertText` (010 §11, accepted) are both characterized, not patched by guessing.
 
 ---
 
@@ -763,7 +763,7 @@ The scheduler core already exists (`plugins/editor-performance.ts`, docs/008): f
 | Lane | Engine work |
 | --- | --- |
 | `sync` | the synchronous tail of the input handler: step, active-leaf DOM patch, caret reposition. Not queued. |
-| `frame` | `requestAnimationFrame`, coalesce by dirty-set union: store-notify the dirty nodes, repaint the range Highlight, recompute the virtual window on scroll. |
+| `frame` | `requestAnimationFrame`, coalesce by dirty-set union: store-notify the dirty nodes, repaint the range overlay rects, recompute the virtual window on scroll. |
 | `idle` | incremental derived indexes (anchors, numbering, TOC, search), height measurement, neighbor prefetch. |
 | `debounced` | host `onChange`, serialize, object bake. |
 
@@ -776,7 +776,7 @@ The frame task carries a typed accumulator, not a document snapshot.
 ```
 StoreDirty = {
   nodes:     Set<NodeId>     // re-render these blocks
-  selection: boolean         // re-derive ranges, repaint Highlight
+  selection: boolean         // re-derive ranges, repaint overlay rects
   structure: boolean         // body order changed → recompute the virtual window
 }
 ```
@@ -784,7 +784,7 @@ StoreDirty = {
 `dispatch` fills it as steps apply; exactly one `frame` task drains and clears it. One writer, one reader. The coalesce policy is union on `nodes` and OR on the flags, so a burst of N steps collapses into one flush over the union. Four rules make it correct.
 
 - The active leaf is excluded from `nodes`. Its text is already on screen (the controller patched it, §11.2) and its snapshot is pinned, so a notify would be a no-op. Its text steps set `selection` and feed derived indexes; they do not add the leaf to the view-notify set, so the hot typing path contributes nothing to the frame's render work.
-- Collapsed-caret moves are `sync`, not `frame`: arrow navigation repositions the one caret element in the handler, so the caret never lags a frame. Only range selection (shift-arrow, drag) sets `selection` and coalesces the Highlight repaint onto the frame.
+- Collapsed-caret moves are `sync`, not `frame`: arrow navigation repositions the one caret element in the handler, so the caret never lags a frame. Only range selection (shift-arrow, drag) sets `selection` and coalesces the overlay-rect repaint onto the frame.
 - Flush order is structure, then nodes, then selection: mount and unmount before notifying nodes, finalize the DOM before deriving selection geometry. A node touched and then deleted in the same frame drops from `nodes` and rides `structure` for unmount.
 - The frame budget measures, it does not chunk. The flush is cheap; the cost is React rendering the dirty blocks, measured as the frame cost. Over budget is a recorded dropped frame, never a half-rendered tree carried to the next frame.
 
@@ -983,7 +983,7 @@ A consolidated, honest scorecard so no advantage is overclaimed.
 | Undo a whole-doc bulk delete | O(change) replay | Lexical: O(1) pointer swap | Lexical wins (one-time, checkpointable) |
 | Session history memory | O(total change) | O(distinct nodes) plus Map per entry | we win |
 | Cross-virtual selection / copy | structural (model holds range) | DOM-bound editors copy only on-screen | we win |
-| Selection painting quality | native via Custom Highlight | native via `::selection` | tie (pending §13 verify) |
+| Selection painting quality | engine overlay rects over real `Range` geometry | native via `::selection` | tie (overlay rects proven cross-browser in the spike) |
 | Desktop editing a11y | owned via ARIA, must design | inherited from contenteditable | contenteditable wins (our §8.7 cost) |
 | iOS loupe / handles | lost (optional per-block fallback) | native | native wins (our §8.7 cost) |
 | History robustness to undisciplined mutation | requires the §6.1 chokepoint | snapshots forgive anything | snapshots safer (we mitigate structurally, §7.4) |
