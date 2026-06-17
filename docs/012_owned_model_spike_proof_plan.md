@@ -33,7 +33,7 @@
 >
 > - The owned-model editor must not move to `docs/010` Phase 3 until the spike proves the foundation contracts in `docs/011`.
 > - Overlay rects are the honest painting baseline. CSS Custom Highlight may remain a future optimization, but the spike must prove engine-owned rect painting first.
-> - The existing `InputSpike` stays valuable and should be extended, not replaced.
+> - This spike **extends** the existing input substrate — `createTextInputController` (`packages/editor/src/owned-model/core/text-input-controller.ts`), the EditContext host (`editcontext-host.ts`), and the **vendored** polyfill under `packages/editor/src/owned-model/vendor/editcontext-polyfill/**`. It does not reimplement them (see 010 §10.2 "Reuse before rebuild"). `InputSpike` stays valuable and is extended, not replaced; `FlowSpike` adds only document-flow concerns on top of the same controller.
 > - Browser automation can replay and synthesize IME-shaped events, but it cannot prove real Microsoft Vietnamese Telex, UniKey Vietnamese Unicode, dead-key, or candidate-window behavior by itself.
 
 ## Table Of Contents
