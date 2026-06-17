@@ -320,6 +320,14 @@ export function createInputTranslator(
   // diffing out the common prefix/suffix and replacing the changed span. The
   // textarea is the real input sink, so its value is authoritative on `input`
   // (which fires after the mutation). Returns whether the model changed.
+  //
+  // Cost: O(n) per input event (n = EditContext buffer length) — two linear
+  // scans, no edit-distance matrix. The buffer mirrors the active block/leaf, so
+  // n stays block-sized and this is negligible. It does NOT short-circuit near
+  // the caret, so it is genuinely O(n) per keystroke; only pathological at
+  // MB-scale single buffers. If EditContext is ever bound to a whole (large)
+  // document, bound both scans to a window around the selection
+  // (textarea.selectionStart/End) to make this O(edit-size).
   function reconcileModelToTextarea(
     editContext: EditContextPolyfill,
   ): boolean {
