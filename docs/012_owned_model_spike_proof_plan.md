@@ -24,11 +24,17 @@
 > - `docs/008_editor_performance_contract.md`
 > - `docs/009_large_document_virtualized_editor_plan.md`
 >
+> External references:
+>
+> - Playwright Keyboard API: <https://playwright.dev/docs/api/class-keyboard>
+> - Chrome DevTools Protocol Input domain: <https://chromedevtools.github.io/devtools-protocol/tot/Input/>
+>
 > Assumptions:
 >
 > - The owned-model editor must not move to `docs/010` Phase 3 until the spike proves the foundation contracts in `docs/011`.
 > - Overlay rects are the honest painting baseline. CSS Custom Highlight may remain a future optimization, but the spike must prove engine-owned rect painting first.
 > - The existing `InputSpike` stays valuable and should be extended, not replaced.
+> - Browser automation can replay and synthesize IME-shaped events, but it cannot prove real Microsoft Vietnamese Telex, UniKey Vietnamese Unicode, dead-key, or candidate-window behavior by itself.
 
 ## Table Of Contents
 
@@ -47,6 +53,7 @@
   - [5.2 Add A Flow Spike Before Phase 3](#52-add-a-flow-spike-before-phase-3)
   - [5.3 Do Not Reintroduce Contenteditable](#53-do-not-reintroduce-contenteditable)
   - [5.4 Keep Spike Helpers Clearly Non-Public](#54-keep-spike-helpers-clearly-non-public)
+  - [5.5 Split Automated Simulation From Real IME Proof](#55-split-automated-simulation-from-real-ime-proof)
 - [6. Implementation Strategy](#6-implementation-strategy)
 - [7. Detailed Proof Plan](#7-detailed-proof-plan)
   - [7.1 InputSpike Hardening](#71-inputspike-hardening)
@@ -57,6 +64,7 @@
   - [7.6 Active Leaf And Dirty Node Proof](#76-active-leaf-and-dirty-node-proof)
   - [7.7 Virtualization And Performance Proof](#77-virtualization-and-performance-proof)
   - [7.8 Accessibility And Windows Manual Proof](#78-accessibility-and-windows-manual-proof)
+  - [7.9 IME Trace Recorder And Replay Fixtures](#79-ime-trace-recorder-and-replay-fixtures)
 - [8. Implementation Backlog](#8-implementation-backlog)
 - [9. Edge Cases And Failure Modes](#9-edge-cases-and-failure-modes)
 - [10. Verification Plan](#10-verification-plan)
@@ -66,7 +74,7 @@
 
 ## 1. Goal
 
-Prove the dangerous runtime edges of `docs/011` before starting `docs/010` Phase 3. The output of this plan is not a full editor and not the real document model. It is a strengthened spike suite that demonstrates the owned-model foundation can survive real browser input, overlay-painted selection, cross-block model selection, model clipboard, atomic objects, fake virtualization, active-leaf dirty isolation, and Windows-first manual checks.
+Prove the dangerous runtime edges of `docs/011` before starting `docs/010` Phase 3. The output of this plan is not a full editor and not the real document model. It is a strengthened spike suite that demonstrates the owned-model foundation can survive real browser input, overlay-painted selection, cross-block model selection, model clipboard, atomic objects, fake virtualization, active-leaf dirty isolation, and Windows-first manual checks that can become replayable regression fixtures.
 
 The short version:
 
@@ -147,7 +155,9 @@ The current spike is intentionally one plain text block. It does not prove:
 - Grapheme-aware left/right/delete. The current `InputSpike` uses one UTF-16 code unit for ArrowLeft and ArrowRight.
 - Large fake document performance with only a visible window mounted.
 - Screen reader behavior beyond focus outline.
-- Manual Windows IME behavior beyond captured/synthetic replay.
+- Real Windows IME behavior beyond captured/synthetic replay.
+- Candidate-window behavior from Microsoft Vietnamese Telex, UniKey Vietnamese Unicode, CJK IMEs, or dead-key/composition-key paths.
+- Whether a synthetic Playwright/CDP sequence exactly matches the current OS/browser/IME event order on a user's machine.
 
 ## 4. Target Proof Model
 
@@ -199,7 +209,7 @@ This intentionally updates the emphasis from `docs/011` §8.5. The same derived 
 | Risk | Existing InputSpike | New FlowSpike | Manual |
 | --- | --- | --- | --- |
 | Browser input backend | yes | reuse only | Windows smoke |
-| IME and preedit | yes | active-block switch only if added | Vietnamese/Telex, CJK if available |
+| IME and preedit | yes, plus trace replay | active-block switch only if added | Vietnamese Telex, UniKey, CJK/dead-key if available |
 | Caret geometry | yes | mounted block caret | visual smoke |
 | Overlay rect selection | one block | cross-block, object, virtual gaps | visual smoke |
 | Copy from model | no | yes | clipboard smoke |
@@ -264,6 +274,35 @@ Avoid:
 - Designing final Phase 3 store APIs inside the spike.
 - Reusing `RichTextEditorNode` as the runtime spike model.
 
+### 5.5 Split Automated Simulation From Real IME Proof
+
+Recommended: use a three-tier input proof model.
+
+Tier 1 is normal Playwright automation:
+
+- `keyboard.type()` for keydown/keypress/input/keyup shaped typing.
+- `keyboard.insertText()` for direct text insertion paths.
+- Pointer, selection, copy, paste, and keyboard navigation tests.
+
+Tier 2 is captured-event replay:
+
+- Manually capture real browser events from a Windows machine using Microsoft Vietnamese Telex, UniKey Vietnamese Unicode, dead-key/composition-key input, and CJK IMEs when available.
+- Store sanitized JSON fixtures under `tests/fixtures/owned-model-ime/`.
+- Replay those fixtures in Playwright against native and forced-polyfill stories.
+
+Tier 3 is manual real-device proof:
+
+- Run the same scenarios through the real OS IME and record observed behavior.
+- Treat failures as architecture blockers unless the doc names a deliberate platform limitation.
+
+Why:
+
+- Playwright's Keyboard API can generate key and input events, but `keyboard.insertText()` intentionally dispatches only `input` without keydown/keyup/keypress. That is useful for coverage, not equivalent to a real OS IME.
+- Chromium DevTools Protocol exposes experimental `Input.imeSetComposition` and `Input.insertText`, but those are Chromium-only automation hooks. They can emulate candidate text, not prove Microsoft Telex or UniKey behavior across Windows browsers.
+- The current idco IME history already showed that a final-text-only test can pass while the real composition lifecycle is still wrong. Transient hidden-textarea/preedit state matters.
+
+Rejected: mark IME as solved because Playwright can synthesize composition-like events. That gives false confidence on exactly the edge this architecture has to survive.
+
 ## 6. Implementation Strategy
 
 Sequence the work by risk, not by final engine layer.
@@ -275,7 +314,8 @@ Sequence the work by risk, not by final engine layer.
 5. Add render counters to prove active-leaf direct patching and dirty-node isolation.
 6. Add fake 1k/5k block stress with a visible window, using `calculateVirtualRange`.
 7. Add NVDA and Windows IME manual scripts.
-8. Only then allow Phase 3 to start.
+8. Add IME trace recording and replay fixtures for real Windows event streams.
+9. Only then allow Phase 3 to start.
 
 Each workstream should end with a passing automated check or an explicit manual log format. If a proof fails, fix the spike or update the architecture before Phase 3. Do not hide a failed proof behind a future implementation task.
 
@@ -528,6 +568,8 @@ Implementation tasks:
 - Run Windows Firefox polyfill path.
 - Run NVDA smoke on both.
 - Run Microsoft Vietnamese Telex manually on native and polyfill paths.
+- Run UniKey Vietnamese Unicode manually on native and polyfill paths when available.
+- Run one dead-key or composition-key path manually when available.
 - If available, run one CJK IME manual check.
 
 Manual evidence format:
@@ -543,6 +585,94 @@ Observed:
 Pass/Fail:
 Notes:
 ```
+
+### 7.9 IME Trace Recorder And Replay Fixtures
+
+Current problem:
+
+- Playwright cannot install or drive a user's real Microsoft Telex, UniKey Vietnamese Unicode, Windows language bar state, dead-key layout, candidate window, or IME conversion menu.
+- Synthetic `compositionstart`/`beforeinput`/`input` event dispatch can cover controller branches but can drift from browser-owned composition.
+- CDP IME APIs are Chromium automation hooks, so they cannot stand in for Firefox/WebKit polyfill behavior or real Windows IME integration.
+- Manual testing without captured artifacts is easy to forget, hard to compare, and not useful in CI.
+
+Target behavior:
+
+- `InputSpike` has a recorder mode that captures real event streams from the focused host and the hidden textarea/polyfill path.
+- Captured traces are sanitized and saved as fixtures.
+- Playwright replays those fixtures as regression tests.
+- The manual checklist records which real IMEs were available, which fixtures were captured, and which gaps remain unproven on the current machine.
+
+Trace fixture shape:
+
+```ts
+type OwnedImeTrace = {
+  schemaVersion: 1;
+  source: {
+    os: string;
+    browser: string;
+    backend: "native-editcontext" | "forced-polyfill" | "polyfill";
+    inputMethod: string;
+    story: string;
+    capturedAt: string;
+  };
+  scenario: {
+    name: string;
+    initialText: string;
+    initialSelection: { anchor: number; focus: number };
+    expectedFinalText: string;
+    expectedFinalSelection: { anchor: number; focus: number };
+  };
+  events: Array<{
+    atMs: number;
+    type:
+      | "keydown"
+      | "keyup"
+      | "compositionstart"
+      | "compositionupdate"
+      | "compositionend"
+      | "beforeinput"
+      | "input"
+      | "selectionchange"
+      | "paste";
+    key?: string;
+    code?: string;
+    data?: string | null;
+    inputType?: string;
+    isComposing?: boolean;
+    defaultPrevented?: boolean;
+    hostSelection?: { anchor: number; focus: number };
+    textarea?: { value: string; selectionStart: number; selectionEnd: number };
+    model?: { text: string; anchor: number; focus: number; preeditText?: string };
+  }>;
+};
+```
+
+Implementation tasks:
+
+- Add a recorder toggle to the `InputSpike` diagnostics surface.
+- Record `keydown`, `keyup`, `compositionstart`, `compositionupdate`, `compositionend`, `beforeinput`, `input`, `selectionchange`, and `paste`.
+- Capture both event fields and controller diagnostics after each event.
+- Capture hidden textarea value/selection during composition on the polyfill path.
+- Add an export button or diagnostics method that returns sanitized JSON.
+- Add fixtures under `tests/fixtures/owned-model-ime/`.
+- Add a replay helper in `tests/e2e/owned-model-input.spec.ts` or a small helper beside it.
+- For each replay, assert transient preedit/textarea checkpoints and final model text, not only final output.
+- Add a plain `<textarea>` recorder variant or small story area for baseline capture when diagnosing a browser/IME mismatch.
+
+Fixture scenarios:
+
+- Microsoft Vietnamese Telex: compose, commit, move caret, insert in the middle, delete during composition.
+- UniKey Vietnamese Unicode: compose, commit, move caret, paste over a selection.
+- Dead-key or composition key: compose accent, cancel composition, then type plain text.
+- CJK IME when available: candidate update, commit, caret move, delete.
+- Firefox forced/polyfill replay of any captured event stream that previously reproduced duplicate commit or selection desync.
+
+Acceptance criteria:
+
+- Each available real Windows IME has a captured manual evidence entry and a replay fixture.
+- Unavailable IMEs are listed as current lab gaps instead of being marked green.
+- Replays assert both transient composition state and final model state.
+- A replay failure blocks Phase 3 unless the architecture doc names a deliberate platform limitation.
 
 ## 8. Implementation Backlog
 
@@ -739,15 +869,50 @@ Tasks:
 - [ ] Add manual Windows Firefox polyfill checklist.
 - [ ] Add NVDA smoke checklist.
 - [ ] Add Microsoft Vietnamese Telex manual checklist.
+- [ ] Add UniKey Vietnamese Unicode manual checklist when available.
+- [ ] Add dead-key/composition-key manual checklist when available.
 - [ ] Add CJK manual checklist if an IME is available.
 
 Acceptance criteria:
 
 - Manual proof has repeatable steps and a stable evidence format.
+- The manual proof clearly separates "tested on this machine" from "not available on this machine".
 
 Tests:
 
 - Manual only.
+
+### R12-J. Add IME Trace Recorder And Replay Fixtures
+
+Scope:
+
+- `stories/owned-model-input.stories.tsx`
+- `packages/editor/src/owned-model/core/text-input-controller.ts`
+- `tests/e2e/owned-model-input.spec.ts`
+- `tests/fixtures/owned-model-ime/*.json`
+
+Tasks:
+
+- [ ] Add recorder mode to `InputSpike`.
+- [ ] Capture real event streams with controller diagnostics.
+- [ ] Capture hidden textarea value/selection during composition.
+- [ ] Export sanitized trace JSON.
+- [ ] Add fixture schema validation in tests.
+- [ ] Add Playwright replay helper.
+- [ ] Replay Microsoft Vietnamese Telex and UniKey fixtures when available.
+- [ ] Replay dead-key/composition-key and CJK fixtures when available.
+- [ ] Assert transient preedit state, hidden textarea state, selection, and final model text.
+- [ ] Add a plain textarea baseline capture path for comparison.
+
+Acceptance criteria:
+
+- Real Windows IME traces become durable fixtures.
+- Playwright replay is treated as regression coverage, not as proof that every OS IME still behaves the same today.
+- Missing IME coverage is explicit in the manual evidence log.
+
+Tests:
+
+- `pnpm exec playwright test tests/e2e/owned-model-input.spec.ts --project=chromium --project=webkit --project=firefox`
 
 ## 9. Edge Cases And Failure Modes
 
@@ -756,6 +921,9 @@ Tests:
 - IME composition desyncs hidden textarea and model: do not rewrite the textarea full value during composition; sync after composition ends.
 - Firefox Telex trailing `insertCompositionText` repeats committed text: keep the captured event stream regression.
 - Windows IME language switch emits plain text instead of composition: treat this as platform behavior unless a safe backend-level signal appears.
+- Playwright IME replay passes but real Microsoft Telex or UniKey fails: treat replay as stale or incomplete, capture a new trace, and fix the architecture/test contract before Phase 3.
+- CDP IME emulation passes in Chromium: do not count that as Firefox/WebKit or real Windows IME proof.
+- Manual capture contains private text: discard it and recapture with short deterministic fixture text.
 - Grapheme movement splits emoji or combining text: block Phase 3 until `Intl.Segmenter` navigation is proven.
 - Object adapter missing: copy/search/export must use explicit unsupported/fallback behavior, never silent skip.
 - Offscreen selected block unmounted: selection remains in the model, overlay rects omit only the invisible DOM, copy still includes it.
@@ -795,7 +963,17 @@ Manual Windows smoke:
 - Firefox: polyfill path.
 - NVDA: focus and selection announcement smoke.
 - Microsoft Vietnamese Telex: type, compose, move caret, switch block, paste.
+- UniKey Vietnamese Unicode: type, compose, move caret, paste over selection when available.
+- Dead-key or composition-key layout: compose, cancel, commit when available.
 - CJK IME if available: compose, commit, move caret, delete.
+
+IME trace replay:
+
+- Capture real Windows IME traces from the recorder mode.
+- Store sanitized fixtures under `tests/fixtures/owned-model-ime/`.
+- Replay fixtures in Playwright across native Chromium and forced-polyfill projects.
+- Assert transient hidden textarea and preedit checkpoints in addition to final text.
+- Keep a manual evidence row beside every captured fixture.
 
 ## 11. Definition Of Done
 
@@ -810,6 +988,8 @@ Phase 2.5 is done when all are true:
 - `FlowSpike` proves active-leaf direct patching and dirty-node render isolation.
 - `FlowSpike` proves bounded mounting for a fake large document.
 - Manual Windows IME and NVDA smoke results are recorded.
+- Available real Windows IME checks have captured trace fixtures and Playwright replay tests.
+- Unavailable real IME checks are listed as explicit lab gaps, not counted as passed.
 - The code and docs agree that overlay rects are the baseline painter.
 - No `contenteditable` path is introduced.
 - No Phase 3 runtime store or public owned-model API is introduced as part of the spike.
