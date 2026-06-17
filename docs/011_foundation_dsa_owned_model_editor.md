@@ -156,6 +156,8 @@ Virtualization windows over the body's top-level `children` (the body order arra
 
 An atomic object's internal structure (a table's `row → cell → block` grid, §2.4) lives inside the object's opaque `data`, not in the main `nodes` Map. The outer engine never addresses a node inside a live object and never compares points across the boundary. While an object rests it is a baked snapshot. While it is live it runs its own internal model and selection, and the outer document's selection over it is a single `{type:"node", node: objectId}` (§8.2). This keeps `comparePoints` (§5.4) scoped to the outer tree, keeps focus and selection arbitration to one surface at a time (010 §6.4), and makes each heavy object a self-contained sub-engine. The cost is that an object like a table reimplements a small internal selection model, which stays isolated and bounded.
 
+Opaque to the outer mutation engine does not mean invisible to document services. A `BlockDefinition` for an object with meaningful internal content must expose object-level adapters for whole-node copy, plain-text search, export/bake completeness, and any indexable anchors it owns. The outer selection still treats the object as one unit; when that unit is copied, searched, exported, or indexed, the object definition supplies the internal projection. If a definition omits an adapter, the service treats the object as atomic and uses the baked fallback or reports the capability as unsupported, never silently pretending table cells or code lines were searched.
+
 ---
 
 ## 3. Text Representation: The Per-Leaf DSA
@@ -186,13 +188,15 @@ The only cost of this choice is eating an O(n) string copy on a degenerate huge 
 
 ### 3.3 The active leaf's text lives in the browser's input buffer
 
-While a leaf is being edited, its authoritative mutable text is the browser's input buffer (the hidden `<textarea>` or `EditContext`). That buffer is a native, gap-buffer-grade mutable text structure the platform maintains for free. Three consequences follow.
+While a leaf is being edited, its authoritative mutable text is an `ActiveLeafDraft` backed by the browser's input buffer (the hidden `<textarea>` or `EditContext`). That buffer is a native, gap-buffer-grade mutable text structure the platform maintains for free. The frozen node object stays pinned for React (§11.2), but the store's read path is still current: reads of the active leaf return `draft.currentText`; reads of inactive leaves return the frozen node string.
 
-- We do not rebuild the model string per keystroke. Each input event hands us a diff `(at, removed, inserted)`.
-- Marks remap off the diff (§4.5). The DOM patches off the diff (§3.4).
-- The immutable model string for that leaf materializes once, lazily, on deactivation, or when a non-active reader or serializer asks.
+Three consequences follow.
 
-Per-keystroke string cost during active editing rounds to zero. Inactive leaves stay immutable strings, optimal for reading, structural sharing, and serialization.
+- We do not replace the frozen node string per keystroke. Each input event hands us a diff `(at, removed, inserted)`, and `dispatch` records the corresponding `ReplaceText` step immediately.
+- Marks, atoms, history, and selection remap off that diff (§4.5, §8.8), so the model is current after every keystroke even though React still sees the pinned snapshot.
+- The immutable node string materializes from the draft on deactivation, on a discrete structural command that needs a rerender, or when a non-active reader/serializer asks for the canonical snapshot.
+
+Per-keystroke frozen-string cost during active editing rounds to zero. Inactive leaves stay immutable strings, optimal for reading, structural sharing, and serialization.
 
 ### 3.4 DOM update: locate the exact styling node, patch it, bypass the framework
 
@@ -676,6 +680,8 @@ Because painting depends on this API, its cross-browser behavior (caret and IME 
 - Accessibility. No browser API gives screen-reader-correct editing accessibility without `contenteditable` or a native input. The hidden textarea buys a `textbox` the screen reader sees, but reconciling its linear view with the virtualized rich render is real work: `role="textbox"`, `aria-multiline`, `aria-activedescendant` for the focused block or object, and live-region selection announcements. This is 010 §11's "a11y must be designed, not inherited," and it is the price of rejecting the editing host. Treat it as a first-class workstream, not a checkbox.
 - iOS native text affordances. The selection loupe, the magnifier, and the drag handles are tied to native editable content, so custom selection loses them. The hidden textarea still provides the iOS keyboard and basic touch. The optional escape (010 §5.8) is native `contenteditable` on the single active block on iOS only, possible because exactly one block is active, which restores the loupe there without making the architecture contenteditable.
 
+Both costs need binary gates before this becomes a product surface. The accessibility gate is: keyboard-only editing works, the focused block/object is reflected through `aria-activedescendant`, selection changes are announced without flooding, copy/cut/paste work from the hidden host, and NVDA plus VoiceOver smoke tests agree with the model selection. The iOS gate is a product decision, not an engineering shrug: either accept no loupe/handles for the owned surface and document it, or implement the single-active-block native `contenteditable` fallback and prove model authority survives typing, selection, paste, and blur.
+
 ### 8.8 The selection remap contract
 
 `mapSelection(sel, steps)` runs inside `dispatch` (§6.7) after `apply`, before subscribers are notified. A command may set `selectionAfter` explicitly (Select All, a click); otherwise the mapped result is the default: `selectionAfter = command ?? mapSelection(selectionBefore, steps)`. The transaction carries a `touchedNodes: Set<NodeId>` so `mapPoint` early-outs in O(1) for the common case, editing block X with the selection in block X and every other node untouched. That early-out is the node-relative payoff (§5.1).
@@ -1006,7 +1012,7 @@ The choices below are recommended here but not yet locked. Each is isolated enou
 
 - Marks: range-array versus marked-run nodes. Recommended: range-array over a flat string (§4.4) for the hot-path allocation win; marked-run nodes are more compat-faithful but churn objects per keystroke. Open only if a profiling case argues otherwise.
 - Body order: array versus fractional order-keys. Recommended: array now, order-keys as the named upgrade (§13.8) when O(n) splices or collaboration make them worth it.
-- CSS Custom Highlight API cross-browser behavior. The paint story (§8.5) rests on it, so its caret and IME-preedit behavior on WebKit and Firefox needs verification on the real three-browser matrix before commitment. This is the single external dependency to retire first.
+- CSS Custom Highlight API cross-browser behavior. The paint story (§8.5) rests on it, so retire this before multi-block selection work: in Chromium, WebKit, and Firefox, prove range painting, IME-preedit underline painting, `user-select: none` interaction, and relayout invalidation against real rendered text. If any browser fails, the fallback is not a new selection model; the same `deriveRanges` output feeds absolute overlay rects from `Range.getClientRects()`, and the failing browser is marked overlay-backed in the conformance matrix.
 - iOS active-block `contenteditable` fallback. Whether to restore the iOS loupe via native `contenteditable` on the single active block (§8.7) or accept its absence is a product call, deferred but designed-for.
 - Periodic history checkpoints. Whether to cap bulk-undo replay with a snapshot every K transactions (§7.3) is a lever named, not pulled.
-- **The intra-transaction `Mapping` in node-relative coordinates (the internal-core open item, left for review).** The transaction builder (§6.10) maps a position through earlier steps in the same transaction, so a multi-step command can target a post-edit position. ProseMirror's `Mapping` operates on flat integer positions; ours are `(NodeId, offset)`. Mapping an offset through a same-node `ReplaceText` is the §8.8 rule and is settled. Mapping a `Point` through a structural step earlier in the same transaction is not: when an earlier step removes, splits, or moves the node the point names, does the point follow the moved node by id, relocate to a boundary as in §8.8's delete case, or is it the command's responsibility never to build such a sequence. This is the one internal-core pattern deliberately left open.
+- **The intra-transaction `Mapping` in node-relative coordinates (the internal-core open item, with a recommended default).** The transaction builder (§6.10) maps a position through earlier steps in the same transaction, so a multi-step command can target a post-edit position. Same-node `ReplaceText` uses the §8.8 rule. Structural mapping should default to: points follow a `MoveNode` by id; points inside a removed node or removed ancestor relocate to the deletion boundary by bias; split/merge commands must provide explicit point redirects for the newly minted or absorbed node ids; and commands may not depend on an implicit "point inside removed structure" rule beyond that boundary relocation. Keep this open only until the first split/merge implementation lands, then lock it with property tests for split, merge, move, delete, undo, and redo.
