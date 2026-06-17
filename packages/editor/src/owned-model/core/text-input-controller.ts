@@ -30,6 +30,7 @@ export type OwnedInputDiagnostics = TextInputState & {
   readonly composing: boolean;
   readonly focused: boolean;
   readonly lastEvent: string;
+  readonly lastClipboardText: string;
   readonly caretLeft: number;
   readonly caretTop: number;
   readonly caretHeight: number;
@@ -48,9 +49,19 @@ export type CreateTextInputControllerOptions = {
   readonly textElement: HTMLElement;
   readonly overlayElement: HTMLElement;
   readonly initialText?: string;
+  readonly initialSelection?: {
+    readonly anchor: number;
+    readonly focus: number;
+  };
   readonly forcePolyfill?: boolean;
   /** Publish diagnostics onto `window.__IDCO_OWNED_INPUT__` for the spike. */
   readonly publishGlobal?: boolean;
+  /**
+   * Project controller state into another spike shell. This keeps the
+   * EditContext/native-polyfill input loop centralized while FlowSpike mirrors
+   * the active leaf into its wider model.
+   */
+  readonly onStateChange?: (diagnostics: OwnedInputDiagnostics) => void;
 };
 
 const GLOBAL_KEY = "__IDCO_OWNED_INPUT__";
@@ -158,6 +169,61 @@ function isWordCharacter(char: string | undefined): boolean {
   return char !== undefined && /[\p{L}\p{N}_]/u.test(char);
 }
 
+type SegmentLike = {
+  readonly index: number;
+};
+
+type SegmenterLike = {
+  readonly segment: (input: string) => Iterable<SegmentLike>;
+};
+
+type SegmenterConstructorLike = new (
+  locale: string | undefined,
+  options: { granularity: "grapheme" },
+) => SegmenterLike;
+
+function graphemeBoundaries(text: string): readonly number[] {
+  const ctor = (Intl as { Segmenter?: SegmenterConstructorLike }).Segmenter;
+  if (typeof ctor === "function") {
+    return [
+      ...new Set([
+        0,
+        ...Array.from(
+          new ctor(undefined, { granularity: "grapheme" }).segment(text),
+          (segment) => segment.index,
+        ),
+        text.length,
+      ]),
+    ].sort((a, b) => a - b);
+  }
+
+  const boundaries = [0];
+  let offset = 0;
+  for (const chunk of Array.from(text)) {
+    offset += chunk.length;
+    boundaries.push(offset);
+  }
+  return boundaries;
+}
+
+function previousGraphemeBoundary(text: string, offset: number): number {
+  const target = Math.min(Math.max(0, offset), text.length);
+  const boundaries = graphemeBoundaries(text);
+  for (let index = boundaries.length - 1; index >= 0; index -= 1) {
+    const boundary = boundaries[index] ?? 0;
+    if (boundary < target) return boundary;
+  }
+  return 0;
+}
+
+function nextGraphemeBoundary(text: string, offset: number): number {
+  const target = Math.min(Math.max(0, offset), text.length);
+  for (const boundary of graphemeBoundaries(text)) {
+    if (boundary > target) return boundary;
+  }
+  return text.length;
+}
+
 /**
  * Normalize platform IME underline styles to CSS values the DOM renderer can
  * apply. Unknown values fall back to a solid underline because a visible
@@ -237,8 +303,10 @@ export function createTextInputController(
     textElement,
     overlayElement,
     initialText = "",
+    initialSelection,
     forcePolyfill = false,
     publishGlobal = false,
+    onStateChange,
   } = options;
 
   const editHost = createEditContextHost({ host, initialText, forcePolyfill });
@@ -254,8 +322,14 @@ export function createTextInputController(
 
   const state: TextInputState = {
     text: initialText,
-    anchor: initialText.length,
-    focus: initialText.length,
+    anchor: Math.min(
+      Math.max(0, initialSelection?.anchor ?? initialText.length),
+      initialText.length,
+    ),
+    focus: Math.min(
+      Math.max(0, initialSelection?.focus ?? initialText.length),
+      initialText.length,
+    ),
   };
   let boldMarks: DemoBoldMark[] = [];
   let compositionFormats: CompositionFormat[] = [];
@@ -264,6 +338,7 @@ export function createTextInputController(
   let composing = false;
   let focused = hostOwnsFocus(host);
   let lastEvent = "init";
+  let lastClipboardText = "";
   let dragging = false;
   let lastPointerOffset = state.focus;
   let lastOverlayInfo: OverlayRenderInfo = {
@@ -273,6 +348,12 @@ export function createTextInputController(
     rectCount: 0,
     usedAddRange: false,
   };
+
+  editContext.updateSelection(
+    Math.min(state.anchor, state.focus),
+    Math.max(state.anchor, state.focus),
+  );
+  editHost.syncInputSelection();
 
   /**
    * Return sorted, clamped bold ranges for the temporary Ctrl+B demo. This is
@@ -424,19 +505,21 @@ export function createTextInputController(
       focused,
     });
     lastOverlayInfo = info;
+    const diagnostics: OwnedInputDiagnostics = {
+      ...state,
+      inputBackend: editHost.backend,
+      composing,
+      focused,
+      lastEvent,
+      lastClipboardText,
+      caretLeft: info.caretLeft,
+      caretTop: info.caretTop,
+      caretHeight: info.caretHeight,
+      rectCount: info.rectCount,
+      usedAddRange: info.usedAddRange,
+    };
+    onStateChange?.(diagnostics);
     if (publishGlobal && typeof window !== "undefined") {
-      const diagnostics: OwnedInputDiagnostics = {
-        ...state,
-        inputBackend: editHost.backend,
-        composing,
-        focused,
-        lastEvent,
-        caretLeft: info.caretLeft,
-        caretTop: info.caretTop,
-        caretHeight: info.caretHeight,
-        rectCount: info.rectCount,
-        usedAddRange: info.usedAddRange,
-      };
       (window as unknown as Record<string, unknown>)[GLOBAL_KEY] = diagnostics;
     }
   }
@@ -449,6 +532,39 @@ export function createTextInputController(
       Math.max(state.anchor, state.focus),
     );
     editHost.syncInputSelection();
+  }
+
+  function replaceModelText(
+    rangeStart: number,
+    rangeEnd: number,
+    text: string,
+  ): void {
+    const result = editHost.replaceText(rangeStart, rangeEnd, text);
+    state.text = result.text;
+    state.anchor = result.selectionStart;
+    state.focus = result.selectionEnd;
+    boldMarks = [];
+    compositionFormats = [];
+    invalidateTextSurface();
+  }
+
+  function selectionRange(): DemoBoldMark {
+    return {
+      start: Math.min(state.anchor, state.focus),
+      end: Math.max(state.anchor, state.focus),
+    };
+  }
+
+  function selectedText(): string {
+    const range = selectionRange();
+    return state.text.slice(range.start, range.end);
+  }
+
+  function writeClipboardData(event: ClipboardEvent, text: string): void {
+    event.clipboardData?.setData("text/plain", text);
+    lastClipboardText = text;
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   /**
@@ -679,6 +795,8 @@ export function createTextInputController(
       event.stopPropagation();
     }
 
+    if (composing) return;
+
     // Enter is an editor text command, not a backend workaround. Route it
     // through the same EditContext replacement helper for native and polyfill
     // implementations so the visible model never depends on textarea defaults.
@@ -686,11 +804,7 @@ export function createTextInputController(
       event.preventDefault();
       const lo = Math.min(state.anchor, state.focus);
       const hi = Math.max(state.anchor, state.focus);
-      const result = editHost.replaceText(lo, hi, "\n");
-      state.text = result.text;
-      state.anchor = result.selectionStart;
-      state.focus = result.selectionEnd;
-      invalidateTextSurface();
+      replaceModelText(lo, hi, "\n");
       lastEvent = "key:Enter";
       paint();
       return;
@@ -701,11 +815,31 @@ export function createTextInputController(
     let handled = true;
     switch (event.key) {
       case "ArrowLeft":
-        focus = state.focus - 1;
+        focus = previousGraphemeBoundary(state.text, state.focus);
         break;
       case "ArrowRight":
-        focus = state.focus + 1;
+        focus = nextGraphemeBoundary(state.text, state.focus);
         break;
+      case "Backspace": {
+        const range = selectionRange();
+        const start =
+          range.start === range.end
+            ? previousGraphemeBoundary(state.text, state.focus)
+            : range.start;
+        const end = range.start === range.end ? state.focus : range.end;
+        replaceModelText(start, end, "");
+        break;
+      }
+      case "Delete": {
+        const range = selectionRange();
+        const start = range.start === range.end ? state.focus : range.start;
+        const end =
+          range.start === range.end
+            ? nextGraphemeBoundary(state.text, state.focus)
+            : range.end;
+        replaceModelText(start, end, "");
+        break;
+      }
       case "ArrowUp":
         focus = offsetFromVerticalMove(-1);
         break;
@@ -724,7 +858,38 @@ export function createTextInputController(
     if (!handled) return;
     event.preventDefault();
     lastEvent = `key:${event.key}`;
-    setSelection(extend ? state.anchor : focus, focus);
+    if (event.key !== "Backspace" && event.key !== "Delete") {
+      setSelection(extend ? state.anchor : focus, focus);
+    }
+    paint();
+  }
+
+  function onCopy(event: ClipboardEvent): void {
+    lastEvent = "clipboard:copy";
+    writeClipboardData(event, selectedText());
+    paint();
+  }
+
+  function onCut(event: ClipboardEvent): void {
+    const range = selectionRange();
+    lastEvent = "clipboard:cut";
+    writeClipboardData(event, state.text.slice(range.start, range.end));
+    if (range.end > range.start) {
+      replaceModelText(range.start, range.end, "");
+    }
+    paint();
+  }
+
+  function onPaste(event: ClipboardEvent): void {
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    const range = selectionRange();
+    lastClipboardText = text;
+    lastEvent = "clipboard:paste";
+    event.preventDefault();
+    event.stopPropagation();
+    if (text.length > 0 || range.end > range.start) {
+      replaceModelText(range.start, range.end, text);
+    }
     paint();
   }
 
@@ -821,6 +986,9 @@ export function createTextInputController(
   host.addEventListener("pointermove", onPointerMove);
   host.addEventListener("pointerup", onPointerUp);
   host.addEventListener("click", onClick);
+  host.addEventListener("copy", onCopy);
+  host.addEventListener("cut", onCut);
+  host.addEventListener("paste", onPaste);
 
   paint();
 
@@ -835,6 +1003,7 @@ export function createTextInputController(
       composing,
       focused,
       lastEvent,
+      lastClipboardText,
       caretLeft: lastOverlayInfo.caretLeft,
       caretTop: lastOverlayInfo.caretTop,
       caretHeight: lastOverlayInfo.caretHeight,
@@ -855,6 +1024,9 @@ export function createTextInputController(
     host.removeEventListener("pointermove", onPointerMove);
     host.removeEventListener("pointerup", onPointerUp);
     host.removeEventListener("click", onClick);
+    host.removeEventListener("copy", onCopy);
+    host.removeEventListener("cut", onCut);
+    host.removeEventListener("paste", onPaste);
     overlay.destroy();
     editHost.destroy();
     if (publishGlobal && typeof window !== "undefined") {

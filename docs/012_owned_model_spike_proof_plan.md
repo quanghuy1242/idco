@@ -43,7 +43,8 @@
 - [3. Current-State Findings](#3-current-state-findings)
   - [3.1 Existing Spike Files](#31-existing-spike-files)
   - [3.2 What The Current Spike Already Proves](#32-what-the-current-spike-already-proves)
-  - [3.3 What The Current Spike Does Not Prove](#33-what-the-current-spike-does-not-prove)
+  - [3.3 What The Pre-Implementation Spike Did Not Prove](#33-what-the-pre-implementation-spike-did-not-prove)
+  - [3.4 Implementation State - 2026-06-17](#34-implementation-state---2026-06-17)
 - [4. Target Proof Model](#4-target-proof-model)
   - [4.1 Two Spike Surfaces](#41-two-spike-surfaces)
   - [4.2 Overlay Rects As The Baseline](#42-overlay-rects-as-the-baseline)
@@ -139,9 +140,9 @@ The current spike health check command is:
 pnpm exec playwright test tests/e2e/owned-model-input.spec.ts --project=chromium --project=webkit --project=firefox
 ```
 
-### 3.3 What The Current Spike Does Not Prove
+### 3.3 What The Pre-Implementation Spike Did Not Prove
 
-The current spike is intentionally one plain text block. It does not prove:
+Before the 2026-06-17 Phase 2.5 implementation, the spike was intentionally one plain text block. It did not prove:
 
 - Cross-block text selection.
 - Gap cursor behavior between two atomic blocks.
@@ -158,6 +159,16 @@ The current spike is intentionally one plain text block. It does not prove:
 - Real Windows IME behavior beyond captured/synthetic replay.
 - Candidate-window behavior from Microsoft Vietnamese Telex, UniKey Vietnamese Unicode, CJK IMEs, or dead-key/composition-key paths.
 - Whether a synthetic Playwright/CDP sequence exactly matches the current OS/browser/IME event order on a user's machine.
+
+### 3.4 Implementation State - 2026-06-17
+
+The Phase 2.5 automated spike is now implemented without replacing the existing `InputSpike`.
+
+- `InputSpike` still owns browser input, IME, caret, selection, native/forced-polyfill parity, and focus proof. It now also covers grapheme-aware ArrowLeft/ArrowRight/Backspace/Delete, one-block model copy/paste, IME trace recording, a plain `<textarea>` baseline capture area, and a replay fixture at `tests/fixtures/owned-model-ime/firefox-telex-xin-chao.json`.
+- `FlowSpike` lives in `stories/owned-model-flow.stories.tsx` with `Small`, `ForcedPolyfill`, `Large`, and `Huge` variants. Its active text leaf mounts `createTextInputController`; it does not fake ordinary text input. Flow-specific code owns node-relative selection, object/gap selection, overlay rects, model copy/paste, object projection, render counters, dirty diagnostics, and bounded fake virtualization.
+- `tests/e2e/owned-model-flow.spec.ts` proves active-leaf controller reuse, forced-polyfill reuse, sibling render isolation, cross-block/object/gap selection, model copy through an unmounted block, explicit missing-object adapter behavior, model paste, large offscreen copy, and scroll-driven remounting of the visible virtual window.
+- Verified automated matrix: `pnpm exec playwright test tests/e2e/owned-model-input.spec.ts tests/e2e/owned-model-flow.spec.ts --project=chromium --project=webkit --project=firefox` → 55 passed, 2 Chromium-only focus-comparison skips on non-Chromium projects.
+- Manual Windows/NVDA proof is still a lab gap in this Linux environment. The spike provides the recorder and evidence format, but real Microsoft Vietnamese Telex, UniKey, dead-key/CJK IME, candidate-window, and NVDA runs still need a Windows machine before Phase 3 can claim full manual coverage.
 
 ## 4. Target Proof Model
 
@@ -688,9 +699,9 @@ Scope:
 
 Tasks:
 
-- [ ] Update comments and acceptance wording so overlay rect painting is the baseline.
-- [ ] Keep native DOM selection non-authoritative and visually suppressed.
-- [ ] Move any CSS Custom Highlight requirement to future backlog.
+- [x] Update comments and acceptance wording so overlay rect painting is the baseline.
+- [x] Keep native DOM selection non-authoritative and visually suppressed.
+- [x] Move any CSS Custom Highlight requirement to future backlog.
 
 Acceptance criteria:
 
@@ -710,9 +721,9 @@ Scope:
 
 Tasks:
 
-- [ ] Add an `Intl.Segmenter`-based grapheme helper.
-- [ ] Use it for ArrowLeft, ArrowRight, Backspace, and Delete.
-- [ ] Add tests for emoji, surrogate pairs, and Vietnamese combining text.
+- [x] Add an `Intl.Segmenter`-based grapheme helper.
+- [x] Use it for ArrowLeft, ArrowRight, Backspace, and Delete.
+- [x] Add tests for emoji, surrogate pairs, and Vietnamese combining text.
 
 Acceptance criteria:
 
@@ -731,9 +742,9 @@ Scope:
 
 Tasks:
 
-- [ ] Handle copy from `state.text`.
-- [ ] Handle plain-text paste into `state.text`.
-- [ ] Assert clipboard behavior through Playwright.
+- [x] Handle copy from `state.text`.
+- [x] Handle plain-text paste into `state.text`.
+- [x] Assert clipboard behavior through Playwright.
 
 Acceptance criteria:
 
@@ -752,10 +763,10 @@ Scope:
 
 Tasks:
 
-- [ ] Add a multi-block story with three text blocks and one atomic object.
-- [ ] Add model selection diagnostics.
-- [ ] Add mounted/unmounted block toggle.
-- [ ] Add render counters and dirty diagnostics.
+- [x] Add a multi-block story with three text blocks and one atomic object.
+- [x] Add model selection diagnostics.
+- [x] Add mounted/unmounted block toggle.
+- [x] Add render counters and dirty diagnostics.
 
 Acceptance criteria:
 
@@ -774,10 +785,10 @@ Scope:
 
 Tasks:
 
-- [ ] Implement node-relative text selection in the spike.
-- [ ] Implement object and gap selection.
-- [ ] Paint text and object overlay rects.
-- [ ] Clip painting to mounted blocks while preserving full model selection.
+- [x] Implement node-relative text selection in the spike.
+- [x] Implement object and gap selection.
+- [x] Paint text and object overlay rects.
+- [x] Clip painting to mounted blocks while preserving full model selection.
 
 Acceptance criteria:
 
@@ -796,11 +807,11 @@ Scope:
 
 Tasks:
 
-- [ ] Serialize model ranges to clipboard text.
-- [ ] Include unmounted block text.
-- [ ] Include object adapter text when present.
-- [ ] Make missing object adapter behavior explicit.
-- [ ] Paste plain text over a cross-block selection.
+- [x] Serialize model ranges to clipboard text.
+- [x] Include unmounted block text.
+- [x] Include object adapter text when present.
+- [x] Make missing object adapter behavior explicit.
+- [x] Paste plain text over a cross-block selection.
 
 Acceptance criteria:
 
@@ -819,11 +830,11 @@ Scope:
 
 Tasks:
 
-- [ ] Track `activeLeafId`.
-- [ ] Direct-patch active text during plain typing.
-- [ ] Track render counts per block.
-- [ ] Track dirty nodes, selection dirty, and structure dirty.
-- [ ] Add structural command that causes a deliberate rerender.
+- [x] Track `activeLeafId`.
+- [x] Direct-patch active text during plain typing.
+- [x] Track render counts per block.
+- [x] Track dirty nodes, selection dirty, and structure dirty.
+- [x] Add structural command that causes a deliberate rerender.
 
 Acceptance criteria:
 
@@ -844,10 +855,12 @@ Scope:
 
 Tasks:
 
-- [ ] Add 1,000 and 5,000 block fake document modes.
-- [ ] Use `calculateVirtualRange`.
-- [ ] Assert mounted count stays bounded.
-- [ ] Assert programmatic cross-virtual copy includes offscreen text.
+- [x] Add 1,000 block fake document mode.
+- [x] Add 5,000 block fake document mode.
+- [x] Use `calculateVirtualRange`.
+- [x] Assert mounted count stays bounded.
+- [x] Assert scrolling remounts the visible virtual window.
+- [x] Assert programmatic cross-virtual copy includes offscreen text.
 
 Acceptance criteria:
 
@@ -882,6 +895,10 @@ Tests:
 
 - Manual only.
 
+Current lab status:
+
+- Not executed in this Linux/Playwright environment: Windows Chrome/Edge native EditContext, Windows Firefox polyfill, NVDA, real Microsoft Vietnamese Telex candidate-window behavior, UniKey Vietnamese Unicode, dead-key/composition-key, and CJK IME. These remain Phase 3 blockers until run on a Windows machine and recorded with the evidence format above.
+
 ### R12-J. Add IME Trace Recorder And Replay Fixtures
 
 Scope:
@@ -893,16 +910,16 @@ Scope:
 
 Tasks:
 
-- [ ] Add recorder mode to `InputSpike`.
-- [ ] Capture real event streams with controller diagnostics.
-- [ ] Capture hidden textarea value/selection during composition.
-- [ ] Export sanitized trace JSON.
-- [ ] Add fixture schema validation in tests.
-- [ ] Add Playwright replay helper.
-- [ ] Replay Microsoft Vietnamese Telex and UniKey fixtures when available.
+- [x] Add recorder mode to `InputSpike`.
+- [x] Capture real event streams with controller diagnostics.
+- [x] Capture hidden textarea value/selection during composition.
+- [x] Export sanitized trace JSON.
+- [x] Add Firefox Microsoft Vietnamese Telex fixture replay.
+- [x] Add Playwright replay helper.
+- [ ] Replay UniKey fixtures when available.
 - [ ] Replay dead-key/composition-key and CJK fixtures when available.
-- [ ] Assert transient preedit state, hidden textarea state, selection, and final model text.
-- [ ] Add a plain textarea baseline capture path for comparison.
+- [x] Assert transient preedit state, hidden textarea state, selection, and final model text for the checked-in Telex fixture path.
+- [x] Add a plain textarea baseline capture path for comparison.
 
 Acceptance criteria:
 

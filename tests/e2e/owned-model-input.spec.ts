@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
 /**
  * docs/010 Phase 2 — Input + caret + selection spike (the make-or-break,
@@ -21,6 +22,15 @@ const NATIVE_STORY = "owned-model--input-spike--native";
 const FORCED_POLYFILL_STORY = "owned-model--input-spike--forced-polyfill";
 const SWITCHING_STORY = "owned-model--input-spike--switching-harness";
 const DIAGNOSTICS_KEY = "__IDCO_OWNED_INPUT__";
+const FIREFOX_TELEX_XIN_CHAO_FIXTURE = JSON.parse(
+  readFileSync(
+    new URL(
+      "../fixtures/owned-model-ime/firefox-telex-xin-chao.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as OwnedImeTrace;
 
 type Diagnostics = {
   text: string;
@@ -30,11 +40,35 @@ type Diagnostics = {
   composing: boolean;
   focused: boolean;
   lastEvent: string;
+  lastClipboardText: string;
   caretLeft: number;
   caretTop: number;
   caretHeight: number;
   rectCount: number;
   usedAddRange: boolean;
+};
+
+type OwnedImeTrace = {
+  schemaVersion: 1;
+  scenario: {
+    name: string;
+    initialText: string;
+    initialSelection: { anchor: number; focus: number };
+    expectedFinalText: string;
+    expectedFinalSelection: { anchor: number; focus: number };
+  };
+  events: Array<{
+    type: string;
+    data?: string | null;
+    inputType?: string;
+    isComposing?: boolean;
+    cancelable?: boolean;
+    textarea?: {
+      value: string;
+      selectionStart: number;
+      selectionEnd: number;
+    };
+  }>;
 };
 
 async function openStory(page: Page, story: string) {
@@ -88,6 +122,36 @@ function nativeSelection(page: Page): Promise<NativeSelection> {
       focusOffset: selection?.focusOffset ?? -1,
     };
   });
+}
+
+function dispatchClipboard(
+  page: Page,
+  type: "copy" | "cut" | "paste",
+  text = "",
+): Promise<string> {
+  return page.evaluate(
+    ({ diagnosticsKey, eventType, clipboardText }) => {
+      const host = document.querySelector("[data-owned-host]");
+      if (!host) throw new Error("owned host missing");
+      const clipboardData = new DataTransfer();
+      if (clipboardText) clipboardData.setData("text/plain", clipboardText);
+      const event = new Event(eventType, {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "clipboardData", { value: clipboardData });
+      host.dispatchEvent(event);
+      const clipboardDiagnostics = (
+        window as unknown as Record<string, Diagnostics | undefined>
+      )[diagnosticsKey];
+      return (
+        clipboardData.getData("text/plain") ||
+        clipboardDiagnostics?.lastClipboardText ||
+        ""
+      );
+    },
+    { clipboardText: text, diagnosticsKey: DIAGNOSTICS_KEY, eventType: type },
+  );
 }
 
 /**
@@ -153,64 +217,81 @@ async function focusedHostSnapshot(
  * committed word ("xin" → "xinxin", "chào" → "chàochào").
  */
 async function replayFirefoxTelexXinChao(page: Page): Promise<void> {
-  await polyfillTextarea(page).evaluate((element) => {
+  await replayOwnedImeTrace(page, FIREFOX_TELEX_XIN_CHAO_FIXTURE);
+}
+
+async function replayOwnedImeTrace(
+  page: Page,
+  trace: OwnedImeTrace,
+): Promise<void> {
+  await polyfillTextarea(page).evaluate((element, replayTrace) => {
     const textarea = element as HTMLTextAreaElement;
     textarea.focus();
 
-    const setValue = (value: string) => {
+    const setValue = (
+      value: string,
+      selectionStart = value.length,
+      selectionEnd = selectionStart,
+    ) => {
       textarea.value = value;
-      textarea.setSelectionRange(value.length, value.length);
+      textarea.setSelectionRange(selectionStart, selectionEnd);
     };
-    const fireInput = (
-      type: "beforeinput" | "input",
-      inputType: string,
-      data: string,
-      isComposing: boolean,
-    ) =>
-      textarea.dispatchEvent(
-        new InputEvent(type, {
-          bubbles: true,
-          cancelable: type === "beforeinput" && inputType === "insertText",
-          data,
-          inputType,
-          isComposing,
-        }),
-      );
 
-    const composeWord = (steps: readonly string[]) => {
-      const final = steps[steps.length - 1] ?? "";
-      textarea.dispatchEvent(new CompositionEvent("compositionstart"));
-      for (const data of steps) {
-        textarea.dispatchEvent(
-          new CompositionEvent("compositionupdate", { data }),
-        );
-        fireInput("beforeinput", "insertCompositionText", data, true);
-        setValue(data);
-        fireInput("input", "insertCompositionText", data, true);
+    for (const event of replayTrace.events) {
+      if (event.type === "compositionstart") {
+        textarea.dispatchEvent(new CompositionEvent("compositionstart"));
+        continue;
       }
-      setValue(final);
-      textarea.dispatchEvent(
-        new CompositionEvent("compositionend", { data: final }),
-      );
-      // Trailing event Firefox emits after compositionend — the real bug trigger.
-      fireInput("input", "insertCompositionText", final, false);
-    };
+      if (event.type === "compositionupdate") {
+        textarea.dispatchEvent(
+          new CompositionEvent("compositionupdate", {
+            data: event.data ?? "",
+          }),
+        );
+        continue;
+      }
+      if (event.type === "compositionend") {
+        if (event.textarea) {
+          setValue(
+            event.textarea.value,
+            event.textarea.selectionStart,
+            event.textarea.selectionEnd,
+          );
+        }
+        textarea.dispatchEvent(
+          new CompositionEvent("compositionend", { data: event.data ?? "" }),
+        );
+        continue;
+      }
+      if (event.type !== "beforeinput" && event.type !== "input") continue;
 
-    const insertText = (data: string) => {
-      const notPrevented = fireInput("beforeinput", "insertText", data, false);
-      if (!notPrevented) return;
-      const start = textarea.selectionStart ?? textarea.value.length;
-      const end = textarea.selectionEnd ?? start;
-      setValue(
-        textarea.value.slice(0, start) + data + textarea.value.slice(end),
-      );
-      fireInput("input", "insertText", data, false);
-    };
-
-    composeWord(["x", "xi", "xin", "xin"]);
-    insertText(" ");
-    composeWord(["c", "ch", "cha", "chao", "chào", "chào"]);
-  });
+      if (event.type === "input" && event.textarea) {
+        setValue(
+          event.textarea.value,
+          event.textarea.selectionStart,
+          event.textarea.selectionEnd,
+        );
+      }
+      const inputEvent = new InputEvent(event.type, {
+        bubbles: true,
+        cancelable:
+          event.cancelable ??
+          (event.type === "beforeinput" && event.inputType === "insertText"),
+        data: event.data ?? null,
+        inputType: event.inputType ?? "",
+        isComposing: event.isComposing ?? false,
+      });
+      const notPrevented = textarea.dispatchEvent(inputEvent);
+      if (event.type === "beforeinput" && !notPrevented) continue;
+      if (event.type === "beforeinput" && event.textarea) {
+        setValue(
+          event.textarea.value,
+          event.textarea.selectionStart,
+          event.textarea.selectionEnd,
+        );
+      }
+    }
+  }, trace);
 }
 
 /**
@@ -621,6 +702,60 @@ test("vertical arrows and basic shortcuts stay inside the input", async ({
   await page.keyboard.press("Control+B");
   await expect(text.locator("[data-owned-bold]")).toHaveText("first\nsecond");
   await expect(text).toHaveText("first\nsecond");
+});
+
+test("grapheme navigation and deletion never split composed text", async ({
+  page,
+}) => {
+  const host = await openStory(page, NATIVE_STORY);
+  const text = page.locator("[data-owned-text]");
+
+  await host.click();
+  await page.keyboard.insertText("A👩‍💻B");
+  await expect.poll(async () => (await diagnostics(page)).text).toBe("A👩‍💻B");
+
+  await page.keyboard.press("ArrowLeft");
+  expect((await diagnostics(page)).focus).toBe("A👩‍💻".length);
+  await page.keyboard.press("Backspace");
+  await expect.poll(async () => (await diagnostics(page)).text).toBe("AB");
+  expect((await diagnostics(page)).focus).toBe("A".length);
+
+  await page.keyboard.insertText("e\u0301🙂");
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("Ae\u0301🙂B");
+  await page.keyboard.press("Backspace");
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("Ae\u0301B");
+  await page.keyboard.press("Backspace");
+  await expect.poll(async () => (await diagnostics(page)).text).toBe("AB");
+  await expect(text).toHaveText("AB");
+});
+
+test("single-block copy and paste use the owned model text", async ({
+  page,
+}) => {
+  const host = await openStory(page, NATIVE_STORY);
+  const text = page.locator("[data-owned-text]");
+
+  await host.click();
+  await page.keyboard.type("copy paste");
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("copy paste");
+
+  await page.keyboard.press("Control+A");
+  const copied = await dispatchClipboard(page, "copy");
+  expect(copied).toBe("copy paste");
+  expect((await diagnostics(page)).lastClipboardText).toBe("copy paste");
+
+  await dispatchClipboard(page, "paste", "model text");
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("model text");
+  await expect(text).toHaveText("model text");
+  expect((await diagnostics(page)).lastClipboardText).toBe("model text");
 });
 
 test("caret aligns with Vietnamese collapsed-range geometry", async ({

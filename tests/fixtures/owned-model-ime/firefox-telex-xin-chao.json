@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "os": "Windows",
+    "browser": "Firefox",
+    "backend": "forced-polyfill",
+    "inputMethod": "Microsoft Vietnamese Telex",
+    "story": "Owned Model / Input Spike / ForcedPolyfill",
+    "capturedAt": "2026-06-17T00:00:00.000Z"
+  },
+  "scenario": {
+    "name": "compose xin chao",
+    "initialText": "",
+    "initialSelection": { "anchor": 0, "focus": 0 },
+    "expectedFinalText": "xin chào",
+    "expectedFinalSelection": { "anchor": 8, "focus": 8 }
+  },
+  "events": [
+    { "atMs": 0, "type": "compositionstart" },
+    { "atMs": 1, "type": "compositionupdate", "data": "x" },
+    {
+      "atMs": 2,
+      "type": "beforeinput",
+      "data": "x",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "cancelable": false
+    },
+    {
+      "atMs": 3,
+      "type": "input",
+      "data": "x",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "textarea": { "value": "x", "selectionStart": 1, "selectionEnd": 1 }
+    },
+    { "atMs": 4, "type": "compositionupdate", "data": "xi" },
+    {
+      "atMs": 5,
+      "type": "beforeinput",
+      "data": "xi",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "cancelable": false
+    },
+    {
+      "atMs": 6,
+      "type": "input",
+      "data": "xi",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "textarea": { "value": "xi", "selectionStart": 2, "selectionEnd": 2 }
+    },
+    { "atMs": 7, "type": "compositionupdate", "data": "xin" },
+    {
+      "atMs": 8,
+      "type": "beforeinput",
+      "data": "xin",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "cancelable": false
+    },
+    {
+      "atMs": 9,
+      "type": "input",
+      "data": "xin",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "textarea": { "value": "xin", "selectionStart": 3, "selectionEnd": 3 }
+    },
+    { "atMs": 10, "type": "compositionend", "data": "xin" },
+    {
+      "atMs": 11,
+      "type": "input",
+      "data": "xin",
+      "inputType": "insertCompositionText",
+      "isComposing": false,
+      "textarea": { "value": "xin", "selectionStart": 3, "selectionEnd": 3 }
+    },
+    {
+      "atMs": 12,
+      "type": "beforeinput",
+      "data": " ",
+      "inputType": "insertText",
+      "isComposing": false,
+      "cancelable": true
+    },
+    { "atMs": 13, "type": "compositionstart" },
+    { "atMs": 14, "type": "compositionupdate", "data": "c" },
+    {
+      "atMs": 15,
+      "type": "beforeinput",
+      "data": "c",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "cancelable": false
+    },
+    {
+      "atMs": 16,
+      "type": "input",
+      "data": "c",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "textarea": { "value": "xin c", "selectionStart": 5, "selectionEnd": 5 }
+    },
+    { "atMs": 17, "type": "compositionupdate", "data": "ch" },
+    {
+      "atMs": 18,
+      "type": "beforeinput",
+      "data": "ch",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "cancelable": false
+    },
+    {
+      "atMs": 19,
+      "type": "input",
+      "data": "ch",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "textarea": { "value": "xin ch", "selectionStart": 6, "selectionEnd": 6 }
+    },
+    { "atMs": 20, "type": "compositionupdate", "data": "cha" },
+    {
+      "atMs": 21,
+      "type": "beforeinput",
+      "data": "cha",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "cancelable": false
+    },
+    {
+      "atMs": 22,
+      "type": "input",
+      "data": "cha",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "textarea": { "value": "xin cha", "selectionStart": 7, "selectionEnd": 7 }
+    },
+    { "atMs": 23, "type": "compositionupdate", "data": "chao" },
+    {
+      "atMs": 24,
+      "type": "beforeinput",
+      "data": "chao",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "cancelable": false
+    },
+    {
+      "atMs": 25,
+      "type": "input",
+      "data": "chao",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "textarea": { "value": "xin chao", "selectionStart": 8, "selectionEnd": 8 }
+    },
+    { "atMs": 26, "type": "compositionupdate", "data": "chào" },
+    {
+      "atMs": 27,
+      "type": "beforeinput",
+      "data": "chào",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "cancelable": false
+    },
+    {
+      "atMs": 28,
+      "type": "input",
+      "data": "chào",
+      "inputType": "insertCompositionText",
+      "isComposing": true,
+      "textarea": { "value": "xin chào", "selectionStart": 8, "selectionEnd": 8 }
+    },
+    { "atMs": 29, "type": "compositionend", "data": "chào" },
+    {
+      "atMs": 30,
+      "type": "input",
+      "data": "chào",
+      "inputType": "insertCompositionText",
+      "isComposing": false,
+      "textarea": { "value": "xin chào", "selectionStart": 8, "selectionEnd": 8 }
+    }
+  ]
+}

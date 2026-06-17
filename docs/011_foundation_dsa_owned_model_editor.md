@@ -55,7 +55,7 @@ The whole design turns on one inversion: the model is the document, and the DOM 
 - §5 asks how a location is named. A node-relative point, UTF-16, with affinity.
 - §6 asks how the document changes. Invertible steps through a single chokepoint.
 - §7 asks how undo works. Inverse steps, never snapshots, with the one place that hurts named.
-- §8 asks what is selected and who paints it. The model owns it; the Custom Highlight API paints it; contenteditable does neither.
+- §8 asks what is selected and who paints it. The model owns it; overlay rects from browser `Range` geometry are the proven baseline painter; contenteditable does neither.
 - §9 asks how keystrokes reach the model. One re-keyed hidden input host mirrors the active leaf.
 - §10 asks what bites at the character level. UTF-16 versus graphemes, IME, affinity, the final line.
 
@@ -639,7 +639,7 @@ Owning the selection model does not mean reimplementing text layout, hit-testing
 | --- | --- | --- |
 | Keyboard / IME / clipboard capture, a11y anchor | hidden `<textarea>` / `EditContext` | the capture host (the floor, §8.4) |
 | Click to position | `caretPositionFromPoint` / `caretRangeFromPoint` | feature-detect wrapper plus map to `Point` |
-| Paint a selection range | CSS Custom Highlight API | which model ranges map to which DOM `Range`s |
+| Paint a selection range | `Range.getClientRects()` / overlay rects; future CSS Custom Highlight | which model ranges map to which DOM `Range`s |
 | Selection / caret geometry | `Range.getClientRects()` / `getBoundingClientRect()` | nothing, wrapping and bidi come free |
 | Up / Down (vertical nav) | `caretPositionFromPoint(goalX, caretY ± lineHeight)` | goal-column bookkeeping |
 | Left/Right, Home/End, word | `Intl.Segmenter` (graphemes/words) | boundary rules at node edges |
@@ -652,18 +652,18 @@ What we build is the mapping (model offset to DOM position) and the selection st
 
 Even fully custom, one hidden focusable input element remains, not for selection but for what the browser only grants a focused text surface: keyboard events, IME composition, `copy`/`cut`/`paste` events, and an accessibility anchor. With no editing host and no native selection, the browser fires no `copy`, routes no IME, and exposes nothing to a screen reader. The hidden input is the capture surface; it never holds the document and never drives the paint (§9).
 
-### 8.5 CSS Custom Highlight API, the paint primitive
+### 8.5 Derived Ranges And Overlay Rects, The Proven Paint Primitive
 
-This contract makes custom selection native-quality instead of an overlay-div hack. Construct `Range`s over the rendered (non-editable) text DOM, add them to a `Highlight`, register via `CSS.highlights.set(name, hl)`, and style with `::highlight(name)`. The browser paints those ranges with full layout, wrapping, and bidi awareness, since they are real Ranges over laid-out text, GPU-composited like native selection, without any `contenteditable`.
+The proven Phase 2.5 paint baseline is deliberately boring: construct `Range`s over the rendered non-editable text DOM, call `Range.getClientRects()`, and draw absolutely positioned overlay rects in scroller coordinates. The browser still supplies full layout, wrapping, bidi fragments, and glyph geometry because the ranges are real ranges over laid-out text. The engine owns only which model ranges map to which DOM ranges and how those rects are layered.
 
 Two things it cannot do, which we own.
 
 - Caret (collapsed selection): a zero-width range has no area, so the caret is a separate blinking element positioned from `range.getBoundingClientRect()`. We own blink and position only.
-- Offscreen middles: a `Range` cannot point at unmounted nodes, so for a selection spanning virtualized gaps we register Highlight ranges over the mounted edges only, and the model holds the full range for copy and extend.
+- Offscreen middles: a `Range` cannot point at unmounted nodes, so for a selection spanning virtualized gaps we paint ranges over the mounted edges only, and the model holds the full range for copy and extend.
 
-The paint layer reuses the per-leaf offset-to-text-node map (§3.4) in reverse: an edit patches the DOM from that map, and the paint derives DOM `Range`s from it. `deriveRanges(selection, mountedBlocks)` orders the endpoints via `comparePoints`, clips the range to mounted leaves, and builds one `Range` per mounted leaf; a selection spanning N mounted leaves becomes N Ranges in one `Highlight`, while the offscreen middle is absent from the set and the model holds the full range. The layer re-derives on selection change, on leaf re-render (a replaced text node detaches its old `Range`), and on relayout (`ResizeObserver`), never per scroll tick, because the `Highlight` rides DOM nodes that scroll with the page and the caret element lives in scroller coordinates. The virtualized text carries `user-select: none` so the browser's own selection never competes during pointer drags; we own selection through Custom Highlight and synthesize the native double-click-word and triple-click-line gestures with `Intl.Segmenter` (§8.3). Where the API is absent or misbehaves (§16), the same `deriveRanges` output feeds absolutely-positioned overlay rects from `Range.getClientRects()`: two painters, one derivation.
+The paint layer reuses the per-leaf offset-to-text-node map (§3.4) in reverse: an edit patches the DOM from that map, and the paint derives DOM `Range`s from it. `deriveRanges(selection, mountedBlocks)` orders the endpoints via `comparePoints`, clips the range to mounted leaves, and builds one `Range` per mounted leaf. A selection spanning N mounted leaves becomes N measured range fragments, while the offscreen middle is absent from the overlay and the model holds the full range. The layer re-derives on selection change, on leaf re-render (a replaced text node detaches its old `Range`), and on relayout (`ResizeObserver`), never per scroll tick, because the overlay lives in scroller coordinates. The virtualized text carries `user-select: none` so the browser's own selection never competes during pointer drags; we own selection through model-derived overlay rects and synthesize the native double-click-word and triple-click-line gestures with `Intl.Segmenter` (§8.3).
 
-Because painting depends on this API, its cross-browser behavior (caret and IME preedit on WebKit and Firefox especially) is the one external contract to verify before committing (§16).
+CSS Custom Highlight remains a future optimization over the same `deriveRanges` output. It can replace the overlay painter where its cross-browser behavior is proven, but it is no longer a prerequisite for multi-block selection work.
 
 ### 8.6 The selection invariants
 
@@ -997,7 +997,7 @@ The shape of the bet: we trade three things, bulk-undo latency, owned accessibil
 010 holds except where this document sharpens it.
 
 - §7.2 (model). 010's "flat per-block text string" and "`order` plus `Map<blockId, BlockModel>`" framing tilted toward a flat store. Corrected to a normalized node graph (§2): structural nodes hold children by id, the model is a faithful tree, and the flat list is only the top-level virtualization index, not the whole model.
-- §5.5 / §7.4 (selection paint). 010 framed the hidden-textarea hand-paint as the baseline and native selection as the optimization, and it carried an unproven "does an `EditContext` host paint a native caret" hypothesis. Corrected: the model owns selection and paints via the CSS Custom Highlight API (§8.5); the input host is for capture only (§9.1); painting no longer depends on that hypothesis.
+- §5.5 / §7.4 (selection paint). 010 originally framed hidden-textarea hand-painting as a backend fallback and native selection as an optimization. Corrected after the spike: the model owns selection and paints through model-derived overlay rects from DOM `Range` geometry (§8.5); CSS Custom Highlight is only a future optimization over the same derivation.
 - `code-block` classification. 010 listed it as both a typed text block and a heavy object. Resolved: atomic object with a piece-table body (§3.6).
 - Tables. Clarified as an atomic object by lifecycle choice with a faithful internal grid (§2.4), not a blob to dodge a flat model.
 - TOC and settings. TOC stays a positional atomic object; `DocumentSettings` is reserved for docs/006 page settings (§2.5).
@@ -1012,7 +1012,7 @@ The choices below are recommended here but not yet locked. Each is isolated enou
 
 - Marks: range-array versus marked-run nodes. Recommended: range-array over a flat string (§4.4) for the hot-path allocation win; marked-run nodes are more compat-faithful but churn objects per keystroke. Open only if a profiling case argues otherwise.
 - Body order: array versus fractional order-keys. Recommended: array now, order-keys as the named upgrade (§13.8) when O(n) splices or collaboration make them worth it.
-- CSS Custom Highlight API cross-browser behavior. The paint story (§8.5) rests on it, so retire this before multi-block selection work: in Chromium, WebKit, and Firefox, prove range painting, IME-preedit underline painting, `user-select: none` interaction, and relayout invalidation against real rendered text. If any browser fails, the fallback is not a new selection model; the same `deriveRanges` output feeds absolute overlay rects from `Range.getClientRects()`, and the failing browser is marked overlay-backed in the conformance matrix.
+- CSS Custom Highlight API cross-browser behavior. This is now an optimization track, not a blocker for multi-block selection. If adopted later, prove range painting, IME-preedit underline painting, `user-select: none` interaction, and relayout invalidation against real rendered text in Chromium, WebKit, and Firefox; if any browser fails, keep using the overlay rect painter over the same `deriveRanges` output.
 - iOS active-block `contenteditable` fallback. Whether to restore the iOS loupe via native `contenteditable` on the single active block (§8.7) or accept its absence is a product call, deferred but designed-for.
 - Periodic history checkpoints. Whether to cap bulk-undo replay with a snapshot every K transactions (§7.3) is a lever named, not pulled.
 - **The intra-transaction `Mapping` in node-relative coordinates (the internal-core open item, with a recommended default).** The transaction builder (§6.10) maps a position through earlier steps in the same transaction, so a multi-step command can target a post-edit position. Same-node `ReplaceText` uses the §8.8 rule. Structural mapping should default to: points follow a `MoveNode` by id; points inside a removed node or removed ancestor relocate to the deletion boundary by bias; split/merge commands must provide explicit point redirects for the newly minted or absorbed node ids; and commands may not depend on an implicit "point inside removed structure" rule beyond that boundary relocation. Keep this open only until the first split/merge implementation lands, then lock it with property tests for split, merge, move, delete, undo, and redo.
