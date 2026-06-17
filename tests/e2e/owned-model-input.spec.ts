@@ -476,6 +476,96 @@ async function replayIpadVietnameseAndWordDelete(page: Page): Promise<void> {
 }
 
 /**
+ * Replay Android Gboard's Vietnamese diacritic pattern (captured from real
+ * Chrome + Firefox on Android). Gboard does NOT compose into the textarea here —
+ * `isComposing` is always false. To accent a vowel it SELECTS the cluster in the
+ * textarea, fires `deleteContentBackward`, then `insertText`s the accented
+ * cluster at the collapsed caret. Two regressions this guards:
+ *   - the model must delete the IME-SELECTED range, not one grapheme at its own
+ *     caret (Firefox Android dropped the range → "chào" became "chaào"), and
+ *   - a redundant uncancelable `input` twin for the same delete (Android Chrome)
+ *     must NOT delete a second time ("nhé" became "né").
+ * `redundantDeleteInput` toggles the Chrome twin; both must yield "xin chào bạn
+ * nhé".
+ */
+async function replayAndroidGboardDiacritics(
+  page: Page,
+  options: { readonly redundantDeleteInput: boolean },
+): Promise<void> {
+  await polyfillTextarea(page).evaluate((element, opts) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+
+    // In-sync plain insert at the current caret (the polyfill mirrors the model
+    // back into the textarea after each edit, so selectionEnd is the caret).
+    const insertText = (data: string) => {
+      const caret = textarea.selectionEnd;
+      textarea.setSelectionRange(caret, caret);
+      const notPrevented = textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data,
+          inputType: "insertText",
+          isComposing: false,
+        }),
+      );
+      if (notPrevented) {
+        textarea.value =
+          textarea.value.slice(0, caret) + data + textarea.value.slice(caret);
+        const next = caret + data.length;
+        textarea.setSelectionRange(next, next);
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            data,
+            inputType: "insertText",
+            isComposing: false,
+          }),
+        );
+      }
+    };
+
+    // Select [start,end], delete it, then insert the accented cluster.
+    const recompose = (start: number, end: number, cluster: string) => {
+      textarea.setSelectionRange(start, end);
+      const deleteNotPrevented = textarea.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          data: null,
+          inputType: "deleteContentBackward",
+          isComposing: false,
+        }),
+      );
+      if (deleteNotPrevented) {
+        textarea.value =
+          textarea.value.slice(0, start) + textarea.value.slice(end);
+        textarea.setSelectionRange(start, start);
+      }
+      if (opts.redundantDeleteInput) {
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            data: null,
+            inputType: "deleteContentBackward",
+            isComposing: false,
+          }),
+        );
+      }
+      insertText(cluster);
+    };
+
+    for (const ch of "xin chao") insertText(ch);
+    recompose(6, 8, "ào"); // "xin chao" → "xin chào"
+    for (const ch of " ban") insertText(ch);
+    recompose(10, 12, "ạn"); // "xin chào ban" → "xin chào bạn"
+    for (const ch of " nhe") insertText(ch);
+    recompose(15, 16, "é"); // "xin chào bạn nhe" → "xin chào bạn nhé"
+  }, options);
+}
+
+/**
  * Return a clickable point for a model offset in the plain text node. The
  * multi-click tests need stable coordinates that follow browser font metrics,
  * not guessed pixel offsets.
@@ -1039,6 +1129,52 @@ test("iPadOS polyfill mirrors textarea context for Vietnamese composition and wo
       ),
     )
     .toBe("cái gì ");
+});
+
+test("polyfill deletes the IME-selected range for Android Gboard diacritics", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  // Firefox Android: one beforeinput per delete, no input twin. The model must
+  // delete the textarea-selected cluster, not one grapheme at its own caret —
+  // otherwise "chào" becomes "chaào" and "bạn" becomes "baạn".
+  await replayAndroidGboardDiacritics(page, { redundantDeleteInput: false });
+
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("xin chào bạn nhé");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin chào bạn nhé");
+});
+
+test("polyfill ignores Android Chrome's redundant delete input twin", async ({
+  page,
+}) => {
+  const host = await openStory(page, FORCED_POLYFILL_STORY);
+  await host.click();
+
+  // Android Chrome fires an extra uncancelable `input` for each delete after the
+  // prevented `beforeinput`. Replaying the operation would delete twice ("nhé" →
+  // "né"); the diff-based reconcile makes the twin a no-op.
+  await replayAndroidGboardDiacritics(page, { redundantDeleteInput: true });
+
+  await expect
+    .poll(async () => (await diagnostics(page)).text)
+    .toBe("xin chào bạn nhé");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+      ),
+    )
+    .toBe("xin chào bạn nhé");
 });
 
 test("native and API polyfill expose the same focused host outline", async ({

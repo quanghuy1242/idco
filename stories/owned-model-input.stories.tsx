@@ -99,8 +99,13 @@ function InputSpike({ force }: { readonly force: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const countRef = useRef<HTMLOutputElement>(null);
   const traceRef = useRef<ImeTraceEvent[]>([]);
-  const recordingRef = useRef(false);
+  // Auto-record from mount so a capture always happens without needing a
+  // (easy-to-miss on mobile) Start-trace tap. Stop trace still pauses it.
+  const recordingRef = useRef(true);
   const dumpRef = useRef<HTMLTextAreaElement>(null);
+  // Lets the Copy button regenerate a fresh trace at tap time instead of
+  // reading a stale global published during an earlier render.
+  const publishRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const host = hostRef.current;
@@ -154,6 +159,7 @@ function InputSpike({ force }: { readonly force: boolean }) {
         countRef.current.textContent = String(traceRef.current.length);
       }
     }
+    publishRef.current = publishTrace;
 
     function record(event: Event): void {
       if (!recordingRef.current) return;
@@ -265,9 +271,12 @@ function InputSpike({ force }: { readonly force: boolean }) {
           data-owned-trace-copy=""
           type="button"
           onClick={() => {
+            // Regenerate the trace from the live controller/events first, so
+            // the dump reflects what was just typed, not a stale snapshot.
+            publishRef.current();
             const text = JSON.stringify(
               (window as unknown as Record<string, unknown>)[TRACE_KEY] ?? {
-                error: "no trace yet — tap Start trace, type, then Stop trace",
+                error: "no trace yet — type into the box above, then Copy trace",
               },
               null,
               2,

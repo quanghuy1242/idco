@@ -271,6 +271,18 @@ export function createInputTranslator(
       if (inputType === "insertText" || inputType === "insertTranspose") {
         editContext._insertText(event.data ?? "");
       } else {
+        // Honor an explicit textarea range-selection as the deletion span before
+        // deleting. Vietnamese IMEs (e.g. Gboard on Android) select the vowel
+        // cluster to recompose it, then fire deleteContentBackward; the model
+        // caret alone deletes the wrong span ("chào" → "chaào"). A *collapsed*
+        // textarea selection is left to the model, preserving the desktop
+        // Telex behavior where the committed-word textarea caret is stale.
+        if (textarea.selectionStart !== textarea.selectionEnd) {
+          editContext.updateSelection(
+            textarea.selectionStart,
+            textarea.selectionEnd,
+          );
+        }
         DELETE_DISPATCH[inputType]?.(editContext);
       }
 
@@ -304,11 +316,54 @@ export function createInputTranslator(
     syncFromEditContext();
   }
 
-  // Safety net: if beforeinput was properly handled, preventDefault() suppresses
-  // the input event. Reaching here means beforeinput didn't fire (WebKit edge
-  // case for Delete at boundary, Enter, etc.) and the textarea mutated
-  // without the polyfill intercepting it. Process the mutation into EditContext
-  // and forward a synthetic beforeinput to the attached element.
+  // Reconcile the EditContext model to the textarea's actual post-edit value by
+  // diffing out the common prefix/suffix and replacing the changed span. The
+  // textarea is the real input sink, so its value is authoritative on `input`
+  // (which fires after the mutation). Returns whether the model changed.
+  function reconcileModelToTextarea(
+    editContext: EditContextPolyfill,
+  ): boolean {
+    const oldText = editContext.text;
+    const newText = textarea.value;
+    if (oldText === newText) return false;
+
+    const oldLen = oldText.length;
+    const newLen = newText.length;
+    let prefix = 0;
+    const maxPrefix = Math.min(oldLen, newLen);
+    while (
+      prefix < maxPrefix &&
+      oldText.charCodeAt(prefix) === newText.charCodeAt(prefix)
+    ) {
+      prefix += 1;
+    }
+    let suffix = 0;
+    const maxSuffix = Math.min(oldLen - prefix, newLen - prefix);
+    while (
+      suffix < maxSuffix &&
+      oldText.charCodeAt(oldLen - 1 - suffix) ===
+        newText.charCodeAt(newLen - 1 - suffix)
+    ) {
+      suffix += 1;
+    }
+
+    const replaceStart = prefix;
+    const replaceEnd = oldLen - suffix;
+    const inserted = newText.slice(prefix, newLen - suffix);
+    // Drive the change through the model's selection so it emits one textupdate
+    // with the inserted text and the post-edit caret, identical to a native edit.
+    editContext.updateSelection(replaceStart, replaceEnd);
+    editContext._insertText(inserted);
+    return true;
+  }
+
+  // `input` fires after the textarea has mutated. Rather than replay the
+  // operation (which double-applies when both beforeinput and input fire, as on
+  // Android Chrome), reconcile the model to the textarea by diff. When
+  // beforeinput already applied + synced this edit (desktop/Firefox) the diff is
+  // empty, so the redundant input is a no-op; when beforeinput never fired
+  // (WebKit boundary cases) the diff carries the real mutation. The edit lands
+  // exactly once, over the span the IME actually changed.
   function handleInput(event: Event): void {
     // Chrome's native EditContext never fires input events on the element.
     // Stop any leaking through shadow DOM retargeting.
@@ -328,24 +383,17 @@ export function createInputTranslator(
       editContext._suspendComposition();
     }
 
-    // Process the mutation into EditContext state.
-    const isHandled = HANDLED_INPUT_TYPES.has(inputType);
-    if (isHandled) {
-      if (inputType === "insertText" || inputType === "insertTranspose") {
-        editContext._insertText(event.data ?? "");
-      } else {
-        DELETE_DISPATCH[inputType]?.(editContext);
-      }
-    }
+    const changed = reconcileModelToTextarea(editContext);
 
-    // Forward synthetic beforeinput to the attached element.
+    // Forward synthetic beforeinput to the attached element only when this input
+    // actually carried a mutation, so the redundant Android twin stays silent.
     const attachedElement = getAttachedElement();
-    if (attachedElement && !SUPPRESSED_INPUT_TYPES.has(inputType)) {
+    if (changed && attachedElement && !SUPPRESSED_INPUT_TYPES.has(inputType)) {
       const syntheticEvent = createSyntheticBeforeInput(inputType, event);
       attachedElement.dispatchEvent(syntheticEvent);
     }
 
-    syncFromEditContext();
+    if (changed) syncFromEditContext();
   }
 
   function forwardClipboardEvent(event: ClipboardEvent): void {
