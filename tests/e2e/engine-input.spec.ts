@@ -11,26 +11,26 @@ import { readFileSync } from "node:fs";
  * Browser binaries: `pnpm exec playwright install webkit firefox`. On Linux,
  * the host libraries are required too: `pnpm exec playwright install-deps`
  * (needs sudo). The webkit/firefox projects are declared in playwright.config.ts
- * and scoped to `owned-model-*.spec.ts` so the legacy editor perf specs stay
+ * and scoped to `engine-*.spec.ts` so the legacy editor perf specs stay
  * chromium-only.
  *
- * Run: `pnpm exec playwright test tests/e2e/owned-model-input.spec.ts \
+ * Run: `pnpm exec playwright test tests/e2e/engine-input.spec.ts \
  *   --project=chromium --project=webkit --project=firefox`
  */
 
-const NATIVE_STORY = "owned-model--input-spike--native";
-const FORCED_POLYFILL_STORY = "owned-model--input-spike--forced-polyfill";
-const SWITCHING_STORY = "owned-model--input-spike--switching-harness";
-const DIAGNOSTICS_KEY = "__IDCO_OWNED_INPUT__";
+const NATIVE_STORY = "engine--input-spike--native";
+const FORCED_POLYFILL_STORY = "engine--input-spike--forced-polyfill";
+const SWITCHING_STORY = "engine--input-spike--switching-harness";
+const DIAGNOSTICS_KEY = "__IDCO_ENGINE_INPUT__";
 const FIREFOX_TELEX_XIN_CHAO_FIXTURE = JSON.parse(
   readFileSync(
     new URL(
-      "../fixtures/owned-model-ime/firefox-telex-xin-chao.json",
+      "../fixtures/engine-ime/firefox-telex-xin-chao.json",
       import.meta.url,
     ),
     "utf8",
   ),
-) as OwnedImeTrace;
+) as EngineImeTrace;
 
 type Diagnostics = {
   text: string;
@@ -48,7 +48,7 @@ type Diagnostics = {
   usedAddRange: boolean;
 };
 
-type OwnedImeTrace = {
+type EngineImeTrace = {
   schemaVersion: 1;
   scenario: {
     name: string;
@@ -73,7 +73,7 @@ type OwnedImeTrace = {
 
 async function openStory(page: Page, story: string) {
   await page.goto(`/?story=${story}`, { waitUntil: "commit" });
-  const host = page.locator("[data-owned-host]");
+  const host = page.locator("[data-engine-host]");
   await host.waitFor({ state: "visible" });
   // Wait for the controller's first paint to publish diagnostics.
   await expect.poll(async () => (await readDiagnostics(page))?.text).toBe("");
@@ -91,7 +91,7 @@ function readDiagnostics(page: Page): Promise<Diagnostics | null> {
 
 async function diagnostics(page: Page): Promise<Diagnostics> {
   const value = await readDiagnostics(page);
-  if (!value) throw new Error("owned-model input diagnostics missing");
+  if (!value) throw new Error("engine input diagnostics missing");
   return value;
 }
 
@@ -131,8 +131,8 @@ function dispatchClipboard(
 ): Promise<string> {
   return page.evaluate(
     ({ diagnosticsKey, eventType, clipboardText }) => {
-      const host = document.querySelector("[data-owned-host]");
-      if (!host) throw new Error("owned host missing");
+      const host = document.querySelector("[data-engine-host]");
+      if (!host) throw new Error("engine host missing");
       const clipboardData = new DataTransfer();
       if (clipboardText) clipboardData.setData("text/plain", clipboardText);
       const event = new Event(eventType, {
@@ -161,7 +161,7 @@ function dispatchClipboard(
  * synthesize composition events.
  */
 function polyfillTextarea(page: Page) {
-  return page.locator("[data-owned-host] textarea");
+  return page.locator("[data-engine-host] textarea");
 }
 
 async function emulateIpadTextareaPlatform(page: Page): Promise<void> {
@@ -217,12 +217,12 @@ async function focusedHostSnapshot(
  * committed word ("xin" → "xinxin", "chào" → "chàochào").
  */
 async function replayFirefoxTelexXinChao(page: Page): Promise<void> {
-  await replayOwnedImeTrace(page, FIREFOX_TELEX_XIN_CHAO_FIXTURE);
+  await replayEngineImeTrace(page, FIREFOX_TELEX_XIN_CHAO_FIXTURE);
 }
 
-async function replayOwnedImeTrace(
+async function replayEngineImeTrace(
   page: Page,
-  trace: OwnedImeTrace,
+  trace: EngineImeTrace,
 ): Promise<void> {
   await polyfillTextarea(page).evaluate((element, replayTrace) => {
     const textarea = element as HTMLTextAreaElement;
@@ -572,9 +572,9 @@ async function replayAndroidGboardDiacritics(
  */
 async function pointForTextOffset(page: Page, offset: number) {
   return page.evaluate((targetOffset) => {
-    const textNode = document.querySelector("[data-owned-text]")?.firstChild;
+    const textNode = document.querySelector("[data-engine-text]")?.firstChild;
     if (!textNode || textNode.nodeType !== Node.TEXT_NODE) {
-      throw new Error("owned text node missing");
+      throw new Error("engine text node missing");
     }
     const range = document.createRange();
     const start = Math.min(
@@ -595,8 +595,8 @@ async function pointForTextOffset(page: Page, offset: number) {
 }
 
 async function expectCaretPixelAligned(page: Page): Promise<void> {
-  const caretBox = await page.locator("[data-owned-caret]").boundingBox();
-  if (!caretBox) throw new Error("owned caret missing");
+  const caretBox = await page.locator("[data-engine-caret]").boundingBox();
+  if (!caretBox) throw new Error("engine caret missing");
   const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio);
   const deviceX = caretBox.x * devicePixelRatio;
   expect(Math.abs(deviceX - Math.round(deviceX))).toBeLessThanOrEqual(0.01);
@@ -610,9 +610,9 @@ async function expectCaretPixelAligned(page: Page): Promise<void> {
 async function collapsedRangeLeftForTextOffset(page: Page, offset: number) {
   return page.evaluate((targetOffset) => {
     const textElement =
-      document.querySelector<HTMLElement>("[data-owned-text]");
-    const host = document.querySelector<HTMLElement>("[data-owned-host]");
-    if (!textElement || !host) throw new Error("owned input DOM missing");
+      document.querySelector<HTMLElement>("[data-engine-text]");
+    const host = document.querySelector<HTMLElement>("[data-engine-host]");
+    if (!textElement || !host) throw new Error("engine input DOM missing");
 
     const walker = document.createTreeWalker(textElement, NodeFilter.SHOW_TEXT);
     let remaining = Math.max(0, targetOffset);
@@ -620,7 +620,7 @@ async function collapsedRangeLeftForTextOffset(page: Page, offset: number) {
     while (current) {
       const text = current as Text;
       const parent = text.parentElement;
-      if (!parent?.closest("[data-owned-trailing-line]")) {
+      if (!parent?.closest("[data-engine-trailing-line]")) {
         if (remaining <= text.length) {
           const range = document.createRange();
           range.setStart(text, remaining);
@@ -634,7 +634,7 @@ async function collapsedRangeLeftForTextOffset(page: Page, offset: number) {
       }
       current = walker.nextNode();
     }
-    throw new Error("offset outside owned text");
+    throw new Error("offset outside engine text");
   }, offset);
 }
 
@@ -644,8 +644,8 @@ async function collapsedRangeLeftForTextOffset(page: Page, offset: number) {
 // the API polyfill. The rendering assertions are intentionally backend-agnostic.
 test("input, caret, and selection loop", async ({ page }, testInfo) => {
   const host = await openStory(page, NATIVE_STORY);
-  const text = page.locator("[data-owned-text]");
-  const caret = page.locator("[data-owned-caret]");
+  const text = page.locator("[data-engine-text]");
+  const caret = page.locator("[data-engine-caret]");
 
   await expect(caret).toBeHidden();
   await host.click();
@@ -686,7 +686,7 @@ test("input, caret, and selection loop", async ({ page }, testInfo) => {
   expect(shiftDiag.focus).toBe(1);
   expect(shiftDiag.anchor).toBe(3);
   expect(shiftDiag.rectCount).toBeGreaterThan(0);
-  await expect(page.locator("[data-owned-selrect]").first()).toBeVisible();
+  await expect(page.locator("[data-engine-selrect]").first()).toBeVisible();
   expect((await nativeSelection(page)).text).toBe("el");
 
   // AC2 — selection renders for drag.
@@ -718,7 +718,7 @@ test("input, caret, and selection loop", async ({ page }, testInfo) => {
 // follows to line 2.
 test("Enter inserts a newline and the caret follows", async ({ page }) => {
   const host = await openStory(page, NATIVE_STORY);
-  const text = page.locator("[data-owned-text]");
+  const text = page.locator("[data-engine-text]");
 
   await host.click();
   await page.keyboard.type("first");
@@ -729,7 +729,7 @@ test("Enter inserts a newline and the caret follows", async ({ page }) => {
   const afterEnterDiag = await diagnostics(page);
   const afterEnterBox = (await text.boundingBox())!;
   const afterEnterCaretBox = (await page
-    .locator("[data-owned-caret]")
+    .locator("[data-engine-caret]")
     .boundingBox())!;
   expect(afterEnterDiag.focus).toBe("first\n".length);
   expect(afterEnterDiag.caretTop).toBeGreaterThan(line1Top);
@@ -762,7 +762,7 @@ test("vertical arrows and basic shortcuts stay inside the input", async ({
   page,
 }) => {
   const host = await openStory(page, NATIVE_STORY);
-  const text = page.locator("[data-owned-text]");
+  const text = page.locator("[data-engine-text]");
 
   await host.click();
   await page.keyboard.type("first");
@@ -790,7 +790,7 @@ test("vertical arrows and basic shortcuts stay inside the input", async ({
   expect((await nativeSelection(page)).text).toBe("first\nsecond");
 
   await page.keyboard.press("Control+B");
-  await expect(text.locator("[data-owned-bold]")).toHaveText("first\nsecond");
+  await expect(text.locator("[data-engine-bold]")).toHaveText("first\nsecond");
   await expect(text).toHaveText("first\nsecond");
 });
 
@@ -798,7 +798,7 @@ test("grapheme navigation and deletion never split composed text", async ({
   page,
 }) => {
   const host = await openStory(page, NATIVE_STORY);
-  const text = page.locator("[data-owned-text]");
+  const text = page.locator("[data-engine-text]");
 
   await host.click();
   await page.keyboard.insertText("A👩‍💻B");
@@ -827,7 +827,7 @@ test("single-block copy and paste use the owned model text", async ({
   page,
 }) => {
   const host = await openStory(page, NATIVE_STORY);
-  const text = page.locator("[data-owned-text]");
+  const text = page.locator("[data-engine-text]");
 
   await host.click();
   await page.keyboard.type("copy paste");
@@ -914,7 +914,7 @@ test("switching forced polyfill back to native keeps newline input stable", asyn
   await expect.poll(async () => (await diagnostics(page)).text).toBe("forced");
   expect((await diagnostics(page)).inputBackend).toBe("polyfill");
 
-  await page.locator("[data-owned-switch]").click();
+  await page.locator("[data-engine-switch]").click();
   await expect.poll(async () => (await diagnostics(page)).text).toBe("");
 
   await host.click();
@@ -997,7 +997,7 @@ test("shared renderer paints IME preedit formats from the API", async ({
   page,
 }) => {
   const host = await openStory(page, FORCED_POLYFILL_STORY);
-  const composition = page.locator("[data-owned-composition]");
+  const composition = page.locator("[data-engine-composition]");
 
   // CI can deterministically synthesize composition on the polyfill textarea.
   // The underline renderer being asserted below is still the shared
@@ -1077,7 +1077,7 @@ test("polyfill composes Vietnamese Telex 'xin chào' from the real Firefox event
   await expect
     .poll(() =>
       page.evaluate(
-        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+        () => document.querySelector("[data-engine-text]")?.textContent ?? null,
       ),
     )
     .toBe("xin chào");
@@ -1099,7 +1099,7 @@ test("polyfill ignores a desynced textarea selection and edits at the model care
   await expect
     .poll(() =>
       page.evaluate(
-        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+        () => document.querySelector("[data-engine-text]")?.textContent ?? null,
       ),
     )
     .toBe("xin o");
@@ -1118,7 +1118,7 @@ test("iPadOS polyfill mirrors textarea context for Vietnamese composition and wo
   await expect
     .poll(() =>
       page.evaluate(
-        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+        () => document.querySelector("[data-engine-text]")?.textContent ?? null,
       ),
     )
     .toBe("cái gì ");
@@ -1148,7 +1148,7 @@ test("polyfill deletes the IME-selected range for Android Gboard diacritics", as
   await expect
     .poll(() =>
       page.evaluate(
-        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+        () => document.querySelector("[data-engine-text]")?.textContent ?? null,
       ),
     )
     .toBe("xin chào bạn nhé");
@@ -1171,7 +1171,7 @@ test("polyfill ignores Android Chrome's redundant delete input twin", async ({
   await expect
     .poll(() =>
       page.evaluate(
-        () => document.querySelector("[data-owned-text]")?.textContent ?? null,
+        () => document.querySelector("[data-engine-text]")?.textContent ?? null,
       ),
     )
     .toBe("xin chào bạn nhé");
@@ -1204,7 +1204,7 @@ test("native and API polyfill expose the same focused host outline", async ({
 // EditContext support.
 test("forced polyfill renders caret and selection", async ({ page }) => {
   const host = await openStory(page, FORCED_POLYFILL_STORY);
-  const caret = page.locator("[data-owned-caret]");
+  const caret = page.locator("[data-engine-caret]");
 
   await host.click();
   await page.keyboard.type("World");

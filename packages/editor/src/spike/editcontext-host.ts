@@ -7,7 +7,7 @@ import {
   install,
   releaseForcedInstall,
   syncPolyfillSelection,
-} from "../vendor/editcontext-polyfill";
+} from "../core/vendor/editcontext-polyfill";
 
 /** The exact EditContext surface the controllers depend on. */
 export type EditContextLike = EventTarget & {

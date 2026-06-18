@@ -10,7 +10,7 @@ import {
   type SerializedRichTextDecoratorNode,
 } from "./base";
 import { VirtualizedDecoratorBody } from "./decorator-virtualization";
-import { richTextNodeSignature } from "../owned-model/core/signatures";
+import { richTextNodeSignature } from "../model/signatures";
 
 /**
  * A decorator-block class as produced by `defineDecoratorBlock`: a Lexical

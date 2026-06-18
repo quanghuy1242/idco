@@ -1,11 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const SMALL_STORY = "owned-model--flow-spike--small";
-const FORCED_POLYFILL_STORY = "owned-model--flow-spike--forced-polyfill";
-const LARGE_STORY = "owned-model--flow-spike--large";
-const HUGE_STORY = "owned-model--flow-spike--huge";
-const FLOW_KEY = "__IDCO_OWNED_FLOW__";
-const FLOW_API_KEY = "__IDCO_OWNED_FLOW_API__";
+const SMALL_STORY = "engine--flow-spike--small";
+const FORCED_POLYFILL_STORY = "engine--flow-spike--forced-polyfill";
+const LARGE_STORY = "engine--flow-spike--large";
+const HUGE_STORY = "engine--flow-spike--huge";
+const FLOW_KEY = "__IDCO_ENGINE_FLOW__";
+const FLOW_API_KEY = "__IDCO_ENGINE_FLOW_API__";
 
 type FlowSelection =
   | {
@@ -64,7 +64,7 @@ function readFlow(page: Page): Promise<FlowDiagnostics | null> {
 
 async function flowDiagnostics(page: Page): Promise<FlowDiagnostics> {
   const diagnostics = await readFlow(page);
-  if (!diagnostics) throw new Error("owned-model flow diagnostics missing");
+  if (!diagnostics) throw new Error("engine flow diagnostics missing");
   return diagnostics;
 }
 
@@ -82,7 +82,7 @@ function callFlowApi<T>(
         >
       )[apiKey];
       const fn = api?.[apiMethod];
-      if (!fn) throw new Error(`owned-model flow api missing ${apiMethod}`);
+      if (!fn) throw new Error(`engine flow api missing ${apiMethod}`);
       return fn(...apiArgs);
     },
     { apiArgs: args, apiKey: FLOW_API_KEY, apiMethod: method },

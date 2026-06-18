@@ -3,7 +3,7 @@
  *
  * The implementation below is based on `@neftaly/editcontext-polyfill`, but the
  * adapter deliberately installs only the EditContext globals, element binding,
- * hidden textarea, and input/state translator. The owned-model engine paints its
+ * hidden textarea, and input/state translator. The engine engine paints its
  * own caret/selection, so we do not install upstream's selection renderer or
  * execCommand interception layer here.
  */

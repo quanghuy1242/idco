@@ -1,21 +1,21 @@
 // docs/010 Phase 2 — Input + caret + selection spike. Binds one EditContext to
-// one host element rendering a single plain-text block, with the owned-model
+// one host element rendering a single plain-text block, with the engine
 // core controllers driving input, caret, and selection. Two variants exercise
 // the same EditContext API contract: `Native` uses the platform implementation
 // when available, and `ForcedPolyfill` forces our API polyfill even on Chromium
 // (AC5).
 //
-// Driven by tests/e2e/owned-model-input.spec.ts across chromium/webkit/firefox.
+// Driven by tests/e2e/engine-input.spec.ts across chromium/webkit/firefox.
 
 import type { Story, StoryDefault } from "@ladle/react";
 import { useEffect, useRef, useState } from "react";
 import {
   createTextInputController,
-  type OwnedInputDiagnostics,
-} from "../packages/editor/src/owned-model/core";
+  type EngineInputDiagnostics,
+} from "../packages/editor/src/spike";
 
 export default {
-  title: "Owned Model / Input Spike",
+  title: "Engine / Input Spike",
 } satisfies StoryDefault;
 
 type ImeTraceEvent = {
@@ -29,7 +29,7 @@ type ImeTraceEvent = {
   readonly cancelable?: boolean;
   readonly defaultPrevented?: boolean;
   readonly model?: Pick<
-    OwnedInputDiagnostics,
+    EngineInputDiagnostics,
     "text" | "anchor" | "focus" | "composing" | "lastEvent"
   >;
   readonly textarea?: {
@@ -65,8 +65,8 @@ type ImeTrace = {
   readonly events: readonly ImeTraceEvent[];
 };
 
-const TRACE_KEY = "__IDCO_OWNED_IME_TRACE__";
-const TRACE_CONTROL_KEY = "__IDCO_OWNED_TRACE_CONTROL__";
+const TRACE_KEY = "__IDCO_ENGINE_IME_TRACE__";
+const TRACE_CONTROL_KEY = "__IDCO_ENGINE_TRACE_CONTROL__";
 
 function hiddenTextarea(host: HTMLElement): HTMLTextAreaElement | null {
   return host.shadowRoot?.querySelector("textarea") ?? null;
@@ -110,9 +110,9 @@ function InputSpike({ force }: { readonly force: boolean }) {
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const textElement = host.querySelector<HTMLElement>("[data-owned-text]");
+    const textElement = host.querySelector<HTMLElement>("[data-engine-text]");
     const overlayElement = host.querySelector<HTMLElement>(
-      "[data-owned-overlay]",
+      "[data-engine-overlay]",
     );
     if (!textElement || !overlayElement) return;
 
@@ -242,7 +242,7 @@ function InputSpike({ force }: { readonly force: boolean }) {
       </p>
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
         <button
-          data-owned-trace-start=""
+          data-engine-trace-start=""
           type="button"
           onClick={() => {
             traceRef.current = [];
@@ -253,7 +253,7 @@ function InputSpike({ force }: { readonly force: boolean }) {
           Start trace
         </button>
         <button
-          data-owned-trace-stop=""
+          data-engine-trace-stop=""
           type="button"
           onClick={() => {
             recordingRef.current = false;
@@ -264,11 +264,11 @@ function InputSpike({ force }: { readonly force: boolean }) {
         >
           Stop trace
         </button>
-        <output ref={countRef} data-owned-trace-count="">
+        <output ref={countRef} data-engine-trace-count="">
           0
         </output>
         <button
-          data-owned-trace-copy=""
+          data-engine-trace-copy=""
           type="button"
           onClick={() => {
             // Regenerate the trace from the live controller/events first, so
@@ -297,7 +297,7 @@ function InputSpike({ force }: { readonly force: boolean }) {
       </div>
       <textarea
         ref={dumpRef}
-        data-owned-trace-dump=""
+        data-engine-trace-dump=""
         readOnly
         aria-label="Recorded IME trace dump"
         placeholder="Tap 'Copy trace' to dump recorded events here, then long-press → Select all → Copy."
@@ -311,8 +311,8 @@ function InputSpike({ force }: { readonly force: boolean }) {
       />
       <div
         ref={hostRef}
-        data-owned-host=""
-        aria-label="Owned model input spike"
+        data-engine-host=""
+        aria-label="Engine input spike"
         role="textbox"
         aria-multiline="true"
         style={{
@@ -328,9 +328,9 @@ function InputSpike({ force }: { readonly force: boolean }) {
           color: "#111",
         }}
       >
-        <div data-owned-text="" />
+        <div data-engine-text="" />
         <div
-          data-owned-overlay=""
+          data-engine-overlay=""
           style={{
             position: "absolute",
             inset: 0,
@@ -339,7 +339,7 @@ function InputSpike({ force }: { readonly force: boolean }) {
         />
       </div>
       <textarea
-        data-owned-ime-baseline=""
+        data-engine-ime-baseline=""
         aria-label="Plain textarea IME baseline"
         placeholder="Plain textarea baseline"
         style={{
@@ -360,7 +360,7 @@ export const SwitchingHarness: Story = () => {
   return (
     <div style={{ display: "grid", gap: "0.75rem" }}>
       <button
-        data-owned-switch=""
+        data-engine-switch=""
         type="button"
         onClick={() => setForce(false)}
       >

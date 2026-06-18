@@ -20,7 +20,7 @@
     "typescript/no-explicit-any": "error",
     "unicorn/no-array-sort": "off",
     "architecture/editor-no-direct-update-listener": "error",
-    "architecture/owned-model-core-no-framework": "error",
+    "architecture/engine-core-no-framework": "error",
     "architecture/idco-package-boundary": "error",
     "architecture/ui-no-side-effect-css": "error",
     "architecture/ui-no-native-dialog": "error",
@@ -28,7 +28,7 @@
   },
   "overrides": [
     {
-      "files": ["packages/editor/src/owned-model/vendor/editcontext-polyfill/**/*.ts"],
+      "files": ["packages/editor/src/core/vendor/editcontext-polyfill/**/*.ts"],
       "rules": {
         "no-underscore-dangle": "off",
         "typescript/no-unsafe-declaration-merging": "off"

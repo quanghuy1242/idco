@@ -1,4 +1,4 @@
-// docs/012 Phase 2.5 — multi-block owned-model proof surface. This deliberately
+// docs/012 Phase 2.5 — multi-block engine proof surface. This deliberately
 // reuses the Phase 2 EditContext controller for the active text leaf; FlowSpike
 // only proves document-flow concerns around that centralized input substrate.
 
@@ -11,18 +11,18 @@ import {
   useRef,
   useState,
 } from "react";
+import { calculateVirtualRange } from "../packages/editor/src/core/virtual-range";
 import {
-  calculateVirtualRange,
   createTextInputController,
-  type OwnedInputDiagnostics,
-} from "../packages/editor/src/owned-model/core";
+  type EngineInputDiagnostics,
+} from "../packages/editor/src/spike";
 
 export default {
-  title: "Owned Model / Flow Spike",
+  title: "Engine / Flow Spike",
 } satisfies StoryDefault;
 
-const FLOW_KEY = "__IDCO_OWNED_FLOW__";
-const FLOW_API_KEY = "__IDCO_OWNED_FLOW_API__";
+const FLOW_KEY = "__IDCO_ENGINE_FLOW__";
+const FLOW_API_KEY = "__IDCO_ENGINE_FLOW_API__";
 const UNSUPPORTED_OBJECT_COPY = "[unsupported object]";
 const SMALL_ACTIVE_ID = "a";
 const LARGE_ACTIVE_ID = "block-3";
@@ -83,7 +83,7 @@ type FlowDiagnostics = {
   readonly dirty: FlowDirty;
   readonly selectionRectCount: number;
   readonly activeLeafId: string;
-  readonly activeInputBackend: OwnedInputDiagnostics["inputBackend"] | null;
+  readonly activeInputBackend: EngineInputDiagnostics["inputBackend"] | null;
   readonly activeInputText: string;
   readonly activeInputFocused: boolean;
   readonly activeInputLastEvent: string;
@@ -303,7 +303,7 @@ function textPosition(
     if (
       current instanceof Text &&
       !current.parentElement?.closest(
-        "[data-owned-trailing-line],[data-owned-caret-probe]",
+        "[data-engine-trailing-line],[data-engine-caret-probe]",
       )
     ) {
       if (remaining <= current.length) {
@@ -488,7 +488,7 @@ function FlowSpike({
   });
   const rectCountRef = useRef(0);
   const renderCountsRef = useRef<Record<string, number>>({});
-  const activeInputRef = useRef<OwnedInputDiagnostics | null>(null);
+  const activeInputRef = useRef<EngineInputDiagnostics | null>(null);
   const activeLeafIdRef = useRef(activeLeafId);
   const virtualViewportRef = useRef(virtualViewport);
   activeLeafIdRef.current = activeLeafId;
@@ -549,7 +549,7 @@ function FlowSpike({
   );
 
   const updateActiveInput = useCallback(
-    (diagnostics: OwnedInputDiagnostics) => {
+    (diagnostics: EngineInputDiagnostics) => {
       activeInputRef.current = diagnostics;
       blocksRef.current = blocksRef.current.map((block) =>
         block.id === activeLeafId && block.kind === "text"
@@ -994,7 +994,7 @@ function FlowTextView({
   readonly block: FlowTextBlock;
   readonly forcePolyfill: boolean;
   readonly initialSelection?: number;
-  readonly onInputState: (diagnostics: OwnedInputDiagnostics) => void;
+  readonly onInputState: (diagnostics: EngineInputDiagnostics) => void;
   readonly onRender: (id: string, count: number) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -1004,9 +1004,9 @@ function FlowTextView({
     if (!active) return;
     const host = hostRef.current;
     if (!host) return;
-    const textElement = host.querySelector<HTMLElement>("[data-owned-text]");
+    const textElement = host.querySelector<HTMLElement>("[data-engine-text]");
     const overlayElement = host.querySelector<HTMLElement>(
-      "[data-owned-overlay]",
+      "[data-engine-overlay]",
     );
     if (!textElement || !overlayElement) return;
     const controller = createTextInputController({
@@ -1032,7 +1032,7 @@ function FlowTextView({
           ref={hostRef}
           data-flow-active-leaf-host=""
           data-flow-block-id={block.id}
-          data-owned-host=""
+          data-engine-host=""
           aria-label={`Flow text block ${block.id}`}
           aria-multiline="true"
           role="textbox"
@@ -1049,10 +1049,10 @@ function FlowTextView({
           <div
             data-flow-text-content=""
             data-flow-text-id={block.id}
-            data-owned-text=""
+            data-engine-text=""
           />
           <div
-            data-owned-overlay=""
+            data-engine-overlay=""
             style={{ inset: 0, pointerEvents: "none", position: "absolute" }}
           />
         </div>

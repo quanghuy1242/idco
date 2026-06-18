@@ -36,7 +36,7 @@ export type TextDomMapper = {
 function isModelTextNode(node: Text): boolean {
   const parent = node.parentElement;
   return !parent?.closest(
-    "[data-owned-trailing-line],[data-owned-caret-probe]",
+    "[data-engine-trailing-line],[data-engine-caret-probe]",
   );
 }
 

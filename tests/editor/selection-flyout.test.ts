@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldSelectionFlyoutCloseOnInteractOutside } from "../../packages/editor/src/plugins/selection-flyout-plugin";
+import { shouldSelectionFlyoutCloseOnInteractOutside } from "../../packages/editor/src/legacy/plugins/selection-flyout-plugin";
 
 function fixture() {
   document.body.innerHTML = `

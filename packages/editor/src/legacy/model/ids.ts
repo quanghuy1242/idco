@@ -1,7 +1,4 @@
-import type {
-  RichTextEditorDocument,
-  RichTextEditorNode,
-} from "../../model/schema";
+import type { RichTextEditorDocument, RichTextEditorNode } from "./schema";
 import { richTextNodeSignature } from "./signatures";
 
 export type RichTextNodeId = `rt_${string}`;

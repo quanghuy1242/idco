@@ -1,8 +1,5 @@
 import { richTextNodeText } from "@quanghuy1242/idco-lib";
-import type {
-  RichTextEditorDocument,
-  RichTextEditorNode,
-} from "../../model/schema";
+import type { RichTextEditorDocument, RichTextEditorNode } from "./schema";
 
 export function richTextDocumentSignature(
   document: RichTextEditorDocument,

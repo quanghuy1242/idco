@@ -3,7 +3,7 @@ import {
   blockGapAtY,
   blockGapCandidates,
   gapCursorRect,
-} from "../../packages/editor/src/model/gap-cursor";
+} from "../../packages/editor/src/legacy/model/gap-cursor";
 
 describe("gapCursorRect", () => {
   it("draws a horizontal insertion marker inside the visible gap", () => {

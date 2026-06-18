@@ -1,6 +1,6 @@
 # Vendored EditContext polyfill
 
-Per docs/010 §5.5 / §6.7, the owned-model engine binds to the **EditContext API
+Per docs/010 §5.5 / §6.7, the engine engine binds to the **EditContext API
 surface only**. On Chromium it is native; on Firefox/Safari it is provided by a
 vendored polyfill so we own its correctness, can pin and audit it, and patch IME
 edge cases without depending on an external release cadence. When native
@@ -23,7 +23,7 @@ binding. The local `index.ts` is a thin adapter that preserves this repo's
 
 The upstream `selection-renderer.ts`, `mouse-handler.ts`, and
 `exec-command-interceptor.ts` are intentionally not installed here. The
-owned-model engine already owns pointer selection, caret painting, selection
+engine engine already owns pointer selection, caret painting, selection
 overlays, shortcut handling, and browser-selection suppression. Keeping those
 layers out of the vendor adapter prevents double-rendered carets/selections and
 keeps the polyfill scoped to input + `EditContext` state.

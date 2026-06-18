@@ -23,7 +23,7 @@ import { DEFAULT_ALLOWED_NODES } from "@idco/editor";
 import {
   enabledTextSelectionActions,
   readTextSelectionContext,
-} from "../../packages/editor/src/model/selection-actions";
+} from "../../packages/editor/src/legacy/model/selection-actions";
 
 function Capture({ onReady }: { onReady: (editor: LexicalEditor) => void }) {
   const [editor] = useLexicalComposerContext();

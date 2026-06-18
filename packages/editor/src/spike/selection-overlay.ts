@@ -47,7 +47,7 @@ export type CreateSelectionOverlayOptions = {
   readonly editContext: EditContextLike;
 };
 
-const SUPPRESS_STYLE_ID = "idco-owned-model-native-selection-suppress";
+const SUPPRESS_STYLE_ID = "idco-engine-native-selection-suppress";
 const CARET_WIDTH_PX = 1;
 const CARET_HEIGHT_FONT_SCALE = 1.12;
 const MIN_CARET_HEIGHT_PX = 12;
@@ -161,8 +161,8 @@ function ensureNativeSuppressStyle(doc: Document): void {
   const style = doc.createElement("style");
   style.id = SUPPRESS_STYLE_ID;
   style.textContent = [
-    "[data-owned-host]{caret-color:transparent;}",
-    "[data-owned-host]::selection,[data-owned-host] ::selection{background:transparent;}",
+    "[data-engine-host]{caret-color:transparent;}",
+    "[data-engine-host]::selection,[data-engine-host] ::selection{background:transparent;}",
   ].join("");
   doc.head.append(style);
 }
@@ -177,7 +177,7 @@ export function createSelectionOverlay(
   ensureNativeSuppressStyle(doc);
 
   const caret = doc.createElement("div");
-  caret.dataset.ownedCaret = "";
+  caret.dataset.engineCaret = "";
   Object.assign(caret.style, {
     position: "absolute",
     width: `${CARET_WIDTH_PX}px`,
@@ -202,7 +202,7 @@ export function createSelectionOverlay(
       : null;
 
   const rectLayer = doc.createElement("div");
-  rectLayer.dataset.ownedSelection = "";
+  rectLayer.dataset.engineSelection = "";
   Object.assign(rectLayer.style, {
     position: "absolute",
     inset: "0",
@@ -241,7 +241,7 @@ export function createSelectionOverlay(
   ): { left: number; top: number; height: number } | null {
     const markerHeight = textLineMetrics(textElement).lineHeight;
     const marker = doc.createElement("span");
-    marker.dataset.ownedCaretProbe = "";
+    marker.dataset.engineCaretProbe = "";
     marker.textContent = "\u200b";
     Object.assign(marker.style, {
       display: "inline-block",
@@ -336,7 +336,7 @@ export function createSelectionOverlay(
       selectionRange = rangeFor(lo, hi);
       for (const rect of Array.from(selectionRange.getClientRects())) {
         const box = doc.createElement("div");
-        box.dataset.ownedSelrect = "";
+        box.dataset.engineSelrect = "";
         Object.assign(box.style, {
           position: "absolute",
           left: `${rect.left - hostRect.left}px`,

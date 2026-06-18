@@ -21,19 +21,19 @@ export default defineConfig({
       },
     },
     // docs/010 Phase 2 (the cross-browser foundation gate) adds the webkit and
-    // firefox projects. They run only the owned-model specs — the legacy
+    // firefox projects. They run only the engine specs — the legacy
     // chromium-tuned editor perf specs (G2) stay chromium-only. The browser
     // binaries must be provisioned with `pnpm exec playwright install webkit
     // firefox` (and, on Linux, the host libraries via
-    // `pnpm exec playwright install-deps`); see tests/e2e/owned-model-input.spec.ts.
+    // `pnpm exec playwright install-deps`); see tests/e2e/engine-input.spec.ts.
     {
       name: "webkit",
-      testMatch: /owned-model-.*\.spec\.ts/,
+      testMatch: /engine-.*\.spec\.ts/,
       use: { ...devices["Desktop Safari"] },
     },
     {
       name: "firefox",
-      testMatch: /owned-model-.*\.spec\.ts/,
+      testMatch: /engine-.*\.spec\.ts/,
       use: { ...devices["Desktop Firefox"] },
     },
   ],

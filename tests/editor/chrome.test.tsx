@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   BlockChrome,
   ChromeButton,
-} from "../../packages/editor/src/nodes/chrome";
+} from "../../packages/editor/src/legacy/nodes/chrome";
 
 describe("BlockChrome", () => {
   it("standardizes the block title on the left and actions on the right", () => {

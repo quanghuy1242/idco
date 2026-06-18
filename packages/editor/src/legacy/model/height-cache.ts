@@ -1,7 +1,4 @@
-import type {
-  RichTextEditorDocument,
-  RichTextEditorNode,
-} from "../../model/schema";
+import type { RichTextEditorDocument, RichTextEditorNode } from "./schema";
 
 export type SectionHeightCacheKey = {
   readonly sectionId: string;
@@ -10,7 +7,7 @@ export type SectionHeightCacheKey = {
 
 /**
  * Minimal shape the height estimator needs. Decoupled from the retired section
- * shell's `RichTextDocumentSection` so the cache stays a pure owned-model core
+ * shell's `RichTextDocumentSection` so the cache stays a pure engine core
  * helper: anything carrying a document of blocks can be estimated.
  */
 export type SectionHeightInput = {

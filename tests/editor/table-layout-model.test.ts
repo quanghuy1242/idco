@@ -3,7 +3,7 @@ import {
   columnWidthRatios,
   moveArrayItem,
   scaleColumnWidths,
-} from "../../packages/editor/src/model/layout";
+} from "../../packages/editor/src/legacy/model/layout";
 
 const sum = (widths: readonly number[]) =>
   widths.reduce((total, width) => total + width, 0);

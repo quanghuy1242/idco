@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { normalizeDocument } from "../../packages/editor/src/model/normalize";
-import { lexicalEditorState } from "../../packages/editor/src/model/serialize";
+import { normalizeDocument } from "../../packages/editor/src/legacy/model/normalize";
+import { lexicalEditorState } from "../../packages/editor/src/legacy/model/serialize";
 
 type LexNode = {
   readonly type: string;

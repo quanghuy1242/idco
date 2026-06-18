@@ -1,23 +1,21 @@
-export { RichTextEditor } from "./RichTextEditor";
-export type { RichTextEditorProps } from "./RichTextEditor";
+export { RichTextEditor } from "./legacy/RichTextEditor";
+export type { RichTextEditorProps } from "./legacy/RichTextEditor";
 export type {
   RichTextEditorDocument,
   RichTextEditorNode,
   RichTextEditorMediaOption,
   RichTextEditorPostOption,
-} from "./model/schema";
-export type { RichTextNodeId } from "./owned-model/core";
-export {
-  calculateVirtualRange,
-  ensureDocumentNodeIds,
-} from "./owned-model/core";
+} from "./legacy/model/schema";
+export type { RichTextNodeId } from "./legacy/model/ids";
+export { calculateVirtualRange } from "./core/virtual-range";
+export { ensureDocumentNodeIds } from "./legacy/model/ids";
 export {
   ALIGNMENTS,
   DEFAULT_ALLOWED_NODES,
   TEXT_FORMAT,
   type RichTextAlignment,
-} from "./model/schema";
-export { capabilityFor, type BlockKind } from "./model/capabilities";
+} from "./legacy/model/schema";
+export { capabilityFor, type BlockKind } from "./legacy/model/capabilities";
 export {
   CalloutNode,
   CodeBlockNode,
@@ -29,4 +27,4 @@ export {
   INSERT_RICH_TEXT_NODE_COMMAND,
   type RichTextEditorBindings,
   type RichTextEditorComment,
-} from "./nodes";
+} from "./legacy/nodes";

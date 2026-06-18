@@ -9,13 +9,13 @@
 > - `packages/content-renderer/src/index.tsx` — the current `"use client"` whole-document read renderer. **Retired by this plan**, not extended.
 > - `packages/ui/src/rich-text-content.tsx` and the `RichText*` family in `@quanghuy1242/idco-ui` — the current visual primitives the reader and editor both lean on; their RSC-safe core is reclaimed by this plan.
 > - future `packages/reader/**` — the new read tier: an RSC-safe presentational primitive layer, a server `Reader`, and the opt-in client islands.
-> - `packages/editor/src/owned-model/view/**` — the editor view layer (011 §11), which renders resting blocks through the **same** primitive layer this document defines.
-> - `packages/editor/src/RichTextEditor.tsx` — the standard Lexical editor, retired together with the Lexical-shaped compat projection once the owned-model editor and this reader reach parity (§8).
+> - `packages/editor/src/engine/view/**` — the editor view layer (011 §11), which renders resting blocks through the **same** primitive layer this document defines.
+> - `packages/editor/src/RichTextEditor.tsx` — the standard Lexical editor, retired together with the Lexical-shaped compat projection once the editor and this reader reach parity (§8).
 >
 > Source docs:
 >
 > - `docs/006_editor_toolbar_redesign_plan.md` — the three render tiers, the bake pipeline, the reader-tier opt-in interactivity.
-> - `docs/010_owned_model_virtualized_editor_plan.md` — the owned-model editor, §5.9 render-tier mapping, and the reader-boundary open decision (§12) this document closes.
+> - `docs/010_owned_model_virtualized_editor_plan.md` — the editor, §5.9 render-tier mapping, and the reader-boundary open decision (§12) this document closes.
 > - `docs/011_foundation_dsa_owned_model_editor.md` — the model, the projection, the editor view layer, and the `virtualize` toggle (§2.6) the reader does not use.
 >
 > Foundation contract:
@@ -33,7 +33,7 @@
 >
 > - The reader renders the **same baked artifact** the export tier consumes (010 §5.9): heavy objects are baked to static HTML/SVG/image at author time, so the reader runs no Prism, no Mermaid, no grid engine for resting content.
 > - React 19 is in use across the workspace, so Server Components and selective hydration are available; the read tier targets a Server-Component host (App Router or equivalent), and the static reader ships zero JavaScript for prose and baked objects.
-> - The reader consumes the document the editor persists. Today that is the `RichTextEditorDocument` compatibility projection; after the persistence flip (§8) it is `OwnedDocumentSnapshot` directly. The reader is written against a projection adapter so the flip does not rewrite the primitive layer.
+> - The reader consumes the document the editor persists. Today that is the `RichTextEditorDocument` compatibility projection; after the persistence flip (§8) it is `EditorDocumentSnapshot` directly. The reader is written against a projection adapter so the flip does not rewrite the primitive layer.
 > - The bake fields, document settings, and node semantics are shared truth owned by 006/010/011; this document does not redefine them, it renders them.
 > - Backlog, per-ticket breakdown, and acceptance criteria are intentionally omitted; this is the architecture and the decisions, in the shape of docs/011.
 
@@ -74,9 +74,9 @@
 
 ## 1. Purpose
 
-Define the read tier of the IDCO live-book platform, and pin the one substrate that guarantees the reader and the editor cannot diverge visually. The editor work in 010/011 produced an owned-model engine whose resting blocks already render a baked static form. This document takes that static form and makes it the published reader: a **true Server Component** that ships no editor runtime, runs no heavy libraries for resting content, and renders through the **same** view components the editor mounts at rest, so a paragraph, a baked code block, or a baked table looks identical whether an author is editing it or a reader is reading it.
+Define the read tier of the IDCO live-book platform, and pin the one substrate that guarantees the reader and the editor cannot diverge visually. The editor work in 010/011 produced an engine whose resting blocks already render a baked static form. This document takes that static form and makes it the published reader: a **true Server Component** that ships no editor runtime, runs no heavy libraries for resting content, and renders through the **same** view components the editor mounts at rest, so a paragraph, a baked code block, or a baked table looks identical whether an author is editing it or a reader is reading it.
 
-The reader is not a second renderer that approximates the editor. It is the editor's resting render, lifted out of the client editing shell and run on the server. That single inversion removes the read-versus-edit drift class of bug at the root, and it is the explicit reason this tier shares a primitive layer with the editor rather than re-implementing one. The plan also retires two things on the way: `@quanghuy1242/idco-content-renderer`, the current client-only read renderer, and the Lexical standard editor with its Lexical-shaped compat JSON, once the owned-model editor and this reader reach parity (§8).
+The reader is not a second renderer that approximates the editor. It is the editor's resting render, lifted out of the client editing shell and run on the server. That single inversion removes the read-versus-edit drift class of bug at the root, and it is the explicit reason this tier shares a primitive layer with the editor rather than re-implementing one. The plan also retires two things on the way: `@quanghuy1242/idco-content-renderer`, the current client-only read renderer, and the Lexical standard editor with its Lexical-shaped compat JSON, once the editor and this reader reach parity (§8).
 
 ## 2. The Drift Problem, Stated Correctly
 
@@ -136,7 +136,7 @@ Reader / shared view substrate
 ├── L2a Server Reader              (packages/reader, the published read tier)
 │       walks the projection, renders L1 on the server, mounts L3 islands by registry
 │       content-visibility virtualization; zero editor JS
-├── L2b Editor view shell          (packages/editor/owned-model/view, the editing tier)
+├── L2b Editor view shell          (packages/editor/engine/view, the editing tier)
 │       wraps L1 with edit chrome, input, selection overlay, unmount-window virtualization
 └── L3  Client enhancement islands (packages/reader, opt-in)
         checklist toggle, sortable/filterable grid, pan-zoom diagram, scroll-spy TOC
@@ -169,7 +169,7 @@ The server reader is a straight pipeline with no editing concepts in it.
 
 ```text
 persisted document
-   → projection adapter        (RichTextEditorDocument today; OwnedDocumentSnapshot after §8)
+   → projection adapter        (RichTextEditorDocument today; EditorDocumentSnapshot after §8)
    → resolve host data         (resolveMedia, resolvePost — the content-renderer resolvers, kept)
    → derive read indexes       (heading anchors, TOC entries — 011 §11.4 indexes, run server-side)
    → render L1 primitives       (Server Component tree, baked fields in, HTML out)
@@ -179,7 +179,7 @@ persisted document
 
 Three properties pin it. The pipeline takes the document the editor already persists, so there is no reader-specific storage format and no second source of truth. It runs entirely on the server for static content, so prose and baked objects ship as HTML with no client JavaScript. The derived indexes (anchors, TOC) are the same ones the editor builds (011 §11.4), run here in a server pass, so a heading's anchor in the reader matches the editor's and a TOC link resolves to the same id; the reader does not invent a parallel anchoring scheme.
 
-The projection adapter is the seam that absorbs the §8 persistence flip. The reader is written against the adapter's output, not against the raw stored shape, so flipping storage from the Lexical-shaped compat JSON to `OwnedDocumentSnapshot` swaps the adapter and leaves L1 and the pipeline untouched.
+The projection adapter is the seam that absorbs the §8 persistence flip. The reader is written against the adapter's output, not against the raw stored shape, so flipping storage from the Lexical-shaped compat JSON to `EditorDocumentSnapshot` swaps the adapter and leaves L1 and the pipeline untouched.
 
 ### 4.5 Two read artifacts: server Reader and editor read-mode
 
@@ -274,17 +274,17 @@ The editor depends on the reader's L1, never the reverse. L1 depends only on `@q
 
 ### 7.3 What moves, what is reclaimed, what is retired
 
-- **Retired:** `@quanghuy1242/idco-content-renderer` (`packages/content-renderer`). Its job, walking the projection and rendering each node, is the server reader's job, done RSC-native. Its resolvers (`resolveMedia`, `resolvePost`) and its renderer-override extension point move to `packages/reader` intact, because they are the right host-data seam. The package is removed, not extended; its two current consumers (the editor view layer at `packages/editor/src/owned-model/view/index.ts`, and the Ladle story) re-point at `packages/reader`.
+- **Retired:** `@quanghuy1242/idco-content-renderer` (`packages/content-renderer`). Its job, walking the projection and rendering each node, is the server reader's job, done RSC-native. Its resolvers (`resolveMedia`, `resolvePost`) and its renderer-override extension point move to `packages/reader` intact, because they are the right host-data seam. The package is removed, not extended; its two current consumers (the editor view layer at `packages/editor/src/engine/view/index.ts`, and the Ladle story) re-point at `packages/reader`.
 - **Reclaimed:** the RSC-safe core of the `RichText*` primitives currently in `@quanghuy1242/idco-ui` becomes L1 in `packages/reader`. The pure primitives (paragraph, heading, list, blockquote, callout, baked code, baked table, media figure, inline marks) are the static base. The interactive ones (the checklist checkbox, the live code editor, the sticky/scroll-spy TOC) split: their static visual becomes an L1 primitive, their behavior becomes an L3 island. The `"use client"` taint that made the whole reader a client component (§3.1) is removed by this split.
 - **Kept where it is:** `@quanghuy1242/idco-ui` remains the app-wide UI library for the authoring app's own chrome (buttons, dialogs, the toolbar). The reader does not depend on the interactive parts of `@idco/ui`; it depends on L1, which is the reader's own RSC-safe layer. Whether L1 physically lives in `packages/reader` or in a thin RSC-safe subpath that `@idco/ui` also re-exports is an internal placement detail, settled by the import-boundary check, not a design fork.
 
 ## 8. Retiring Lexical Through The Reader
 
-The intent is to kill Lexical once the owned-model editor and this reader reach parity, and the reader is the consumer that makes the kill clean. Lexical lives in two places relevant here: the standard editor (`packages/editor/src/RichTextEditor.tsx`), and the Lexical-shaped `RichTextEditorDocument` JSON that is both the editor's compat projection and the document the reader consumes today. The reader touches the second.
+The intent is to kill Lexical once the editor and this reader reach parity, and the reader is the consumer that makes the kill clean. Lexical lives in two places relevant here: the standard editor (`packages/editor/src/RichTextEditor.tsx`), and the Lexical-shaped `RichTextEditorDocument` JSON that is both the editor's compat projection and the document the reader consumes today. The reader touches the second.
 
-The retirement is staged through the projection adapter (§4.4). While Lexical is alive, the reader consumes the Lexical-shaped projection through the adapter, and the editor emits that same projection, so the reader and the standard editor agree on every byte. When the owned-model editor reaches parity and persistence flips to `OwnedDocumentSnapshot` (010 §12's persistence-format decision), the adapter switches to read the owned snapshot directly, the reader's L1 and pipeline do not change, and the Lexical-shaped projection stops being a runtime format. At that point the standard editor and its Lexical dependency are removed: the owned-model editor is the only editor, the server reader is the only reader, and `OwnedDocumentSnapshot` is the only persisted shape. The reader never depended on Lexical, only on the projection adapter's output, so retiring Lexical is a storage and editor change that leaves the read tier intact.
+The retirement is staged through the projection adapter (§4.4). While Lexical is alive, the reader consumes the Lexical-shaped projection through the adapter, and the editor emits that same projection, so the reader and the standard editor agree on every byte. When the editor reaches parity and persistence flips to `EditorDocumentSnapshot` (010 §12's persistence-format decision), the adapter switches to read the owned snapshot directly, the reader's L1 and pipeline do not change, and the Lexical-shaped projection stops being a runtime format. At that point the standard editor and its Lexical dependency are removed: the editor is the only editor, the server reader is the only reader, and `EditorDocumentSnapshot` is the only persisted shape. The reader never depended on Lexical, only on the projection adapter's output, so retiring Lexical is a storage and editor change that leaves the read tier intact.
 
-This is the endgame the reader is designed for, and it is why the reader is written against an adapter rather than against the raw stored JSON: the format under the adapter is allowed to change from Lexical-shaped to owned-model-shaped without the read tier noticing.
+This is the endgame the reader is designed for, and it is why the reader is written against an adapter rather than against the raw stored JSON: the format under the adapter is allowed to change from Lexical-shaped to EditorDocument-shaped without the read tier noticing.
 
 ## 9. Architecture Decisions
 
@@ -294,7 +294,7 @@ This is the endgame the reader is designed for, and it is why the reader is writ
 - **Decision: reader = export tier + opt-in islands.** The reader inherits export's "render the baked field, run no heavy libraries" discipline, so any object with a correct baked field reads correctly for free (§4.3). Rejected: re-deriving live renders in the reader (running Prism or Mermaid client-side), which would duplicate the editor's live surfaces and re-open the drift the bake model closes.
 - **Decision: a dedicated `packages/reader`, with the editor depending onto it.** The reader cannot live inside the client-heavy editor package without risking the RSC boundary (§7.1); a dedicated package puts L1 at the bottom of the dependency graph where both tiers depend down onto it (§7.2). Rejected: folding the reader into the editor package; rejected: a separate `packages/reader-primitives` on top of `packages/reader`, which adds a package for no boundary the import-check does not already enforce.
 - **Decision: the island registry mirrors the block registry by `kind`.** The reader's interactive island and the editor's live-edit surface are separate components keyed by the same `kind` over the same baked field (§6.2), which closes 010 §12's open reader-sharing boundary: identity and baked data are shared, surfaces are separate and minimal.
-- **Decision: retire `content-renderer` and Lexical through the adapter, not through the read tier.** The reader consumes a projection adapter, so the format under it can flip from Lexical-shaped JSON to `OwnedDocumentSnapshot` and Lexical can be removed without changing L1 or the pipeline (§8). Rejected: writing the reader against the raw stored JSON, which would couple the read tier to the format being retired.
+- **Decision: retire `content-renderer` and Lexical through the adapter, not through the read tier.** The reader consumes a projection adapter, so the format under it can flip from Lexical-shaped JSON to `EditorDocumentSnapshot` and Lexical can be removed without changing L1 or the pipeline (§8). Rejected: writing the reader against the raw stored JSON, which would couple the read tier to the format being retired.
 
 ## 10. Risks, Edge Cases, And Failure Modes
 
@@ -309,4 +309,4 @@ This is the endgame the reader is designed for, and it is why the reader is writ
 
 ## 11. Final Model
 
-The IDCO reader is the editor's resting render, lifted out of the client editing shell and run on the server. It shares one layer with the editor, the RSC-safe presentational primitives (L1) that turn a node and its baked fields into DOM, and it shares nothing above that layer, so a paragraph, a baked code block, or a baked table is the same component whether an author edits it or a reader reads it, and read-versus-edit drift is unrepresentable rather than merely discouraged. The reader is a true Server Component for all static content, runs no heavy libraries because it renders baked fields the way the export tier does, and adds interactivity only as opt-in islands keyed to the same `kind` the editor registers, so the static page is always complete on its own. It virtualizes with `content-visibility` rather than the editor's unmount-window, which keeps native find, select, and copy and sheds the three hardest editor surfaces instead of inheriting them. It lives in `packages/reader` at the bottom of the dependency graph, retires `@quanghuy1242/idco-content-renderer`, and reads through a projection adapter so the format beneath it can flip from Lexical-shaped JSON to `OwnedDocumentSnapshot` and Lexical can be removed without the read tier changing. This is the read tier a live technical book platform needs: identical to the editor by construction, free of the editor's runtime by architecture, and native to the platform for everything the platform already does well.
+The IDCO reader is the editor's resting render, lifted out of the client editing shell and run on the server. It shares one layer with the editor, the RSC-safe presentational primitives (L1) that turn a node and its baked fields into DOM, and it shares nothing above that layer, so a paragraph, a baked code block, or a baked table is the same component whether an author edits it or a reader reads it, and read-versus-edit drift is unrepresentable rather than merely discouraged. The reader is a true Server Component for all static content, runs no heavy libraries because it renders baked fields the way the export tier does, and adds interactivity only as opt-in islands keyed to the same `kind` the editor registers, so the static page is always complete on its own. It virtualizes with `content-visibility` rather than the editor's unmount-window, which keeps native find, select, and copy and sheds the three hardest editor surfaces instead of inheriting them. It lives in `packages/reader` at the bottom of the dependency graph, retires `@quanghuy1242/idco-content-renderer`, and reads through a projection adapter so the format beneath it can flip from Lexical-shaped JSON to `EditorDocumentSnapshot` and Lexical can be removed without the read tier changing. This is the read tier a live technical book platform needs: identical to the editor by construction, free of the editor's runtime by architecture, and native to the platform for everything the platform already does well.

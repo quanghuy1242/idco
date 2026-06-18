@@ -3,7 +3,7 @@
 // input → model → render, model-owned selection, geometry fed to the
 // EditContext — before any document model or virtualization exists.
 //
-// Framework-free (owned-model/core, enforced by lint). DOM event plumbing is
+// Framework-free (spike reference; not canonical). DOM event plumbing is
 // allowed; React/Lexical are not.
 
 import { caretPointFromCoordinates, type CaretPoint } from "./caret-from-point";
@@ -25,7 +25,7 @@ export type TextInputState = {
   focus: number;
 };
 
-export type OwnedInputDiagnostics = TextInputState & {
+export type EngineInputDiagnostics = TextInputState & {
   readonly inputBackend: EditContextBackend;
   readonly composing: boolean;
   readonly focused: boolean;
@@ -40,7 +40,7 @@ export type OwnedInputDiagnostics = TextInputState & {
 
 export type TextInputController = {
   readonly getState: () => TextInputState;
-  readonly getDiagnostics: () => OwnedInputDiagnostics;
+  readonly getDiagnostics: () => EngineInputDiagnostics;
   readonly destroy: () => void;
 };
 
@@ -54,17 +54,17 @@ export type CreateTextInputControllerOptions = {
     readonly focus: number;
   };
   readonly forcePolyfill?: boolean;
-  /** Publish diagnostics onto `window.__IDCO_OWNED_INPUT__` for the spike. */
+  /** Publish diagnostics onto `window.__IDCO_ENGINE_INPUT__` for the spike. */
   readonly publishGlobal?: boolean;
   /**
    * Project controller state into another spike shell. This keeps the
    * EditContext/native-polyfill input loop centralized while FlowSpike mirrors
    * the active leaf into its wider model.
    */
-  readonly onStateChange?: (diagnostics: OwnedInputDiagnostics) => void;
+  readonly onStateChange?: (diagnostics: EngineInputDiagnostics) => void;
 };
 
-const GLOBAL_KEY = "__IDCO_OWNED_INPUT__";
+const GLOBAL_KEY = "__IDCO_ENGINE_INPUT__";
 
 type DemoBoldMark = {
   readonly start: number;
@@ -113,7 +113,7 @@ function isTrailingLinePoint(
     point.node.nodeType === Node.ELEMENT_NODE
       ? (point.node as Element)
       : point.node.parentElement;
-  return Boolean(node?.closest("[data-owned-trailing-line]")) &&
+  return Boolean(node?.closest("[data-engine-trailing-line]")) &&
     textElement.contains(node)
     ? true
     : point.node === textElement && point.offset > 0;
@@ -420,9 +420,9 @@ export function createTextInputController(
     const wrapper = host.ownerDocument.createElement(
       segmentOptions.bold ? "strong" : "span",
     );
-    if (segmentOptions.bold) wrapper.dataset.ownedBold = "";
+    if (segmentOptions.bold) wrapper.dataset.engineBold = "";
     if (segmentOptions.composition) {
-      wrapper.dataset.ownedComposition = "";
+      wrapper.dataset.engineComposition = "";
       Object.assign(wrapper.style, {
         textDecorationLine: "underline",
         textDecorationStyle: underlineStyle(
@@ -479,7 +479,7 @@ export function createTextInputController(
       // model end without adding anything to `state.text`, clipboard text, or
       // the first text node that offset mapping uses.
       const trailingLine = host.ownerDocument.createElement("span");
-      trailingLine.dataset.ownedTrailingLine = "";
+      trailingLine.dataset.engineTrailingLine = "";
       trailingLine.setAttribute("aria-hidden", "true");
       trailingLine.textContent = "\u200b";
       Object.assign(trailingLine.style, {
@@ -505,7 +505,7 @@ export function createTextInputController(
       focused,
     });
     lastOverlayInfo = info;
-    const diagnostics: OwnedInputDiagnostics = {
+    const diagnostics: EngineInputDiagnostics = {
       ...state,
       inputBackend: editHost.backend,
       composing,
@@ -996,7 +996,7 @@ export function createTextInputController(
     return { ...state };
   }
 
-  function getDiagnostics(): OwnedInputDiagnostics {
+  function getDiagnostics(): EngineInputDiagnostics {
     return {
       ...state,
       inputBackend: editHost.backend,

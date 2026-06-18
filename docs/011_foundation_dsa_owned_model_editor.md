@@ -1,4 +1,4 @@
-# 011 - Foundation: Data Structures & Algorithms for the Owned-Model Editor
+# 011 - Foundation: Data Structures & Algorithms for the Editor Engine
 
 > Status: design foundation (pre-implementation). Pure design and rationale.
 >
@@ -475,7 +475,7 @@ dispatch(transaction):
     → the selection view re-derives Ranges, repaints overlay rects + caret (§8.5)
 ```
 
-`comparePoints` keeps document order truthful, `mapSelection` keeps the selection valid, and the per-leaf offset↔node map serves both the edit patch and the paint. The chokepoint (§6.1) guarantees the whole sequence runs on every change, so no path mutates the document and forgets to remap the selection or repaint. Miss one step and you get the classic owned-model failure: a selection that points at a node that no longer exists, or a highlight painted over stale geometry. The notify step is where the scheduler (docs/008) takes over: the model step lands on the `sync` lane, and the render and repaint coalesce onto one `frame` task (§7.3 of 010), so a keystroke never triggers a synchronous per-subscriber re-render.
+`comparePoints` keeps document order truthful, `mapSelection` keeps the selection valid, and the per-leaf offset↔node map serves both the edit patch and the paint. The chokepoint (§6.1) guarantees the whole sequence runs on every change, so no path mutates the document and forgets to remap the selection or repaint. Miss one step and you get the classic failure of owning the model: a selection that points at a node that no longer exists, or a highlight painted over stale geometry. The notify step is where the scheduler (docs/008) takes over: the model step lands on the `sync` lane, and the render and repaint coalesce onto one `frame` task (§7.3 of 010), so a keystroke never triggers a synchronous per-subscriber re-render.
 
 ### 6.8 The store representation: mutable store, immutable nodes
 
@@ -715,7 +715,7 @@ CSS Custom Highlight remains a future optimization over the same `deriveRanges` 
 
 1. Model is truth, DOM is a projection. Native selection is never read as authority except to translate a user gesture into a model selection.
 2. One-way valves. Gesture to model: read `caretPositionFromPoint` or the native range, map, done. Model to DOM and paint: set behind an "updating" flag so the resulting `selectionchange` cannot echo back and re-trigger. Without this guard you get an infinite DOM-to-model loop.
-3. Remap on every transaction. After any step, `selection = mapSelection(selection, steps)`. A delete that removes the focus node moves focus to the nearest valid position. A selection must never point at a node that no longer exists, which is the number-one owned-model selection crash, prevented by remap-or-reset on every transaction, no exceptions. The full mapping contract is §8.8.
+3. Remap on every transaction. After any step, `selection = mapSelection(selection, steps)`. A delete that removes the focus node moves focus to the nearest valid position. A selection must never point at a node that no longer exists, which is the number-one model-owned selection crash, prevented by remap-or-reset on every transaction, no exceptions. The full mapping contract is §8.8.
 4. Survives virtualization for free. Endpoints are `(NodeId, offset)`, so unmounting the middle changes painting, not the selection.
 5. Document-order comparator (§5.4) backs render, copy, delete, and extend.
 6. Block-atomic across objects (§8.2).
@@ -956,7 +956,7 @@ The host hands the editor the document it already persists (compat JSON), gets t
 ```
 interface OwnedEditorHandle {
   getDocument(): RichTextEditorDocument;          // current compat projection
-  getOwnedSnapshot(): OwnedDocumentSnapshot;       // the authoritative model
+  getEditorSnapshot(): EditorDocumentSnapshot;       // the authoritative model
   isDirty(): boolean;
 
   focus(at?: Point): void;
@@ -1084,4 +1084,4 @@ What needs nothing, and why structure is already done. The tree is identity-addr
 
 What we deliberately do not build in Phase 3: rebasing, awareness and presence, multi-peer tombstone GC, the concurrent-move conflict rule, any network or provider. Single-user tombstone GC is collect-on-commit, since there are no peers to wait for. The hard problems that any CRDT choice would face, concurrent tree-move, heavy-object merge semantics, selective undo, interleaving, projection determinism, are catalogued with recommended leans in docs/014 §7; none blocks Phase 3, and the single-user model forecloses none of them.
 
-The build-versus-buy call, recorded: we own the minimal run-encoded sequence rather than embedding a CRDT library for it. We are already building the model, steps, history, selection, and input; taking a foundational dependency on a library, plus its formatting assumptions we do not want, to get one data structure is the wrong trade. A CRDT library stays available later as a replication adapter under the owned model, the posture docs/013's rejection approved, never as the authoritative document.
+The build-versus-buy call, recorded: we own the minimal run-encoded sequence rather than embedding a CRDT library for it. We are already building the model, steps, history, selection, and input; taking a foundational dependency on a library, plus its formatting assumptions we do not want, to get one data structure is the wrong trade. A CRDT library stays available later as a replication adapter under the model we own, the posture docs/013's rejection approved, never as the authoritative document.
