@@ -252,6 +252,21 @@ function importCompatNode(
     return [id];
   }
   if (node.type === "quote" || node.type === "editor-quote") {
+    if (hasBlockChildren(node.children)) {
+      const children = (node.children ?? []).flatMap((child) =>
+        importCompatNode(child, state),
+      );
+      state.blocks.set(
+        id,
+        makeStructuralNode({
+          attrs: pickAttrs(node, ["format"]),
+          children,
+          id,
+          type: "quote",
+        }),
+      );
+      return [id];
+    }
     const content = state.allocator.createTextSlice(
       textFromInlineChildren(node.children),
     );
@@ -268,6 +283,21 @@ function importCompatNode(
     return [id];
   }
   if (node.type === "callout") {
+    if (hasBlockChildren(node.children)) {
+      const children = (node.children ?? []).flatMap((child) =>
+        importCompatNode(child, state),
+      );
+      state.blocks.set(
+        id,
+        makeStructuralNode({
+          attrs: pickAttrs(node, ["tone"]),
+          children,
+          id,
+          type: "callout",
+        }),
+      );
+      return [id];
+    }
     const content = state.allocator.createTextSlice(
       textFromInlineChildren(node.children),
     );
@@ -307,6 +337,19 @@ function importCompatNode(
     return [id];
   }
   if (node.type === "listitem" || node.type === "editor-listitem") {
+    if (hasBlockChildren(node.children)) {
+      const children = importListItemChildren(node.children, state);
+      state.blocks.set(
+        id,
+        makeStructuralNode({
+          attrs: pickAttrs(node, ["checked", "value"]),
+          children,
+          id,
+          type: "listitem",
+        }),
+      );
+      return [id];
+    }
     const content = state.allocator.createTextSlice(
       textFromInlineChildren(node.children),
     );
@@ -368,9 +411,12 @@ function exportCompatNode(
     return [
       {
         ...node.attrs,
-        children: node.children.flatMap((id) =>
-          exportCompatNode(snapshot.body.blocks[id], snapshot, registry),
-        ),
+        children:
+          node.type === "listitem"
+            ? exportListItemChildren(node.children, snapshot, registry)
+            : node.children.flatMap((id) =>
+                exportCompatNode(snapshot.body.blocks[id], snapshot, registry),
+              ),
         id: node.id,
         type: node.type,
       },
@@ -391,6 +437,25 @@ function exportTextNode(node: TextLeafNode): RichTextCompatNode {
     id: node.id,
     type: node.type,
   };
+}
+
+function exportListItemChildren(
+  children: readonly NodeId[],
+  snapshot: EditorDocumentSnapshot,
+  registry: BlockRegistry,
+): readonly RichTextCompatNode[] {
+  /*
+   * Structural list items are an internal shape used only when a list item has a
+   * nested block child. The direct text leaf must become inline text children in
+   * compatibility JSON, otherwise export would produce `listitem > listitem`
+   * instead of the legacy `listitem > text + nested list` shape.
+   */
+  return children.flatMap((id) => {
+    const child = snapshot.body.blocks[id];
+    return child?.kind === "text" && child.type === "listitem"
+      ? compatInlineChildren(child)
+      : exportCompatNode(child, snapshot, registry);
+  });
 }
 
 /**
@@ -514,6 +579,65 @@ function textFromInlineChildren(
     .join("");
 }
 
+function importListItemChildren(
+  children: readonly RichTextCompatNode[] | undefined,
+  state: BuildState,
+): readonly NodeId[] {
+  /*
+   * Legacy list items can contain inline text followed by a nested list. Flattening
+   * those children would turn the nested list into plain text and violate the
+   * normalized-tree contract from docs/011. The owned model keeps the list item as
+   * structural only for that mixed case, with one generated text leaf for direct
+   * inline content and normal child ids for nested blocks.
+   */
+  const inlineChildren: RichTextCompatNode[] = [];
+  const ids: NodeId[] = [];
+  for (const child of children ?? []) {
+    if (isBlockChild(child)) {
+      ids.push(...importCompatNode(child, state));
+    } else {
+      inlineChildren.push(child);
+    }
+  }
+  const inlineText = textFromInlineChildren(inlineChildren);
+  if (inlineText.length > 0) {
+    const textId = state.allocator.createNodeId();
+    const content = state.allocator.createTextSlice(inlineText);
+    state.blocks.set(
+      textId,
+      makeTextNode({
+        content,
+        id: textId,
+        marks: marksFromInlineChildren(inlineChildren, content, textId),
+        type: "listitem",
+      }),
+    );
+    ids.unshift(textId);
+  }
+  return ids;
+}
+
+function hasBlockChildren(
+  children: readonly RichTextCompatNode[] | undefined,
+): boolean {
+  return (children ?? []).some(isBlockChild);
+}
+
+function isBlockChild(node: RichTextCompatNode): boolean {
+  return (
+    node.type === "paragraph" ||
+    node.type === "editor-paragraph" ||
+    node.type === "heading" ||
+    node.type === "editor-heading" ||
+    node.type === "quote" ||
+    node.type === "editor-quote" ||
+    node.type === "callout" ||
+    node.type === "list" ||
+    node.type === "editor-list" ||
+    isBuiltInObjectCompatType(node.type)
+  );
+}
+
 function formatAtRange(node: TextLeafNode, from: number, to: number): number {
   return node.marks.reduce((format, mark) => {
     if (!isFormatMark(mark.kind)) return format;
@@ -544,6 +668,18 @@ function nodeId(node: RichTextCompatNode, allocator: IdAllocator): NodeId {
 
 function isObjectNodeType(type: string, registry: BlockRegistry): boolean {
   return registry.get(type) !== undefined;
+}
+
+function isBuiltInObjectCompatType(type: string): boolean {
+  return (
+    type === "code-block" ||
+    type === "media" ||
+    type === "post-ref" ||
+    type === "embed" ||
+    type === "table-of-contents" ||
+    type === "table" ||
+    type === "editor-table"
+  );
 }
 
 function pickAttrs(

@@ -139,7 +139,12 @@ export type TextLeafType =
   | "quote"
   | "callout";
 
-export type StructuralNodeType = "body" | "list" | "quote" | "callout";
+export type StructuralNodeType =
+  | "body"
+  | "list"
+  | "listitem"
+  | "quote"
+  | "callout";
 
 export type ObjectNodeStatus = "ready" | "dirty" | "invalid" | "unresolved";
 

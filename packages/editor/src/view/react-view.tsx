@@ -304,8 +304,6 @@ function EngineTextBlock(props: {
   const { node, store, forcePolyfill, registerBlock } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<TextBlockController | null>(null);
-  const latestNodeRef = useRef(node);
-  latestNodeRef.current = node;
 
   const syncSelectionIntoEditContext = useCallback(() => {
     const controller = controllerRef.current;
@@ -355,6 +353,7 @@ function EngineTextBlock(props: {
       diff.removed.length,
       inserted,
     );
+    patchHostText(hostRef.current, editContext.text);
     const steps =
       diff.removed.length > 0 || diff.inserted.length > 0
         ? [
@@ -401,11 +400,12 @@ function EngineTextBlock(props: {
     }
     const Ctor = (view as unknown as { EditContext: EditContextConstructor })
       .EditContext;
-    const length = latestNodeRef.current.content.text.length;
+    const current = store.requireTextNode(node.id);
+    const length = current.content.text.length;
     const editContext = new Ctor({
       selectionEnd: length,
       selectionStart: length,
-      text: latestNodeRef.current.content.text,
+      text: current.content.text,
     });
     editContext.addEventListener("textupdate", onTextUpdate);
     (host as unknown as { editContext: EditContextLike }).editContext =
@@ -418,7 +418,7 @@ function EngineTextBlock(props: {
     };
     controllerRef.current = { backend, destroy, editContext };
     return controllerRef.current;
-  }, [forcePolyfill, onTextUpdate]);
+  }, [forcePolyfill, node.id, onTextUpdate, store]);
 
   useLayoutEffect(() => {
     const controller = controllerRef.current;
@@ -438,8 +438,9 @@ function EngineTextBlock(props: {
     () => () => {
       controllerRef.current?.destroy();
       controllerRef.current = null;
+      store.deactivateTextLeaf(node.id);
     },
-    [],
+    [node.id, store],
   );
 
   const bindRef = useCallback(
@@ -451,8 +452,9 @@ function EngineTextBlock(props: {
   );
 
   const focusAtEnd = useCallback(() => {
-    const controller = ensureController();
     const current = store.requireTextNode(node.id);
+    store.activateTextLeaf(node.id);
+    const controller = ensureController();
     const existing = store.selection;
     const offset =
       existing?.type === "text" && existing.focus.node === node.id
@@ -571,8 +573,8 @@ function useEditorOrder(store: EditorStore): readonly NodeId[] {
 function useEditorNode(store: EditorStore, id: NodeId) {
   return useSyncExternalStore(
     (listener) => store.subscribeNode(id, listener),
-    () => store.requireNode(id),
-    () => store.requireNode(id),
+    () => store.requireViewNode(id),
+    () => store.requireViewNode(id),
   );
 }
 
@@ -722,6 +724,12 @@ function selectionRects(
   const anchorIndex = order.indexOf(selection.anchor.node);
   const focusIndex = order.indexOf(selection.focus.node);
   if (anchorIndex < 0 || focusIndex < 0) return [];
+  const forward =
+    anchorIndex < focusIndex ||
+    (anchorIndex === focusIndex &&
+      selection.anchor.offset <= selection.focus.offset);
+  const start = forward ? selection.anchor : selection.focus;
+  const end = forward ? selection.focus : selection.anchor;
   const startIndex = Math.min(anchorIndex, focusIndex);
   const endIndex = Math.max(anchorIndex, focusIndex);
   const collapsed =
@@ -731,42 +739,173 @@ function selectionRects(
     const node = store.requireTextNode(selection.focus.node);
     const element = blockRefs.get(node.id);
     if (!element) return [];
-    const rect = element.getBoundingClientRect();
-    const usableWidth = Math.max(1, rect.width - 24);
-    const left =
-      rect.left -
-      rootRect.left +
-      12 +
-      (usableWidth * selection.focus.offset) /
-        Math.max(1, node.content.text.length);
-    return [
-      {
-        height: Math.max(18, rect.height - 10),
-        kind: "caret",
-        left,
-        node: node.id,
-        top: rect.top - rootRect.top + 5,
-        width: 2,
-      },
-    ];
+    return caretRectsFromRange(
+      element,
+      rootRect,
+      node.id,
+      selection.focus.offset,
+      node.content.text.length,
+    );
   }
   const rects: OverlayRect[] = [];
   for (let index = startIndex; index <= endIndex; index += 1) {
     const id = order[index];
     if (!id) continue;
+    const node = store.requireTextNode(id);
     const element = blockRefs.get(id);
     if (!element) continue;
-    const blockRect = element.getBoundingClientRect();
-    rects.push({
-      height: Math.max(18, blockRect.height - 10),
-      kind: "range",
-      left: blockRect.left - rootRect.left + 8,
-      node: id,
-      top: blockRect.top - rootRect.top + 5,
-      width: Math.max(1, blockRect.width - 16),
-    });
+    const from = id === start.node ? start.offset : 0;
+    const to = id === end.node ? end.offset : node.content.text.length;
+    rects.push(
+      ...rangeRectsFromText(
+        element,
+        rootRect,
+        id,
+        from,
+        to,
+        node.content.text.length,
+      ),
+    );
   }
   return rects;
+}
+
+function caretRectsFromRange(
+  element: HTMLElement,
+  rootRect: DOMRect,
+  node: NodeId,
+  offset: number,
+  textLength: number,
+): readonly OverlayRect[] {
+  const rects = textRangeClientRects(element, offset, offset);
+  if (rects.length > 0) {
+    return rects.map((rect) => ({
+      height: Math.max(18, rect.height),
+      kind: "caret",
+      left: rect.left - rootRect.left,
+      node,
+      top: rect.top - rootRect.top,
+      width: 2,
+    }));
+  }
+  return [fallbackCaretRect(element, rootRect, node, offset, textLength)];
+}
+
+function rangeRectsFromText(
+  element: HTMLElement,
+  rootRect: DOMRect,
+  node: NodeId,
+  from: number,
+  to: number,
+  textLength: number,
+): readonly OverlayRect[] {
+  const rects = textRangeClientRects(element, from, to);
+  if (rects.length > 0) {
+    return rects.map((rect) => ({
+      height: Math.max(1, rect.height),
+      kind: "range",
+      left: rect.left - rootRect.left,
+      node,
+      top: rect.top - rootRect.top,
+      width: Math.max(1, rect.width),
+    }));
+  }
+  return [fallbackRangeRect(element, rootRect, node, from, to, textLength)];
+}
+
+function textRangeClientRects(
+  element: HTMLElement,
+  from: number,
+  to: number,
+): readonly DOMRect[] {
+  /*
+   * The production path is real DOM Range geometry. That lets the browser own line
+   * wrapping, font metrics, bidi fragments, and subpixel layout while the engine
+   * owns which model offsets are selected. jsdom has no layout engine, so callers
+   * fall back to deterministic block-relative rectangles only when Range produces
+   * no measurable rects.
+   */
+  const textNode = firstTextNode(element);
+  if (!textNode) return [];
+  const length = textNode.textContent?.length ?? 0;
+  const start = clampOffset(from, length);
+  const end = clampOffset(to, length);
+  const range = element.ownerDocument.createRange();
+  range.setStart(textNode, start);
+  range.setEnd(textNode, Math.max(start, end));
+  if (
+    typeof range.getClientRects !== "function" ||
+    typeof range.getBoundingClientRect !== "function"
+  ) {
+    return [];
+  }
+  const rects = Array.from(range.getClientRects()).filter(
+    (rect) => rect.width > 0 || rect.height > 0,
+  );
+  if (rects.length > 0) return rects;
+  const rect = range.getBoundingClientRect();
+  return rect.width > 0 || rect.height > 0 ? [rect] : [];
+}
+
+function firstTextNode(element: HTMLElement): Text | null {
+  const textNodeType = element.ownerDocument.defaultView?.Node.TEXT_NODE ?? 3;
+  return element.firstChild?.nodeType === textNodeType
+    ? (element.firstChild as Text)
+    : null;
+}
+
+function fallbackCaretRect(
+  element: HTMLElement,
+  rootRect: DOMRect,
+  node: NodeId,
+  offset: number,
+  textLength: number,
+): OverlayRect {
+  const rect = element.getBoundingClientRect();
+  const usableWidth = Math.max(1, rect.width - 24);
+  return {
+    height: Math.max(18, rect.height - 10),
+    kind: "caret",
+    left:
+      rect.left -
+      rootRect.left +
+      12 +
+      (usableWidth * offset) / Math.max(1, textLength),
+    node,
+    top: rect.top - rootRect.top + 5,
+    width: 2,
+  };
+}
+
+function fallbackRangeRect(
+  element: HTMLElement,
+  rootRect: DOMRect,
+  node: NodeId,
+  from: number,
+  to: number,
+  textLength: number,
+): OverlayRect {
+  const rect = element.getBoundingClientRect();
+  const usableWidth = Math.max(1, rect.width - 16);
+  const width =
+    from === 0 && to === textLength
+      ? usableWidth
+      : Math.max(
+          1,
+          (usableWidth * Math.max(1, to - from)) / Math.max(1, textLength),
+        );
+  return {
+    height: Math.max(18, rect.height - 10),
+    kind: "range",
+    left:
+      rect.left -
+      rootRect.left +
+      8 +
+      (usableWidth * from) / Math.max(1, textLength),
+    node,
+    top: rect.top - rootRect.top + 5,
+    width,
+  };
 }
 
 function diffText(before: string, after: string): TextDiff {
@@ -793,6 +932,17 @@ function diffText(before: string, after: string): TextDiff {
     inserted: after.slice(start, afterEnd),
     removed: before.slice(start, beforeEnd),
   };
+}
+
+function patchHostText(element: HTMLElement | null, text: string): void {
+  /*
+   * While the leaf is active, React keeps reading the pinned snapshot from the
+   * store. The visible glyph still has to appear synchronously with the input
+   * event, so the controller owns this one textContent patch until the leaf
+   * deactivates or a structural command forces a React refresh.
+   */
+  if (!element) return;
+  element.textContent = text.length > 0 ? text : "\u200b";
 }
 
 function activeSelectionNode(selection: EditorSelection | null): NodeId | null {

@@ -57,9 +57,7 @@ test("owned-model React view edits 300 mounted blocks with continuous selection"
 
   const afterType = await diagnostics(page);
   expect(afterType.renderCounts[first]).toBe(before.renderCounts[first]);
-  expect(afterType.renderCounts[target]).toBeGreaterThan(
-    before.renderCounts[target] ?? 0,
-  );
+  expect(afterType.renderCounts[target]).toBe(before.renderCounts[target]);
   expect(afterType.selectionOverlayRenderCount).toBeGreaterThan(
     before.selectionOverlayRenderCount,
   );

@@ -14,9 +14,13 @@
  * - Phase 3 has the collaboration-ready address fields but no collaboration
  *   machinery.
  */
+import { render, screen } from "@testing-library/react";
+import { RichTextRenderer } from "@idco/content-renderer";
+import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
   BlockRegistry,
+  ROOT_NODE_ID,
   TEXT_FORMAT,
   characterIdsForSlice,
   compatFromEditorStore,
@@ -31,7 +35,9 @@ import {
   type BlockDefinition,
   type EditorDocumentSnapshot,
   type EditorNode,
+  type JsonValue,
   type NodeId,
+  type Step,
   type TextLeafNode,
 } from "../../packages/editor/src/core";
 
@@ -128,6 +134,53 @@ describe("owned-model editor core", () => {
     expect((store.requireNode(node.id) as TextLeafNode).type).toBe("heading");
   });
 
+  it("proves every Phase 3 step kind is invertible over generated cases", () => {
+    for (const testCase of invertibleStepCases()) {
+      const before = testCase.store.toSnapshot();
+      testCase.store.dispatch({ origin: "local", steps: [testCase.step] });
+      testCase.store.undo();
+      expect(testCase.store.toSnapshot()).toEqual(before);
+    }
+  });
+
+  it("undoes and redoes a generated edit sequence back to exact snapshots", () => {
+    const allocator = createIdAllocator(CLIENT);
+    const node = makeTextNode({
+      content: allocator.createTextSlice("seed"),
+      id: allocator.createNodeId(),
+    });
+    const store = createEditorStore({
+      allocator,
+      snapshot: snapshot([node]),
+    });
+    const before = store.toSnapshot();
+
+    for (const edit of generatedTextEdits()) {
+      const current = store.requireTextNode(node.id);
+      store.dispatch(
+        store.transaction().replaceText({
+          at: Math.min(edit.at, current.content.text.length),
+          inserted: edit.inserted,
+          node: node.id,
+          removed: current.content.text.slice(
+            Math.min(edit.at, current.content.text.length),
+            Math.min(edit.at, current.content.text.length) + edit.remove,
+          ),
+        }),
+      );
+    }
+    const after = store.toSnapshot();
+
+    for (let index = 0; index < generatedTextEdits().length; index += 1) {
+      store.undo();
+    }
+    expect(store.toSnapshot()).toEqual(before);
+    for (let index = 0; index < generatedTextEdits().length; index += 1) {
+      store.redo();
+    }
+    expect(store.toSnapshot()).toEqual(after);
+  });
+
   it("projects format range marks through compat split text nodes losslessly", () => {
     /*
      * Runtime marks can overlap, while legacy compatibility JSON only has a
@@ -178,6 +231,135 @@ describe("owned-model editor core", () => {
       allocator: createIdAllocator(CLIENT),
     });
     expect(compatFromEditorStore(roundTrip)).toEqual(compat);
+  });
+
+  it("round-trips generated overlapping and adjacent format ranges", () => {
+    const markKinds = ["bold", "italic", "underline"] as const;
+    for (let from = 0; from < 6; from += 1) {
+      for (let to = from + 1; to <= 6; to += 1) {
+        const allocator = createIdAllocator(CLIENT);
+        const content = allocator.createTextSlice("abcdef");
+        const base = makeTextNode({
+          content,
+          id: allocator.createNodeId(),
+        });
+        const marks = markKinds.map((kind, index) =>
+          createTextMark({
+            from: Math.max(0, from - index),
+            id: `${kind}-${from}-${to}`,
+            kind,
+            node: base,
+            to: Math.min(6, to + index),
+          }),
+        );
+        const marked = makeTextNode({ ...base, marks });
+        const store = createEditorStore({
+          allocator,
+          snapshot: snapshot([marked]),
+        });
+        const compat = compatFromEditorStore(store);
+        const roundTrip = createEditorStoreFromCompat(compat, {
+          allocator: createIdAllocator(CLIENT),
+        });
+        expect(compatFromEditorStore(roundTrip), `${from}-${to}`).toEqual(
+          compat,
+        );
+      }
+    }
+  });
+
+  it("preserves nested list structure instead of flattening it into list-item text", () => {
+    const compat = {
+      root: {
+        children: [
+          {
+            children: [
+              {
+                children: [
+                  { text: "Parent", type: "text" },
+                  {
+                    children: [
+                      {
+                        children: [{ text: "Child", type: "text" }],
+                        type: "listitem",
+                      },
+                    ],
+                    listType: "bullet",
+                    type: "list",
+                  },
+                ],
+                type: "listitem",
+              },
+            ],
+            listType: "bullet",
+            type: "list",
+          },
+        ],
+      },
+    };
+
+    const store = createEditorStoreFromCompat(compat, {
+      allocator: createIdAllocator(CLIENT),
+    });
+    const list = store.requireNode(store.order[0]!);
+    if (list.kind !== "structural") throw new Error("expected structural list");
+    const item = store.requireNode(list.children[0]!);
+    expect(item.kind).toBe("structural");
+    expect(compatFromEditorStore(store).root.children[0]).toMatchObject(
+      compat.root.children[0],
+    );
+  });
+
+  it("stores code-block bodies as piece tables while exporting legacy text", () => {
+    const store = createEditorStoreFromCompat(
+      {
+        root: {
+          children: [
+            {
+              id: "idco_node_code",
+              language: "ts",
+              text: "const answer = 42;",
+              type: "code-block",
+            },
+          ],
+        },
+      },
+      { allocator: createIdAllocator(CLIENT) },
+    );
+    const node = store.requireNode("idco_node_code" as NodeId);
+    expect(node.kind).toBe("object");
+    if (node.kind !== "object") throw new Error("expected object node");
+    expect((node.data as { readonly code?: JsonValue }).code).toMatchObject({
+      kind: "piece-table",
+      original: "const answer = 42;",
+      pieces: [{ buffer: "original", from: 0, length: 18 }],
+    });
+    expect(compatFromEditorStore(store).root.children[0]).toMatchObject({
+      language: "ts",
+      text: "const answer = 42;",
+      type: "code-block",
+    });
+  });
+
+  it("matches a committed golden compatibility document and renders through the read tier", () => {
+    const store = createEditorStoreFromCompat(GOLDEN_COMPAT_INPUT, {
+      allocator: createIdAllocator(CLIENT),
+    });
+    store.dispatch(
+      store.transaction().replaceText({
+        at: 5,
+        inserted: " model",
+        node: "idco_node_para" as NodeId,
+        removed: "",
+      }),
+    );
+
+    const golden = compatFromEditorStore(store);
+    expect(golden).toEqual(GOLDEN_COMPAT_OUTPUT);
+    render(createElement(RichTextRenderer, { value: golden }));
+    expect(screen.getByText(/Owned model text/)).toBeInTheDocument();
+    expect(screen.getByText("Nested child").closest("ul")).not.toBeNull();
+    expect(screen.getByText("const answer = 42;")).toBeInTheDocument();
   });
 
   it("keeps character-id anchors stable while offsets resolve after edits", () => {
@@ -345,3 +527,370 @@ function snapshot(nodes: readonly EditorNode[]): EditorDocumentSnapshot {
     version: 1,
   };
 }
+
+function invertibleStepCases(): Array<{
+  readonly name: string;
+  readonly store: ReturnType<typeof createEditorStore>;
+  readonly step: Step;
+}> {
+  const cases: Array<{
+    readonly name: string;
+    readonly store: ReturnType<typeof createEditorStore>;
+    readonly step: Step;
+  }> = [];
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const node = makeTextNode({
+      content: allocator.createTextSlice("abc"),
+      id: allocator.createNodeId(),
+    });
+    cases.push({
+      name: "replace-text",
+      step: {
+        at: 1,
+        inserted: allocator.createTextSlice("Z"),
+        node: node.id,
+        removed: { runs: [], text: "" },
+        type: "replace-text",
+      },
+      store: createEditorStore({ allocator, snapshot: snapshot([node]) }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const node = makeTextNode({
+      content: allocator.createTextSlice("abc"),
+      id: allocator.createNodeId(),
+    });
+    const mark = createTextMark({
+      from: 0,
+      id: "add-bold",
+      kind: "bold",
+      node,
+      to: 2,
+    });
+    cases.push({
+      name: "add-mark",
+      step: { mark, node: node.id, type: "add-mark" },
+      store: createEditorStore({ allocator, snapshot: snapshot([node]) }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const base = makeTextNode({
+      content: allocator.createTextSlice("abc"),
+      id: allocator.createNodeId(),
+    });
+    const mark = createTextMark({
+      from: 0,
+      id: "remove-bold",
+      kind: "bold",
+      node: base,
+      to: 2,
+    });
+    const node = makeTextNode({ ...base, marks: [mark] });
+    cases.push({
+      name: "remove-mark",
+      step: { mark, node: node.id, type: "remove-mark" },
+      store: createEditorStore({ allocator, snapshot: snapshot([node]) }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const node = makeTextNode({
+      content: allocator.createTextSlice("abc"),
+      id: allocator.createNodeId(),
+    });
+    cases.push({
+      name: "set-node-type",
+      step: {
+        from: "paragraph",
+        node: node.id,
+        to: "heading",
+        type: "set-node-type",
+      },
+      store: createEditorStore({ allocator, snapshot: snapshot([node]) }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const node = makeTextNode({
+      attrs: { align: "left" },
+      content: allocator.createTextSlice("abc"),
+      id: allocator.createNodeId(),
+    });
+    cases.push({
+      name: "set-node-attr",
+      step: {
+        from: "left",
+        key: "align",
+        node: node.id,
+        to: "center",
+        type: "set-node-attr",
+      },
+      store: createEditorStore({ allocator, snapshot: snapshot([node]) }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const node = makeTextNode({
+      content: allocator.createTextSlice("abc"),
+      id: allocator.createNodeId(),
+    });
+    const inserted = makeTextNode({
+      content: allocator.createTextSlice("inserted"),
+      id: allocator.createNodeId(),
+    });
+    cases.push({
+      name: "insert-node",
+      step: {
+        index: 1,
+        node: inserted,
+        parent: ROOT_NODE_ID,
+        type: "insert-node",
+      },
+      store: createEditorStore({ allocator, snapshot: snapshot([node]) }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const first = makeTextNode({
+      content: allocator.createTextSlice("first"),
+      id: allocator.createNodeId(),
+    });
+    const second = makeTextNode({
+      content: allocator.createTextSlice("second"),
+      id: allocator.createNodeId(),
+    });
+    cases.push({
+      name: "remove-node",
+      step: {
+        index: 1,
+        node: second,
+        parent: ROOT_NODE_ID,
+        type: "remove-node",
+      },
+      store: createEditorStore({
+        allocator,
+        snapshot: snapshot([first, second]),
+      }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const first = makeTextNode({
+      content: allocator.createTextSlice("first"),
+      id: allocator.createNodeId(),
+    });
+    const second = makeTextNode({
+      content: allocator.createTextSlice("second"),
+      id: allocator.createNodeId(),
+    });
+    cases.push({
+      name: "move-node",
+      step: {
+        from: { index: 1, parent: ROOT_NODE_ID },
+        node: second.id,
+        to: { index: 0, parent: ROOT_NODE_ID },
+        type: "move-node",
+      },
+      store: createEditorStore({
+        allocator,
+        snapshot: snapshot([first, second]),
+      }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const object = makeObjectNode({
+      baked: { kind: "html", payload: "<p>old</p>" },
+      data: { value: "old" },
+      id: allocator.createNodeId(),
+      status: "ready",
+      type: "fake-object",
+    });
+    cases.push({
+      name: "set-object-data",
+      step: {
+        bakedFrom: { kind: "html", payload: "<p>old</p>" },
+        bakedTo: { kind: "html", payload: "<p>new</p>" },
+        from: { value: "old" },
+        node: object.id,
+        statusFrom: "ready",
+        statusTo: "dirty",
+        to: { value: "new" },
+        type: "set-object-data",
+      },
+      store: createEditorStore({ allocator, snapshot: snapshot([object]) }),
+    });
+  }
+
+  {
+    const allocator = createIdAllocator(CLIENT);
+    const node = makeTextNode({
+      content: allocator.createTextSlice("abc"),
+      id: allocator.createNodeId(),
+    });
+    cases.push({
+      name: "set-settings",
+      step: {
+        from: {},
+        to: { pageSize: "wide" },
+        type: "set-settings",
+      },
+      store: createEditorStore({ allocator, snapshot: snapshot([node]) }),
+    });
+  }
+
+  return cases;
+}
+
+function generatedTextEdits(): ReadonlyArray<{
+  readonly at: number;
+  readonly inserted: string;
+  readonly remove: number;
+}> {
+  return [
+    { at: 4, inserted: "-a", remove: 0 },
+    { at: 1, inserted: "B", remove: 1 },
+    { at: 6, inserted: "tail", remove: 0 },
+    { at: 2, inserted: "", remove: 2 },
+    { at: 0, inserted: "start-", remove: 0 },
+    { at: 5, inserted: "_", remove: 1 },
+  ];
+}
+
+const GOLDEN_COMPAT_INPUT = {
+  root: {
+    children: [
+      {
+        children: [{ text: "Owned text", type: "text" }],
+        id: "idco_node_para",
+        type: "paragraph",
+      },
+      {
+        children: [{ format: TEXT_FORMAT.bold, text: "Heading", type: "text" }],
+        id: "idco_node_heading",
+        tag: "h2",
+        type: "heading",
+      },
+      {
+        children: [
+          {
+            children: [
+              { text: "Parent item", type: "text" },
+              {
+                children: [
+                  {
+                    children: [{ text: "Nested child", type: "text" }],
+                    id: "idco_node_nested_item",
+                    type: "listitem",
+                  },
+                ],
+                id: "idco_node_nested_list",
+                listType: "bullet",
+                type: "list",
+              },
+            ],
+            id: "idco_node_parent_item",
+            type: "listitem",
+          },
+        ],
+        id: "idco_node_list",
+        listType: "bullet",
+        type: "list",
+      },
+      {
+        id: "idco_node_code",
+        language: "ts",
+        status: "ready",
+        text: "const answer = 42;",
+        type: "code-block",
+      },
+    ],
+  },
+  settings: { pageSize: "wide" },
+} as const;
+
+const GOLDEN_COMPAT_OUTPUT = {
+  root: {
+    children: [
+      {
+        children: [
+          {
+            format: 0,
+            text: "Owned model text",
+            type: "text",
+          },
+        ],
+        id: "idco_node_para",
+        type: "paragraph",
+      },
+      {
+        children: [
+          {
+            format: TEXT_FORMAT.bold,
+            text: "Heading",
+            type: "text",
+          },
+        ],
+        id: "idco_node_heading",
+        tag: "h2",
+        type: "heading",
+      },
+      {
+        children: [
+          {
+            children: [
+              {
+                format: 0,
+                text: "Parent item",
+                type: "text",
+              },
+              {
+                children: [
+                  {
+                    children: [
+                      {
+                        format: 0,
+                        text: "Nested child",
+                        type: "text",
+                      },
+                    ],
+                    id: "idco_node_nested_item",
+                    type: "listitem",
+                  },
+                ],
+                id: "idco_node_nested_list",
+                listType: "bullet",
+                type: "list",
+              },
+            ],
+            id: "idco_node_parent_item",
+            type: "listitem",
+          },
+        ],
+        id: "idco_node_list",
+        listType: "bullet",
+        type: "list",
+      },
+      {
+        id: "idco_node_code",
+        language: "ts",
+        status: "ready",
+        text: "const answer = 42;",
+        type: "code-block",
+      },
+    ],
+  },
+  settings: { pageSize: "wide" },
+} as const;

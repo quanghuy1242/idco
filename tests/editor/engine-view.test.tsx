@@ -35,6 +35,7 @@ describe("owned-model React view", () => {
     expect(before.mountedCount).toBe(3);
 
     const target = nodes[1]!;
+    store.activateTextLeaf(target.id);
     const inserted = store.allocator.createTextSlice("!");
     const nextContent = replaceTextContent(target.content, 2, 0, inserted);
     await act(async () => {
@@ -63,13 +64,11 @@ describe("owned-model React view", () => {
       ).toBeGreaterThan(before.selectionOverlayRenderCount);
     });
     const after = ref.current!.diagnostics();
-    expect(screen.getByText("br!avo")).toBeInTheDocument();
+    expect(after.blockTexts[target.id]).toBe("br!avo");
     expect(after.renderCounts[nodes[0]!.id]).toBe(
       before.renderCounts[nodes[0]!.id],
     );
-    expect(after.renderCounts[target.id]).toBeGreaterThan(
-      before.renderCounts[target.id] ?? 0,
-    );
+    expect(after.renderCounts[target.id]).toBe(before.renderCounts[target.id]);
     expect(after.renderCounts[nodes[2]!.id]).toBe(
       before.renderCounts[nodes[2]!.id],
     );
@@ -83,6 +82,13 @@ describe("owned-model React view", () => {
         }),
       ]),
     );
+
+    await act(async () => {
+      store.deactivateTextLeaf(target.id);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("br!avo")).toBeInTheDocument();
+    });
   });
 
   it("coalesces engine frame work and reports it through the perf dashboard", () => {

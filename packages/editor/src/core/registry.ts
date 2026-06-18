@@ -113,13 +113,7 @@ export function createDefaultBlockRegistry(
  * real bake pipelines. Phase 6 can replace these with richer definitions.
  */
 export const BUILT_IN_OBJECT_DEFINITIONS: readonly BlockDefinition[] = [
-  simpleObjectDefinition("code-block", (node) => ({
-    data: {
-      code: stringValue(node.text) ?? stringValue(node.code) ?? "",
-      language: stringValue(node.language) ?? "ts",
-    },
-    status: statusValue(node.status) ?? "ready",
-  })),
+  codeBlockDefinition(),
   simpleObjectDefinition("media", (node) => ({
     data: {
       alt: stringValue(node.alt) ?? "",
@@ -166,6 +160,64 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly BlockDefinition[] = [
   })),
 ];
 
+function codeBlockDefinition(): BlockDefinition {
+  /*
+   * `code-block` is the one Phase 3 object whose internal DSA matters now. Compat
+   * JSON still uses a plain `text` field, but the owned model stores a
+   * piece-table-shaped body under `data.code` so later code editing does not need
+   * a persistence migration from string to piece table.
+   */
+  return {
+    fromCompatNode(node) {
+      return {
+        baked: bakedValue(node.baked),
+        data: {
+          code: pieceTableFromText(
+            stringValue(node.text) ?? stringValue(node.code) ?? "",
+          ),
+          language: stringValue(node.language) ?? "ts",
+        },
+        status: statusValue(node.status) ?? "ready",
+      };
+    },
+    normalizeData(value) {
+      const normalized: ObjectNormalizationResult = isObjectNormalizationResult(
+        value,
+      )
+        ? value
+        : {
+            data: toJsonValue(value),
+            status: "dirty" as ObjectNodeStatus,
+          };
+      const data = isJsonObject(normalized.data) ? normalized.data : {};
+      const code =
+        pieceTableValue(data.code) ??
+        pieceTableFromText(
+          stringValue(data.code) ?? stringValue(data.text) ?? "",
+        );
+      return {
+        baked: normalized.baked,
+        data: {
+          ...data,
+          code,
+          language: stringValue(data.language) ?? "ts",
+        },
+        status: normalized.status ?? "dirty",
+      };
+    },
+    toCompatNode(value) {
+      const data = isJsonObject(value.data) ? value.data : {};
+      return {
+        ...(value.baked ? { baked: value.baked } : {}),
+        language: stringValue(data.language) ?? "ts",
+        status: value.status,
+        text: pieceTableText(data.code),
+      };
+    },
+    type: "code-block",
+  };
+}
+
 function simpleObjectDefinition(
   type: string,
   fromCompatNode: (node: RichTextCompatNode) => ObjectNormalizationResult,
@@ -208,6 +260,78 @@ function compatObjectFromValue(
     ...(value.baked ? { baked: value.baked } : {}),
     status: value.status,
   } as Omit<RichTextCompatNode, "id" | "type">;
+}
+
+type PieceTableBuffer = "original" | "append";
+
+type PieceTablePiece = {
+  readonly buffer: PieceTableBuffer;
+  readonly from: number;
+  readonly length: number;
+};
+
+type PieceTable = {
+  readonly kind: "piece-table";
+  readonly original: string;
+  readonly append: string;
+  readonly pieces: readonly PieceTablePiece[];
+};
+
+function pieceTableFromText(text: string): PieceTable {
+  return {
+    append: "",
+    kind: "piece-table",
+    original: text,
+    pieces:
+      text.length === 0
+        ? []
+        : [{ buffer: "original", from: 0, length: text.length }],
+  };
+}
+
+function pieceTableValue(value: unknown): PieceTable | undefined {
+  if (!isRecord(value) || value.kind !== "piece-table") return undefined;
+  if (typeof value.original !== "string" || typeof value.append !== "string") {
+    return undefined;
+  }
+  if (
+    !Array.isArray(value.pieces) ||
+    !value.pieces.every(
+      (piece) =>
+        isRecord(piece) &&
+        (piece.buffer === "original" || piece.buffer === "append") &&
+        typeof piece.from === "number" &&
+        Number.isInteger(piece.from) &&
+        piece.from >= 0 &&
+        typeof piece.length === "number" &&
+        Number.isInteger(piece.length) &&
+        piece.length >= 0,
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    append: value.append,
+    kind: "piece-table",
+    original: value.original,
+    pieces: value.pieces.map((piece) => ({
+      buffer: piece.buffer,
+      from: piece.from,
+      length: piece.length,
+    })),
+  };
+}
+
+function pieceTableText(value: unknown): string {
+  const table = pieceTableValue(value);
+  if (!table) return "";
+  return table.pieces
+    .map((piece) => {
+      const source =
+        piece.buffer === "original" ? table.original : table.append;
+      return source.slice(piece.from, piece.from + piece.length);
+    })
+    .join("");
 }
 
 function isObjectNormalizationResult(

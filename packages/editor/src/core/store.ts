@@ -181,6 +181,8 @@ export class EditorStore {
   readonly #selectionSubscribers = new Set<EditorSubscriber>();
   readonly #nodes = new Map<NodeId, EditorNode>();
   readonly #parentOf = new Map<NodeId, ParentEntry>();
+  #activeTextLeafId: NodeId | null = null;
+  #activeTextLeafSnapshot: TextLeafNode | null = null;
   #order: NodeId[] = [];
   #selection: EditorSelection | null;
   #settings: DocumentSettings = {};
@@ -218,6 +220,10 @@ export class EditorStore {
     return this.#selection;
   }
 
+  get activeTextLeafId(): NodeId | null {
+    return this.#activeTextLeafId;
+  }
+
   get settings(): DocumentSettings {
     return this.#settings;
   }
@@ -236,6 +242,26 @@ export class EditorStore {
     return node;
   }
 
+  getViewNode(id: NodeId): EditorNode | undefined {
+    /*
+     * React reads through this method, not `getNode`, so the active text leaf can
+     * keep returning the same frozen snapshot while the store's live node changes
+     * on each keystroke. That is the hot-path split from docs/011: the model is
+     * current immediately, but React does not reconcile the active paragraph just
+     * to show the character the input controller already patched into the DOM.
+     */
+    if (id === this.#activeTextLeafId && this.#activeTextLeafSnapshot) {
+      return this.#activeTextLeafSnapshot;
+    }
+    return this.getNode(id);
+  }
+
+  requireViewNode(id: NodeId): EditorNode {
+    const node = this.getViewNode(id);
+    if (!node) throw new Error(`Unknown node: ${id}`);
+    return node;
+  }
+
   requireTextNode(id: NodeId): TextLeafNode {
     const node = this.requireNode(id);
     if (node.kind !== "text") throw new Error(`Node is not a text leaf: ${id}`);
@@ -244,6 +270,36 @@ export class EditorStore {
 
   transaction(): TransactionBuilder {
     return new TransactionBuilder(this.#allocator);
+  }
+
+  activateTextLeaf(id: NodeId): void {
+    if (this.#activeTextLeafId && this.#activeTextLeafId !== id) {
+      this.deactivateTextLeaf();
+    }
+    const node = this.requireTextNode(id);
+    this.#activeTextLeafId = id;
+    this.#activeTextLeafSnapshot = node;
+  }
+
+  deactivateTextLeaf(id?: NodeId): void {
+    if (id && this.#activeTextLeafId !== id) return;
+    const active = this.#activeTextLeafId;
+    const snapshot = this.#activeTextLeafSnapshot;
+    this.#activeTextLeafId = null;
+    this.#activeTextLeafSnapshot = null;
+    /*
+     * Deactivation is the moment React should catch up to the live model if the
+     * active leaf skipped text-edit notifications. Without this notify, a block
+     * could keep showing the pinned pre-edit snapshot after the controller unbinds.
+     */
+    if (active && snapshot && this.getNode(active) !== snapshot) {
+      this.#notify({
+        nodes: new Set([active]),
+        selection: false,
+        settings: false,
+        structure: false,
+      });
+    }
   }
 
   /**
@@ -413,8 +469,18 @@ export class EditorStore {
       touched: new Set(state.touched),
     };
     if (options.recordHistory) this.#history.done.push(committed);
+    const dirtyNodes = new Set(committed.touched);
+    if (this.#activeTextLeafId && dirtyNodes.has(this.#activeTextLeafId)) {
+      if (canSkipActiveTextNotify(draft.steps, this.#activeTextLeafId)) {
+        dirtyNodes.delete(this.#activeTextLeafId);
+      } else {
+        this.#activeTextLeafSnapshot = this.requireTextNode(
+          this.#activeTextLeafId,
+        );
+      }
+    }
     this.#notify({
-      nodes: committed.touched,
+      nodes: dirtyNodes,
       selection: selectionChanged,
       settings: committed.settingsChanged,
       structure: committed.structureChanged,
@@ -641,16 +707,15 @@ export class EditorStore {
       throw new Error("MoveNode from index does not point to node");
     }
     const without = fromParent.children.filter((id) => id !== step.node);
-    const adjustedToIndex =
-      step.from.parent === step.to.parent && step.from.index < step.to.index
-        ? step.to.index - 1
-        : step.to.index;
     const targetChildren =
       step.from.parent === step.to.parent ? without : toParent.children;
+    if (step.to.index < 0 || step.to.index > targetChildren.length) {
+      throw new Error("MoveNode target index out of range");
+    }
     const nextTargetChildren = [
-      ...targetChildren.slice(0, adjustedToIndex),
+      ...targetChildren.slice(0, step.to.index),
       step.node,
-      ...targetChildren.slice(adjustedToIndex),
+      ...targetChildren.slice(step.to.index),
     ];
     this.#nodes.set(
       fromParent.id,
@@ -673,7 +738,7 @@ export class EditorStore {
     state.structureChanged = true;
     return {
       from: {
-        index: adjustedToIndex,
+        index: step.to.index,
         parent: step.to.parent,
       },
       node: step.node,
@@ -910,6 +975,58 @@ function removesNode(step: Step, node: NodeId): boolean {
   if (step.type !== "remove-node") return false;
   if (step.node.id === node) return true;
   return (step.descendants ?? []).some((descendant) => descendant.id === node);
+}
+
+function canSkipActiveTextNotify(
+  steps: readonly Step[],
+  active: NodeId,
+): boolean {
+  /*
+   * Text replacement on the active leaf is the one mutation React should not see
+   * immediately: the input controller patches the rendered text node in the same
+   * event. Other active-leaf mutations, such as mark toggles or node-type changes,
+   * change structure/formatting and must refresh the React snapshot.
+   */
+  return (
+    steps.some((step) => stepTouchesNode(step, active)) &&
+    steps.every(
+      (step) =>
+        !stepTouchesNode(step, active) ||
+        (step.type === "replace-text" && step.node === active),
+    )
+  );
+}
+
+function stepTouchesNode(step: Step, node: NodeId): boolean {
+  switch (step.type) {
+    case "replace-text":
+    case "add-mark":
+    case "remove-mark":
+    case "set-node-type":
+    case "set-node-attr":
+    case "set-object-data":
+      return step.node === node;
+    case "insert-node":
+      return (
+        step.node.id === node ||
+        step.parent === node ||
+        (step.descendants ?? []).some((descendant) => descendant.id === node)
+      );
+    case "remove-node":
+      return (
+        step.node.id === node ||
+        step.parent === node ||
+        (step.descendants ?? []).some((descendant) => descendant.id === node)
+      );
+    case "move-node":
+      return (
+        step.node === node ||
+        step.from.parent === node ||
+        step.to.parent === node
+      );
+    case "set-settings":
+      return false;
+  }
 }
 
 function fallbackSelection(
