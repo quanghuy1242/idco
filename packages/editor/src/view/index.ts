@@ -8,6 +8,11 @@
  */
 export {
   OwnedModelEditorView,
+  applyEditContextText,
+  lineRangeAt,
+  nextGraphemeBoundary,
+  prevGraphemeBoundary,
+  wordRangeAt,
   type OwnedModelEditorViewDiagnostics,
   type OwnedModelEditorViewHandle,
   type OwnedModelEditorViewProps,

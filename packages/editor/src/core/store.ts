@@ -95,6 +95,17 @@ export type EditorStoreOptions = {
   readonly registry?: BlockRegistry;
 };
 
+/**
+ * The active IME composition (preedit) range on one text leaf, in model offsets.
+ * Runtime view state, not document content: it drives the engine-painted preedit
+ * underline (docs/010 Phase 7 AC5) and is cleared on `compositionend`.
+ */
+export type CompositionRange = {
+  readonly node: NodeId;
+  readonly from: number;
+  readonly to: number;
+};
+
 export type EditorSubscriber = (dirty: StoreDirty) => void;
 
 export type EditorCommitSubscriber = (committed: CommittedTransaction) => void;
@@ -244,6 +255,7 @@ export class EditorStore {
   #activeTextLeafSnapshot: TextLeafNode | null = null;
   #activeLeafDomSynced = false;
   #activeObjectId: NodeId | null = null;
+  #composition: CompositionRange | null = null;
   readonly #activeObjectSubscribers = new Set<() => void>();
   #order: NodeId[] = [];
   #selection: EditorSelection | null;
@@ -419,6 +431,45 @@ export class EditorStore {
     if (!this.#activeObjectId) return;
     this.#activeObjectId = null;
     this.#notifyActiveObject();
+  }
+
+  /** The active IME preedit range, or null when no composition is in flight. */
+  get composition(): CompositionRange | null {
+    return this.#composition;
+  }
+
+  /**
+   * Set the active composition (preedit) range so the engine paints its own
+   * underline (docs/010 §7.4, Phase 7 AC5) — a fully owned view gets no
+   * browser-drawn preedit. Notifies selection subscribers so the overlay
+   * repaints on the frame lane; it carries no document mutation.
+   */
+  setComposition(range: CompositionRange | null): void {
+    const prev = this.#composition;
+    if (
+      prev === range ||
+      (prev &&
+        range &&
+        prev.node === range.node &&
+        prev.from === range.from &&
+        prev.to === range.to)
+    ) {
+      return;
+    }
+    this.#composition = range;
+    this.#selectionSubscribers.forEach((subscriber) =>
+      subscriber({
+        nodes: new Set(),
+        selection: true,
+        settings: false,
+        structure: false,
+      }),
+    );
+  }
+
+  /** Clear the active composition preedit range (on `compositionend`). */
+  clearComposition(): void {
+    this.setComposition(null);
   }
 
   /** Subscribe to live-object slot changes (the view's resting↔live switch). */

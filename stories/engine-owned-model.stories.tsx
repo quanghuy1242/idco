@@ -110,6 +110,17 @@ export const Phase6MixedBook: Story = () => {
   );
 };
 
+export const Phase7RaggedLines: Story = () => {
+  const store = useMemo(() => createRaggedLinesStore(), []);
+  const viewRef = useRef<OwnedModelEditorViewHandle | null>(null);
+
+  // A non-virtualized surface so the multiline blocks render their full height;
+  // vertical caret navigation must hold a goal column across the ragged lines.
+  return (
+    <OwnedModelStoryFrame store={store} viewRef={viewRef} virtualize={false} />
+  );
+};
+
 function OwnedModelStoryFrame(props: {
   readonly store: ReturnType<typeof createEditorStore>;
   readonly viewRef: RefObject<OwnedModelEditorViewHandle | null>;
@@ -326,6 +337,39 @@ function createMixedBookStore() {
     version: 1,
   };
   return createEditorStore({ allocator, registry, snapshot });
+}
+
+function createRaggedLinesStore() {
+  // One block of deliberately ragged visual lines (rendered via pre-wrap `\n`):
+  // a long line, a short line, then a long line. Goal-column navigation must let
+  // ArrowDown from a column on the first long line land near that same column on
+  // the third line, instead of sticking at the short middle line's end (AC7).
+  const allocator = createIdAllocator("idco_client_phase7_story");
+  const long1 = "The quick brown fox jumps over the lazy dog by the riverbank.";
+  const short = "Short.";
+  const long2 =
+    "Pack my box with five dozen liquor jugs before the long night.";
+  const block = makeTextNode({
+    content: allocator.createTextSlice(`${long1}\n${short}\n${long2}`),
+    id: allocator.createNodeId(),
+  });
+  const tail = makeTextNode({
+    content: allocator.createTextSlice("A trailing paragraph after the block."),
+    id: allocator.createNodeId(),
+  });
+  const blocks = [block, tail];
+  const snapshot: EditorDocumentSnapshot = {
+    body: {
+      blocks: Object.fromEntries(blocks.map((n) => [n.id, n])) as Record<
+        NodeId,
+        EditorNode
+      >,
+      order: blocks.map((n) => n.id),
+    },
+    settings: { phase: "7", story: "owned-model-ragged-lines" },
+    version: 1,
+  };
+  return createEditorStore({ allocator, snapshot });
 }
 
 function createPhase4Store(blockCount: number) {

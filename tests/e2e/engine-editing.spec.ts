@@ -150,7 +150,17 @@ test("typing then a single undo reverts it; caret moves are not undoable", async
 
 test("cut deletes the selection and paste re-inserts it through commands", async ({
   page,
+  browserName,
 }) => {
+  // Known cross-browser limitation (docs/010 Phase 7 §11): Firefox returns a
+  // null `clipboardData` for a *synthetic* ClipboardEvent (the constructor's
+  // clipboardData is ignored), so this test — which dispatches a synthetic cut —
+  // cannot read what the engine wrote. Real Ctrl+X/Ctrl+V works on Firefox; the
+  // engine's model delete/insert is proven on chromium/webkit here.
+  test.fixme(
+    browserName === "firefox",
+    "Firefox synthetic ClipboardEvent.clipboardData is null",
+  );
   await open(page);
   const block = page.locator("[data-engine-block-id]").nth(1);
   const id = (await block.getAttribute("data-engine-block-id"))!;

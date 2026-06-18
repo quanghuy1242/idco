@@ -133,6 +133,7 @@ export {
   ROOT_NODE_ID,
   TransactionBuilder,
   createEditorStore,
+  type CompositionRange,
   type EditorCommitSubscriber,
   type EditorStore,
   type EditorStoreOptions,

@@ -96,6 +96,10 @@ export type OwnedModelEditorViewDiagnostics = {
   readonly objects: Readonly<Record<NodeId, ObjectBlockDiagnostics>>;
   /** Mounted live object-editor surfaces; the slot is capped at one (AC2). */
   readonly liveObjectEditorCount: number;
+  /** The active IME composition (preedit) range, or null (Phase 7 AC5). */
+  readonly composition: { node: NodeId; from: number; to: number } | null;
+  /** Last IME bounds fed to the active leaf's EditContext (Phase 7 AC4). */
+  readonly imeBounds: ImeBoundsSnapshot | null;
   /** The derived TOC/text index, once the worker round-trip resolves (AC6). */
   readonly documentIndex: DocumentIndex | null;
   /** True once a worker (not just main-thread fallback) returned the index. */
@@ -152,6 +156,42 @@ type EditContextLike = EventTarget & {
   selectionEnd: number;
   updateText(rangeStart: number, rangeEnd: number, text: string): void;
   updateSelection(start: number, end: number): void;
+  /** IME bounds feedback (docs/010 §7.4, Phase 7 AC4); present on both backends. */
+  updateControlBounds?(controlBounds: DOMRect): void;
+  updateSelectionBounds?(selectionBounds: DOMRect): void;
+  updateCharacterBounds?(rangeStart: number, characterBounds: DOMRect[]): void;
+};
+
+/** One IME composition format range (docs/010 Phase 7 AC5: preedit underline). */
+type TextFormatLike = {
+  readonly rangeStart: number;
+  readonly rangeEnd: number;
+  readonly underlineStyle?: string;
+  readonly underlineThickness?: string;
+};
+
+type TextFormatUpdateEventLike = Event & {
+  getTextFormats(): readonly TextFormatLike[];
+};
+
+type CharacterBoundsUpdateEventLike = Event & {
+  readonly rangeStart: number;
+  readonly rangeEnd: number;
+};
+
+/** The last IME bounds fed to the active EditContext, for diagnostics (AC4). */
+type ImeBoundsSnapshot = {
+  readonly control: SerializedRect;
+  readonly selection: SerializedRect;
+  readonly characterCount: number;
+  readonly firstCharacter: SerializedRect | null;
+};
+
+type SerializedRect = {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
 };
 
 type EditContextConstructor = new (init?: {
@@ -178,6 +218,10 @@ type RenderRegistry = {
   readonly objectEditors: Set<NodeId>;
   selectionOverlayRenderCount: number;
   selectionRectCount: number;
+  /** Last IME bounds fed to the active leaf's EditContext (AC4 diagnostics). */
+  imeBounds: ImeBoundsSnapshot | null;
+  /** True during a pointer drag; suppresses IME bounds feeding (autoscroll). */
+  dragging: boolean;
 };
 
 type TextDiff = {
@@ -222,11 +266,18 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   } | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const dragAnchorRef = useRef<TextPoint | null>(null);
+  // The remembered caret X (viewport px) for vertical navigation. Persists across
+  // consecutive ArrowUp/ArrowDown so the caret tracks a goal column through
+  // ragged-width lines (docs/010 Phase 7 AC7); any horizontal move/click/type
+  // resets it to null so the next vertical run re-seeds from the live caret.
+  const goalColumnRef = useRef<number | null>(null);
   const draggingRef = useRef(false);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const autoscrollFrameRef = useRef<number | null>(null);
   const registryRef = useRef<RenderRegistry>({
     blockRefs: new Map(),
+    dragging: false,
+    imeBounds: null,
     inputBackends: new Map(),
     objectEditors: new Set(),
     renderCounts: new Map(),
@@ -485,12 +536,16 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       scrollFrameRef.current = null;
       const element = rootRef.current;
       if (element) setScrollTop(element.scrollTop);
+      // Re-feed IME bounds after scroll so the OS candidate window follows the
+      // caret to its new viewport position (docs/010 §7.4, Phase 7 AC4).
+      feedImeBounds(rootRef.current, store, registryRef.current);
     });
-  }, [virtualize]);
+  }, [store, virtualize]);
 
   const beginDrag = useCallback((anchor: TextPoint) => {
     dragAnchorRef.current = anchor;
     draggingRef.current = true;
+    registryRef.current.dragging = true;
   }, []);
 
   const extendDragToPointer = useCallback(() => {
@@ -599,6 +654,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
 
   const endDrag = useCallback(() => {
     draggingRef.current = false;
+    registryRef.current.dragging = false;
     dragAnchorRef.current = null;
     lastPointerRef.current = null;
     stopAutoscroll();
@@ -610,16 +666,25 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // early-out unless a drag is active, so they are cheap when idle.
   useEffect(() => {
     const view = rootRef.current?.ownerDocument.defaultView ?? globalThis;
-    const onMove = (event: PointerEvent) => {
+    // Track on BOTH mouse and pointer events. Desktop drag is mouse-driven and
+    // every browser dispatches `mousemove`/`mouseup`; `pointermove` covers touch
+    // but is not reliably synthesized from mouse input on WebKit/Firefox, which
+    // is why a pointer-only listener let cross-browser drags stall (Phase 7).
+    // `handleDragMove` is idempotent, so the overlap is harmless.
+    const onMove = (event: MouseEvent) => {
       if (draggingRef.current) handleDragMove(event.clientX, event.clientY);
     };
     const onUp = () => {
       if (draggingRef.current) endDrag();
     };
+    view.addEventListener("mousemove", onMove);
     view.addEventListener("pointermove", onMove);
+    view.addEventListener("mouseup", onUp);
     view.addEventListener("pointerup", onUp);
     return () => {
+      view.removeEventListener("mousemove", onMove);
       view.removeEventListener("pointermove", onMove);
+      view.removeEventListener("mouseup", onUp);
       view.removeEventListener("pointerup", onUp);
     };
   }, [endDrag, handleDragMove]);
@@ -736,7 +801,9 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       activeNodeId,
       activeObjectId: store.activeObjectId,
       blockTexts,
+      composition: store.composition,
       documentIndex: documentIndexRef.current,
+      imeBounds: registryRef.current.imeBounds,
       indexFromWorker: indexFromWorkerRef.current,
       liveObjectEditorCount: registryRef.current.objectEditors.size,
       mountedCount: registryRef.current.blockRefs.size,
@@ -816,6 +883,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     <EngineBlock
       beginDrag={beginDrag}
       forcePolyfill={forcePolyfill}
+      goalColumnRef={goalColumnRef}
       id={id}
       key={id}
       onRender={recordBlockRender}
@@ -832,6 +900,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     return (
       <div
         ref={rootRef}
+        aria-label="Document editor"
+        aria-roledescription="rich text editor"
         className={className}
         data-engine-view-root=""
         onCopy={onClipboardCopy}
@@ -848,6 +918,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scheduler={scheduler}
           store={store}
         />
+        <SelectionAnnouncer scheduler={scheduler} store={store} />
       </div>
     );
   }
@@ -855,6 +926,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   return (
     <div
       ref={rootRef}
+      aria-label="Document editor"
+      aria-roledescription="rich text editor"
       className={className}
       data-engine-view-root=""
       data-engine-virtualized=""
@@ -888,6 +961,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scheduler={scheduler}
           store={store}
         />
+        <SelectionAnnouncer scheduler={scheduler} store={store} />
       </div>
     </div>
   );
@@ -939,6 +1013,7 @@ function EngineBlock(props: {
   readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
   readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
+  readonly goalColumnRef: RefObject<number | null>;
 }) {
   const {
     id,
@@ -951,6 +1026,7 @@ function EngineBlock(props: {
     revealBlock,
     beginDrag,
     registerObjectEditor,
+    goalColumnRef,
   } = props;
   const node = useEditorNode(store, id);
   onRender(id);
@@ -962,6 +1038,7 @@ function EngineBlock(props: {
       <EngineTextBlock
         beginDrag={beginDrag}
         forcePolyfill={forcePolyfill}
+        goalColumnRef={goalColumnRef}
         node={node}
         registerBlock={registerBlock}
         registerInputBackend={registerInputBackend}
@@ -1283,6 +1360,7 @@ function EngineTextBlock(props: {
   readonly requestFocus: (id: NodeId) => void;
   readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
+  readonly goalColumnRef: RefObject<number | null>;
 }) {
   const {
     node,
@@ -1293,6 +1371,7 @@ function EngineTextBlock(props: {
     requestFocus,
     revealBlock,
     beginDrag,
+    goalColumnRef,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<TextBlockController | null>(null);
@@ -1315,67 +1394,62 @@ function EngineTextBlock(props: {
   const onTextUpdate = useCallback(() => {
     const controller = controllerRef.current;
     if (!controller) return;
+    // Typing is a horizontal change; drop any remembered vertical goal column.
+    goalColumnRef.current = null;
     const editContext = controller.editContext;
-    const current = store.requireTextNode(node.id);
-    const diff = diffText(current.content.text, editContext.text);
-    const selectionStart = clampOffset(
+    applyEditContextText(
+      store,
+      node.id,
+      editContext.text,
       editContext.selectionStart,
-      editContext.text.length,
-    );
-    const selectionEnd = clampOffset(
       editContext.selectionEnd,
-      editContext.text.length,
-    );
-
-    if (
-      diff.removed.length === 0 &&
-      diff.inserted.length === 0 &&
-      store.selection?.type === "text" &&
-      store.selection.anchor.node === node.id &&
-      store.selection.anchor.offset === selectionStart &&
-      store.selection.focus.offset === selectionEnd
-    ) {
-      return;
-    }
-
-    const inserted = store.allocator.createTextSlice(diff.inserted);
-    const nextContent = replaceTextContent(
-      current.content,
-      diff.at,
-      diff.removed.length,
-      inserted,
-    );
-    patchHostText(hostRef.current, editContext.text);
-    // The DOM text is now current, so the commit may skip re-rendering this leaf
-    // (the typing fast path). Command-driven edits never call this, so they
-    // re-render and stay visible.
-    store.markActiveLeafDomSynced();
-    const steps =
-      diff.removed.length > 0 || diff.inserted.length > 0
-        ? [
-            {
-              at: diff.at,
-              inserted,
-              node: node.id,
-              removed: sliceTextContent(
-                current.content,
-                diff.at,
-                diff.at + diff.removed.length,
-              ),
-              type: "replace-text" as const,
-            },
-          ]
-        : [];
-    store.dispatch({
-      origin: "local",
-      selectionAfter: {
-        anchor: pointAtOffset(node.id, nextContent, selectionStart),
-        focus: pointAtOffset(node.id, nextContent, selectionEnd),
-        type: "text",
+      () => {
+        // Patch the rendered text node ourselves and authorize the commit to
+        // skip re-rendering this leaf (the typing fast path). Command-driven
+        // edits never call this, so they re-render and stay visible.
+        patchHostText(hostRef.current, editContext.text);
+        store.markActiveLeafDomSynced();
       },
-      steps,
-    });
+    );
   }, [node.id, store]);
+
+  // IME preedit: a fully owned view gets no browser-drawn composition underline,
+  // so the engine paints it (docs/010 §7.4, Phase 7 AC5). `textformatupdate`
+  // carries the preedit range + underline style on both backends; we record the
+  // range on the store and the overlay paints the underline.
+  const onTextFormatUpdate = useCallback(
+    (event: Event) => {
+      const formats =
+        (event as TextFormatUpdateEventLike).getTextFormats?.() ?? [];
+      const underlined = formats.find((f) => f.rangeEnd > f.rangeStart);
+      if (underlined) {
+        store.setComposition({
+          from: underlined.rangeStart,
+          node: node.id,
+          to: underlined.rangeEnd,
+        });
+      } else {
+        store.clearComposition();
+      }
+    },
+    [node.id, store],
+  );
+
+  const onCompositionEnd = useCallback(() => {
+    store.clearComposition();
+  }, [store]);
+
+  // The IME asks for per-character geometry to place its candidate window
+  // (docs/010 §7.4, Phase 7 AC4/AC5); answer with viewport rects for the
+  // requested range so the candidate box sits at the composing text.
+  const onCharacterBoundsUpdate = useCallback((event: Event) => {
+    const controller = controllerRef.current;
+    const host = hostRef.current;
+    if (!controller || !host) return;
+    const { rangeStart, rangeEnd } = event as CharacterBoundsUpdateEventLike;
+    const rects = characterClientRects(host, rangeStart, rangeEnd);
+    controller.editContext.updateCharacterBounds?.(rangeStart, rects);
+  }, []);
 
   const ensureController = useCallback((): TextBlockController | null => {
     if (controllerRef.current) return controllerRef.current;
@@ -1404,10 +1478,23 @@ function EngineTextBlock(props: {
       text: current.content.text,
     });
     editContext.addEventListener("textupdate", onTextUpdate);
+    editContext.addEventListener("compositionend", onCompositionEnd);
+    editContext.addEventListener("textformatupdate", onTextFormatUpdate);
+    editContext.addEventListener(
+      "characterboundsupdate",
+      onCharacterBoundsUpdate,
+    );
     (host as unknown as { editContext: EditContextLike }).editContext =
       editContext;
     const destroy = () => {
       editContext.removeEventListener("textupdate", onTextUpdate);
+      editContext.removeEventListener("compositionend", onCompositionEnd);
+      editContext.removeEventListener("textformatupdate", onTextFormatUpdate);
+      editContext.removeEventListener(
+        "characterboundsupdate",
+        onCharacterBoundsUpdate,
+      );
+      store.clearComposition();
       (host as unknown as { editContext: EditContextLike | null }).editContext =
         null;
       registerInputBackend(node.id, null);
@@ -1416,7 +1503,16 @@ function EngineTextBlock(props: {
     registerInputBackend(node.id, backend);
     controllerRef.current = { backend, destroy, editContext };
     return controllerRef.current;
-  }, [forcePolyfill, node.id, onTextUpdate, registerInputBackend, store]);
+  }, [
+    forcePolyfill,
+    node.id,
+    onCharacterBoundsUpdate,
+    onCompositionEnd,
+    onTextFormatUpdate,
+    onTextUpdate,
+    registerInputBackend,
+    store,
+  ]);
 
   useLayoutEffect(() => {
     const controller = controllerRef.current;
@@ -1509,6 +1605,8 @@ function EngineTextBlock(props: {
 
   const focusAtClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      // A pointer click sets a fresh caret X; drop any remembered goal column.
+      goalColumnRef.current = null;
       // Map the click to a model offset (docs/011 \u00a78.3 click-to-position), not
       // the end of the block. Fall back to the end only if the point misses the
       // text (e.g. a click in the block padding).
@@ -1521,14 +1619,17 @@ function EngineTextBlock(props: {
         current.content.text.length,
       );
       // Double-click selects the word under the pointer; triple-click selects
-      // the whole block (docs/011 \u00a78.3 gesture-to-range via Intl.Segmenter).
+      // the line (the run between soft `\n` breaks) at the pointer, matching a
+      // native editor \u2014 for a single-line block the line is the whole block
+      // (docs/010 Phase 7 AC8; docs/011 \u00a78.3 gesture-to-range via Intl.Segmenter).
       if (event.detail === 2) {
         const [from, to] = wordRangeAt(current.content.text, offset);
         selectRangeInBlock(from, to);
         return;
       }
       if (event.detail >= 3) {
-        selectRangeInBlock(0, current.content.text.length);
+        const [from, to] = lineRangeAt(current.content.text, offset);
+        selectRangeInBlock(from, to);
         return;
       }
       const focus = pointAtOffset(node.id, current.content, offset);
@@ -1670,6 +1771,13 @@ function EngineTextBlock(props: {
       }
       event.stopPropagation();
       const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
+      // Goal column (docs/010 Phase 7 AC7): consecutive ArrowUp/ArrowDown track a
+      // remembered caret X through ragged-width lines. Seed it from the live
+      // caret on the first vertical press; any non-vertical move resets it below.
+      if (vertical && goalColumnRef.current === null && hostRef.current) {
+        const rect = caretClientRect(hostRef.current, selection.focus.offset);
+        goalColumnRef.current = rect ? rect.left : null;
+      }
       // Vertical nav uses browser line geometry inside a wrapped block; at the
       // first/last line the probe lands in the inter-block gap and returns
       // nothing or the same spot, so fall back to a block-level jump.
@@ -1680,22 +1788,28 @@ function EngineTextBlock(props: {
             hostRef.current,
             event.key === "ArrowUp" ? -1 : 1,
             event.shiftKey,
+            goalColumnRef.current,
           )
         : null;
       const next =
         lineMove && !samePoint(lineMove, selection)
           ? lineMove
           : selectionForNavigation(store, selection, event.key, event.shiftKey);
+      // A horizontal move (or a vertical fall-through to a block jump that the
+      // browser geometry could not satisfy) resets the goal column so the next
+      // vertical run re-seeds from the live caret.
+      if (!vertical) goalColumnRef.current = null;
       if (!next || samePoint(next, selection)) return;
       event.preventDefault();
       moveSelection(next);
     },
-    [moveSelection, node.id, store],
+    [goalColumnRef, moveSelection, node.id, store],
   );
 
   return (
     <div
-      aria-label={`Block ${node.id}`}
+      aria-label={ariaLabelForLeaf(node)}
+      aria-multiline="true"
       data-engine-block-id={node.id}
       data-engine-text-id={node.id}
       onFocus={focusAtEnd}
@@ -1711,6 +1825,22 @@ function EngineTextBlock(props: {
   );
 }
 
+/** A screen-reader label for a text leaf: its role plus a short text preview. */
+function ariaLabelForLeaf(node: TextLeafNode): string {
+  const role =
+    node.type === "heading"
+      ? "Heading"
+      : node.type === "listitem"
+        ? "List item"
+        : node.type === "quote"
+          ? "Quote"
+          : node.type === "callout"
+            ? "Callout"
+            : "Paragraph";
+  const preview = node.content.text.trim().slice(0, 40);
+  return preview ? `${role}: ${preview}` : `${role}, empty`;
+}
+
 function SelectionOverlay(props: {
   readonly store: EditorStore;
   readonly scheduler: EngineScheduler;
@@ -1722,32 +1852,42 @@ function SelectionOverlay(props: {
   void version;
   const rects = selectionRects(store, rootRef.current, registry.blockRefs);
   registry.selectionOverlayRenderCount += 1;
-  registry.selectionRectCount = rects.length;
+  registry.selectionRectCount = rects.filter(
+    (rect) => rect.kind !== "preedit",
+  ).length;
+  // Feed IME bounds for the active leaf each frame (docs/010 §7.4, Phase 7 AC4),
+  // so the OS candidate window follows the caret/selection after edits.
+  feedImeBounds(rootRef.current, store, registry);
   return (
     <div
       aria-hidden="true"
+      data-engine-preedit-count={
+        rects.filter((rect) => rect.kind === "preedit").length
+      }
       data-engine-selection-overlay=""
-      data-engine-selection-rect-count={rects.length}
+      data-engine-selection-rect-count={registry.selectionRectCount}
       style={{
         inset: 0,
         pointerEvents: "none",
         position: "absolute",
       }}
     >
-      <style>{CARET_BLINK_KEYFRAMES}</style>
+      <style>{CARET_BLINK_KEYFRAMES + ENGINE_SURFACE_SUPPRESS_CSS}</style>
       {rects.map((rect, index) => {
         const isCaret = rect.kind === "caret";
+        const isPreedit = rect.kind === "preedit";
         return (
           <div
             data-engine-caret={isCaret ? "" : undefined}
-            data-engine-selection-rect=""
+            data-engine-preedit={isPreedit ? "" : undefined}
+            data-engine-selection-rect={isPreedit ? undefined : ""}
             // Keying a caret by its pixel position recreates the element when it
             // moves, restarting the blink so it shows solid right after a move,
             // the way a native insertion bar does (mirrors the spike).
             key={
               isCaret
                 ? `caret-${Math.round(rect.left)}-${Math.round(rect.top)}`
-                : `range-${rect.node}-${index}`
+                : `${rect.kind}-${rect.node}-${index}`
             }
             style={{
               animation: isCaret
@@ -1755,8 +1895,10 @@ function SelectionOverlay(props: {
                 : undefined,
               background: isCaret
                 ? "CanvasText"
-                : "color-mix(in srgb, Highlight 36%, transparent)",
-              borderRadius: isCaret ? 1 : 3,
+                : isPreedit
+                  ? "CanvasText"
+                  : "color-mix(in srgb, Highlight 36%, transparent)",
+              borderRadius: isCaret ? 1 : isPreedit ? 0 : 3,
               height: rect.height,
               left: rect.left,
               position: "absolute",
@@ -1773,8 +1915,189 @@ function SelectionOverlay(props: {
   );
 }
 
+/**
+ * Feed `updateControlBounds`/`updateSelectionBounds` (and character bounds while
+ * composing) for the active leaf's EditContext (docs/010 §7.4, Phase 7 AC4).
+ * Bounds are viewport-space, so the OS candidate window follows the caret across
+ * scroll and relayout. The last fed bounds are recorded for diagnostics.
+ */
+function feedImeBounds(
+  root: HTMLElement | null,
+  store: EditorStore,
+  registry: RenderRegistry,
+): void {
+  if (!root) return;
+  // While a pointer drag is autoscrolling, feeding bounds would re-home the
+  // focused polyfill textarea to the caret and the browser would scroll it back
+  // into view, fighting the drag autoscroll. IME bounds are not needed mid-drag.
+  if (registry.dragging) return;
+  const selection = store.selection;
+  const activeId =
+    store.activeTextLeafId ??
+    (selection?.type === "text" ? selection.focus.node : null);
+  if (!activeId) return;
+  const host = registry.blockRefs.get(activeId);
+  if (!host) return;
+  const editContext = (host as { editContext?: EditContextLike | null })
+    .editContext;
+  if (!editContext) return;
+  const hostRect = host.getBoundingClientRect();
+  editContext.updateControlBounds?.(toDomRect(hostRect));
+  const focusOffset =
+    selection?.type === "text" && selection.focus.node === activeId
+      ? selection.focus.offset
+      : 0;
+  const caret = robustCaretRect(host, focusOffset) ?? hostRect;
+  // Native `EditContext` requires a real `DOMRect` here (not a plain rect-shaped
+  // object), or it throws and the overlay error-boundary unmounts the caret. The
+  // polyfill accepts either, which is why this only bit the Chromium native path.
+  const selectionRect = toDomRect(
+    makeRect(caret.left, caret.top, Math.max(1, caret.width), caret.height),
+  );
+  editContext.updateSelectionBounds?.(selectionRect);
+  const composition = store.composition;
+  let characterRects: DOMRect[] = [];
+  if (composition && composition.node === activeId) {
+    characterRects = characterClientRects(
+      host,
+      composition.from,
+      composition.to,
+    );
+    editContext.updateCharacterBounds?.(composition.from, characterRects);
+  }
+  registry.imeBounds = {
+    characterCount: characterRects.length,
+    control: serializeRect(hostRect),
+    firstCharacter: characterRects[0] ? serializeRect(characterRects[0]) : null,
+    selection: serializeRect(selectionRect),
+  };
+}
+
+/** A real `DOMRect` (required by native EditContext bounds), or the input in SSR. */
+function toDomRect(rect: {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}): DOMRect {
+  if (typeof DOMRect === "function") {
+    return new DOMRect(rect.left, rect.top, rect.width, rect.height);
+  }
+  return rect as DOMRect;
+}
+
+function serializeRect(rect: DOMRect): SerializedRect {
+  return {
+    height: rect.height,
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+  };
+}
+
+/**
+ * A polite live region that announces model selection changes to assistive tech
+ * (docs/010 Phase 7 AC3, docs/011 §8.7). A non-`contenteditable` surface gets no
+ * announcements for free, so the engine owns them. It dedupes on the message and
+ * announces caret moves only when the focused block changes, so a run of arrow
+ * keys does not flood the screen reader.
+ */
+function SelectionAnnouncer(props: {
+  readonly store: EditorStore;
+  readonly scheduler: EngineScheduler;
+}) {
+  const { store, scheduler } = props;
+  const version = useSelectionFrameVersion(store, scheduler);
+  void version;
+  const lastNodeRef = useRef<NodeId | null>(null);
+  const [message, setMessage] = useState("");
+  const next = selectionAnnouncement(store, lastNodeRef);
+  if (next !== null && next !== message) setMessage(next);
+  return (
+    <div
+      aria-live="polite"
+      data-engine-a11y-announcer=""
+      role="status"
+      style={visuallyHiddenStyle}
+    >
+      {message}
+    </div>
+  );
+}
+
+/**
+ * Build the announcement for the current selection, or null to leave the live
+ * region unchanged (the caret moved within the same block — no announcement, to
+ * avoid flooding).
+ */
+function selectionAnnouncement(
+  store: EditorStore,
+  lastNodeRef: { current: NodeId | null },
+): string | null {
+  const selection = store.selection;
+  if (!selection) {
+    lastNodeRef.current = null;
+    return null;
+  }
+  if (selection.type === "node") {
+    lastNodeRef.current = null;
+    const node = store.getNode(selection.node);
+    return `${node?.type ?? "object"} selected`;
+  }
+  if (selection.type === "gap") {
+    lastNodeRef.current = null;
+    return "Caret between blocks";
+  }
+  const { anchor, focus } = selection;
+  const collapsed =
+    anchor.node === focus.node && anchor.offset === focus.offset;
+  if (!collapsed) {
+    lastNodeRef.current = null;
+    if (anchor.node === focus.node) {
+      const count = Math.abs(focus.offset - anchor.offset);
+      return `${count} character${count === 1 ? "" : "s"} selected`;
+    }
+    return "Selection spanning multiple blocks";
+  }
+  // Collapsed caret: announce only when it enters a different block.
+  if (focus.node === lastNodeRef.current) return null;
+  lastNodeRef.current = focus.node;
+  const node = store.getNode(focus.node);
+  return node && node.kind === "text" ? ariaLabelForLeaf(node) : null;
+}
+
+const visuallyHiddenStyle: CSSProperties = {
+  border: 0,
+  clip: "rect(0 0 0 0)",
+  clipPath: "inset(50%)",
+  height: 1,
+  margin: -1,
+  overflow: "hidden",
+  padding: 0,
+  position: "absolute",
+  whiteSpace: "nowrap",
+  width: 1,
+};
+
 const CARET_BLINK_KEYFRAMES =
   "@keyframes idco-caret-blink{0%,50%{opacity:1}51%,100%{opacity:0}}";
+
+// Suppress the browser's own caret and ::selection on the editing surface so the
+// only visible caret/selection is the engine-painted overlay (docs/010 Phase 7
+// AC6). Applies on both backends: native EditContext can still draw a platform
+// caret on the focused host, and the native ::selection can flash during a
+// pointer gesture. Reabsorbed from the Phase 2 spike's overlay (§10.2).
+// Suppress the native caret/::selection on the engine's own text surface (the
+// blocks paint their own caret/overlay), but NOT on a live object editor: its
+// `<textarea>`/inputs are real native inputs that must keep their visible caret
+// and selection (the code-block live edit surface, docs/010 §6.4). caret-color
+// inherits, so the object editor needs an explicit `auto` override.
+const ENGINE_SURFACE_SUPPRESS_CSS =
+  "[data-engine-view-root]{caret-color:transparent;}" +
+  "[data-engine-view-root] [data-engine-text-id]{caret-color:transparent;}" +
+  "[data-engine-view-root] [data-engine-text-id]::selection{background:transparent;color:inherit;}" +
+  "[data-engine-view-root]::selection{background:transparent;color:inherit;}" +
+  "[data-engine-view-root] [data-engine-object-editor],[data-engine-view-root] [data-engine-object-editor] *{caret-color:auto;}";
 
 function useEditorOrder(store: EditorStore): readonly NodeId[] {
   return useSyncExternalStore(
@@ -1903,7 +2226,8 @@ function selectionForNavigation(
   // shift+arrow cross the list to the next/previous paragraph.
   if (key === "ArrowRight") {
     if (offset < current.content.text.length) {
-      offset += 1;
+      // Move by a whole grapheme cluster, never a half surrogate/cluster (AC1).
+      offset = nextGraphemeBoundary(current.content.text, offset);
     } else {
       const next = adjacentTextLeaf(store, currentIndex, 1);
       if (!next) return null;
@@ -1912,7 +2236,7 @@ function selectionForNavigation(
     }
   } else if (key === "ArrowLeft") {
     if (offset > 0) {
-      offset -= 1;
+      offset = prevGraphemeBoundary(current.content.text, offset);
     } else {
       const prev = adjacentTextLeaf(store, currentIndex, -1);
       if (!prev) return null;
@@ -1959,24 +2283,34 @@ function verticalNavigation(
   host: HTMLElement | null,
   direction: -1 | 1,
   extend: boolean,
+  goalColumn: number | null,
 ): EditorSelection | null {
   if (!host) return null;
   const rect = caretClientRect(host, selection.focus.offset);
   if (!rect) return null;
-  const probeX = rect.left;
   const lineStep = Math.max(8, rect.height || 16);
   const probeY =
     direction < 0 ? rect.top - lineStep * 0.5 : rect.bottom + lineStep * 0.5;
-  const hit = pointToModelPosition(host.ownerDocument, probeX, probeY);
-  if (!hit) return null;
-  const target = store.getNode(hit.id);
-  if (!target || target.kind !== "text") return null;
-  const focus = pointAtOffset(
-    hit.id,
-    target.content,
-    clampOffset(hit.offset, target.content.text.length),
-  );
-  return { anchor: extend ? selection.anchor : focus, focus, type: "text" };
+  const probe = (x: number): EditorSelection | null => {
+    const hit = pointToModelPosition(host.ownerDocument, x, probeY);
+    if (!hit) return null;
+    const target = store.getNode(hit.id);
+    if (!target || target.kind !== "text") return null;
+    const focus = pointAtOffset(
+      hit.id,
+      target.content,
+      clampOffset(hit.offset, target.content.text.length),
+    );
+    return { anchor: extend ? selection.anchor : focus, focus, type: "text" };
+  };
+  // Prefer the remembered goal column (docs/010 Phase 7 AC7) so a run of vertical
+  // moves tracks the original X through ragged lines. But if the goal-column
+  // probe yields nothing or does not move the caret, fall back to the live caret
+  // X — that keeps the per-line reveal step (and avoids degrading to a whole-block
+  // jump) exactly as before the goal column existed.
+  const byGoal = goalColumn === null ? null : probe(goalColumn);
+  if (byGoal && !samePoint(byGoal, selection)) return byGoal;
+  return probe(rect.left);
 }
 
 /** Whether a text selection is a collapsed caret (anchor === focus). */
@@ -2041,8 +2375,52 @@ const wordSegmenter =
     ? new Intl.Segmenter(undefined, { granularity: "word" })
     : null;
 
+// Grapheme segmentation for caret movement (docs/010 Phase 7 AC1, docs/011
+// §5.2/§8.3): ArrowLeft/Right move by a whole user-perceived character so the
+// caret never lands inside a surrogate pair, a combining sequence, an emoji ZWJ
+// cluster, or a regional-indicator flag.
+const graphemeSegmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+
+/** The next grapheme-cluster boundary at or after `offset`. */
+export function nextGraphemeBoundary(text: string, offset: number): number {
+  if (offset >= text.length) return text.length;
+  if (!graphemeSegmenter) return offset + 1;
+  for (const segment of graphemeSegmenter.segment(text)) {
+    const start = segment.index;
+    const end = start + segment.segment.length;
+    if (offset >= start && offset < end) return end;
+  }
+  return Math.min(offset + 1, text.length);
+}
+
+/** The previous grapheme-cluster boundary at or before `offset`. */
+export function prevGraphemeBoundary(text: string, offset: number): number {
+  if (offset <= 0) return 0;
+  if (!graphemeSegmenter) return offset - 1;
+  let boundary = 0;
+  for (const segment of graphemeSegmenter.segment(text)) {
+    const start = segment.index;
+    const end = start + segment.segment.length;
+    if (offset > start && offset <= end) return start;
+    boundary = end;
+  }
+  return Math.min(boundary, Math.max(0, offset - 1));
+}
+
+/** The [start, end) range of the soft-break-delimited line containing `offset`. */
+export function lineRangeAt(text: string, offset: number): [number, number] {
+  const clamped = Math.max(0, Math.min(text.length, offset));
+  const start = text.lastIndexOf("\n", clamped - 1) + 1;
+  const nextBreak = text.indexOf("\n", clamped);
+  const end = nextBreak === -1 ? text.length : nextBreak;
+  return [start, end];
+}
+
 /** The [start, end) range of the word at `offset`, or a collapsed point. */
-function wordRangeAt(text: string, offset: number): [number, number] {
+export function wordRangeAt(text: string, offset: number): [number, number] {
   if (!wordSegmenter || text.length === 0) return [offset, offset];
   let result: [number, number] = [offset, offset];
   for (const segment of wordSegmenter.segment(text)) {
@@ -2337,7 +2715,7 @@ function makeRect(
 
 type OverlayRect = {
   readonly height: number;
-  readonly kind: "caret" | "range";
+  readonly kind: "caret" | "range" | "preedit";
   readonly left: number;
   readonly node: NodeId;
   readonly top: number;
@@ -2375,31 +2753,72 @@ function selectionRects(
   const collapsed =
     selection.anchor.node === selection.focus.node &&
     selection.anchor.offset === selection.focus.offset;
+  const rects: OverlayRect[] = [];
   if (collapsed) {
     const leaf = leaves[focusIndex]!;
     const element = blockRefs.get(leaf.id);
-    if (!element) return [];
-    return caretRectsFromRange(
-      element,
-      rootRect,
-      leaf.id,
-      selection.focus.offset,
-      leaf.node.content.text.length,
-    );
+    if (element) {
+      rects.push(
+        ...caretRectsFromRange(
+          element,
+          rootRect,
+          leaf.id,
+          selection.focus.offset,
+          leaf.node.content.text.length,
+        ),
+      );
+    }
+  } else {
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      const leaf = leaves[index]!;
+      const element = blockRefs.get(leaf.id);
+      if (!element) continue;
+      const length = leaf.node.content.text.length;
+      const from = leaf.id === start.node ? start.offset : 0;
+      const to = leaf.id === end.node ? end.offset : length;
+      rects.push(
+        ...rangeRectsFromText(element, rootRect, leaf.id, from, to, length),
+      );
+    }
   }
-  const rects: OverlayRect[] = [];
-  for (let index = startIndex; index <= endIndex; index += 1) {
-    const leaf = leaves[index]!;
-    const element = blockRefs.get(leaf.id);
-    if (!element) continue;
-    const length = leaf.node.content.text.length;
-    const from = leaf.id === start.node ? start.offset : 0;
-    const to = leaf.id === end.node ? end.offset : length;
-    rects.push(
-      ...rangeRectsFromText(element, rootRect, leaf.id, from, to, length),
-    );
+  // Engine-painted IME preedit underline (docs/010 Phase 7 AC5). A fully owned
+  // view gets no browser-drawn composition mark, so paint a thin bar under each
+  // line fragment of the composition range on the active (mounted) leaf.
+  const composition = store.composition;
+  if (composition) {
+    const element = blockRefs.get(composition.node);
+    if (element) {
+      rects.push(
+        ...preeditRectsFromText(
+          element,
+          rootRect,
+          composition.node,
+          composition.from,
+          composition.to,
+        ),
+      );
+    }
   }
   return rects;
+}
+
+function preeditRectsFromText(
+  element: HTMLElement,
+  rootRect: DOMRect,
+  node: NodeId,
+  from: number,
+  to: number,
+): readonly OverlayRect[] {
+  // A ~2px underline at the bottom of each line fragment of the preedit range.
+  const UNDERLINE = 2;
+  return textRangeClientRects(element, from, to).map((rect) => ({
+    height: UNDERLINE,
+    kind: "preedit" as const,
+    left: rect.left - rootRect.left,
+    node,
+    top: rect.bottom - rootRect.top - UNDERLINE,
+    width: rect.width,
+  }));
 }
 
 function caretRectsFromRange(
@@ -2488,6 +2907,33 @@ function textRangeClientRects(
   return rect.width > 0 || rect.height > 0 ? [rect] : [];
 }
 
+/**
+ * One viewport-space rect per character in `[from, to)`, for IME character
+ * bounds (docs/010 §7.4, Phase 7 AC4/AC5). Native `updateCharacterBounds`
+ * expects one box per code unit so the candidate window aligns to the glyphs.
+ */
+function characterClientRects(
+  element: HTMLElement,
+  from: number,
+  to: number,
+): DOMRect[] {
+  const textNode = firstTextNode(element);
+  if (!textNode) return [];
+  const length = textNode.textContent?.length ?? 0;
+  const start = clampOffset(from, length);
+  const end = clampOffset(to, length);
+  const doc = element.ownerDocument;
+  const rects: DOMRect[] = [];
+  for (let index = start; index < end; index += 1) {
+    const range = doc.createRange();
+    range.setStart(textNode, index);
+    range.setEnd(textNode, index + 1);
+    if (typeof range.getBoundingClientRect !== "function") break;
+    rects.push(range.getBoundingClientRect());
+  }
+  return rects;
+}
+
 function firstTextNode(element: HTMLElement): Text | null {
   const textNodeType = element.ownerDocument.defaultView?.Node.TEXT_NODE ?? 3;
   return element.firstChild?.nodeType === textNodeType
@@ -2547,6 +2993,77 @@ function fallbackRangeRect(
     top: rect.top - rootRect.top + 5,
     width,
   };
+}
+
+/**
+ * Apply one EditContext text snapshot to the model (docs/011 §9.4): diff the
+ * snapshot against the leaf's current text, build the minimal `replace-text`
+ * step preserving surrounding character ids, and dispatch with the snapshot's
+ * selection. This is the engine's half of the IME/typing contract — the bug
+ * surface the Microsoft-Telex regression lived in — so it is a pure,
+ * framework-free function the view calls and the IME fuzz suite drives directly.
+ *
+ * `onBeforeDispatch` lets the view patch the rendered text node and authorize
+ * the active-leaf re-render skip immediately before the commit; headless callers
+ * omit it. Returns whether anything was dispatched.
+ */
+export function applyEditContextText(
+  store: EditorStore,
+  nodeId: NodeId,
+  text: string,
+  selectionStartRaw: number,
+  selectionEndRaw: number,
+  onBeforeDispatch?: () => void,
+): boolean {
+  const current = store.requireTextNode(nodeId);
+  const diff = diffText(current.content.text, text);
+  const selectionStart = clampOffset(selectionStartRaw, text.length);
+  const selectionEnd = clampOffset(selectionEndRaw, text.length);
+  const selection = store.selection;
+  if (
+    diff.removed.length === 0 &&
+    diff.inserted.length === 0 &&
+    selection?.type === "text" &&
+    selection.anchor.node === nodeId &&
+    selection.anchor.offset === selectionStart &&
+    selection.focus.offset === selectionEnd
+  ) {
+    return false;
+  }
+  const inserted = store.allocator.createTextSlice(diff.inserted);
+  const nextContent = replaceTextContent(
+    current.content,
+    diff.at,
+    diff.removed.length,
+    inserted,
+  );
+  const steps =
+    diff.removed.length > 0 || diff.inserted.length > 0
+      ? [
+          {
+            at: diff.at,
+            inserted,
+            node: nodeId,
+            removed: sliceTextContent(
+              current.content,
+              diff.at,
+              diff.at + diff.removed.length,
+            ),
+            type: "replace-text" as const,
+          },
+        ]
+      : [];
+  onBeforeDispatch?.();
+  store.dispatch({
+    origin: "local",
+    selectionAfter: {
+      anchor: pointAtOffset(nodeId, nextContent, selectionStart),
+      focus: pointAtOffset(nodeId, nextContent, selectionEnd),
+      type: "text",
+    },
+    steps,
+  });
+  return true;
 }
 
 function diffText(before: string, after: string): TextDiff {

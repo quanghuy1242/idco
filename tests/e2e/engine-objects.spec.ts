@@ -222,3 +222,27 @@ test("AC6 a pure-compute index runs in the worker (round-trip, off main thread)"
     "Second section",
   );
 });
+
+test("the live code editor keeps a visible native caret and selection", async ({
+  page,
+}) => {
+  // Regression guard: the Phase 7 caret/::selection suppression must not leak
+  // into a live object editor's <textarea> (it is a real input that needs its
+  // own caret/selection). Activate the code block and assert its caret-color is
+  // not the engine's transparent suppression, while the surface root still is.
+  await open(page);
+  const codeId = objectId(await diag(page), "code-block");
+  await page.locator(`[data-engine-block-id="${codeId}"]`).click();
+  const editor = page.locator('[data-engine-object-editor="code"]');
+  await editor.waitFor({ state: "visible" });
+  const caretColor = await editor.evaluate(
+    (el) => getComputedStyle(el).caretColor,
+  );
+  expect(caretColor.replace(/\s/g, "")).not.toBe("rgba(0,0,0,0)");
+  // ...while the engine's own text blocks still suppress their native caret (AC6).
+  const textCaret = await page
+    .locator("[data-engine-text-id]")
+    .first()
+    .evaluate((el) => getComputedStyle(el).caretColor);
+  expect(textCaret.replace(/\s/g, "")).toBe("rgba(0,0,0,0)");
+});

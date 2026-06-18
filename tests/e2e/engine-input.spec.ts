@@ -25,7 +25,7 @@ const DIAGNOSTICS_KEY = "__IDCO_ENGINE_INPUT__";
 const FIREFOX_TELEX_XIN_CHAO_FIXTURE = JSON.parse(
   readFileSync(
     new URL(
-      "../fixtures/engine-ime/firefox-telex-xin-chao.json",
+      "../fixtures/owned-model-ime/firefox-telex-xin-chao.json",
       import.meta.url,
     ),
     "utf8",
