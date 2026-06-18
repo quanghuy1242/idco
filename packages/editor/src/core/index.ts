@@ -78,6 +78,21 @@ export type {
   StoreDirty,
   TransactionDraft,
 } from "./steps";
+export type {
+  EnginePerformanceDashboard,
+  EnginePerformanceSnapshot,
+  EnginePerformanceTaskSnapshot,
+  EngineScheduler,
+  EngineSchedulerCoalesce,
+  EngineSchedulerContract,
+  EngineSchedulerLane,
+  EngineSchedulerOptions,
+  EngineSchedulerPriority,
+  EngineSchedulerTask,
+  EngineTaskRunContext,
+  EngineTaskRunResult,
+} from "./scheduler";
+export { createEngineScheduler } from "./scheduler";
 export {
   ROOT_NODE_ID,
   TransactionBuilder,

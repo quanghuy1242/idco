@@ -527,7 +527,7 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 - [x] P1 Groundwork
 - [ ] P2 Input + caret + selection spike
 - [ ] P3 Model + transactions
-- [ ] P4 React view + scheduler/frame loop
+- [x] P4 React view + scheduler/frame loop
 - [ ] P5 Block virtualization
 - [ ] P6 Heavy objects + bake
 - [ ] P7 Cross-browser / mobile / a11y hardening

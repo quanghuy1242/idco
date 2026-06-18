@@ -53,6 +53,7 @@ await import("./editor/engine-ids.test");
 await import("./editor/engine-virtual-range.test");
 await import("./editor/engine-height-cache.test");
 await import("./editor/engine-model.test");
+await import("./editor/engine-view.test");
 await import("./editor/editcontext-polyfill.test");
 await import("./editor/editor-performance.test");
 await import("./editor/editor-foundation.test");

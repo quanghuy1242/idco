@@ -25,6 +25,16 @@ Current invariants:
 - `packages/ui` source modules must remain side-effect-free. Consumers own app-global CSS, Tailwind setup, DaisyUI theme definitions, and portal theme placement.
 - Consumers must not compensate for missing primitives by hand-rolling UI in product repos. When `content-api` or `auth` needs reusable admin layout, typography, modal, menu, table, action, or form behavior, add the product-neutral primitive here with tests, publish a tagged idco release, then have the consumer repin the registry alias.
 
+## Code comments and architecture notes
+
+JSDoc and file headers are required but they are not enough for new architecture, infrastructure, or compatibility layers. When adding or rewriting schedulers, transactions, model/store code, reconciliation, browser bridges, polyfills, compatibility adapters, performance queues, or other non-obvious control flow, add explanatory comments inside the actual code path.
+
+- Comments must explain why the branch, queue, invariant, ordering rule, or fallback exists; how data moves through the flow; and what breaks if a future edit changes it.
+- Put gotchas next to the code that carries the gotcha: browser quirks, race boundaries, coalescing rules, reference-implementation differences, transaction ordering, stale-state hazards, cleanup timing, and performance tradeoffs belong inline.
+- For code derived from or replacing an older implementation, document the reference boundary and the intentional differences where they affect behavior. Say whether the old code was used only as a reference, whether it is imported, and why the new version diverges.
+- Avoid comments that merely restate the next line of code. The goal is to preserve architecture reasoning and maintenance hazards that are not obvious from syntax.
+- Before declaring an architecture slice done, scan every new or changed architecture file and confirm the explanation exists in the code flow, not only at the top of the file.
+
 ## Cross-repo release (do this, do not improvise)
 
 Edit idco here → in the consumer run `pnpm dev:link` and prove `pnpm check` passes against your local idco → bump the version in EVERY publishable `packages/*/package.json` (and the root) to the same `X.Y.Z` so it matches the tag (the publish workflow verifies tag == every package version) → commit, `git tag vX.Y.Z && git push origin main vX.Y.Z` (the tag triggers publish) → back in the consumer run `pnpm dev:unlink` to repin the registry. Never hand-symlink `node_modules/@idco/*` and never delete the consumer lockfile for a full reinstall — `dev:link`/`dev:unlink` are the only supported paths and `dev:unlink` keeps the lockfile registry-clean with a minimal diff.

@@ -1,12 +1,14 @@
-// Engine view layer (docs/010 §7.1). The thin React binding that
-// renders the visible block window, paints the selection overlay, and hosts
-// object chrome — reusing `@idco/content-renderer` and `@idco/ui`.
-//
-// Phase 1 only establishes the home for this layer; rendering lands in later
-// phases (P4 React view + scheduler/frame loop onward).
-
-/** Placeholder surface contract for the engine React view (docs/010 §7.1). */
-export type EngineViewPlaceholder = {
-  /** Reserved until the P4 React view + scheduler/frame loop lands. */
-  readonly ready: false;
-};
+/**
+ * Public React binding for the owned-model editor engine.
+ *
+ * `core/` owns the framework-free model, transactions, and scheduler. This
+ * package is the Phase 4 bridge from that store into React through
+ * `useSyncExternalStore`; it renders every block mounted and leaves
+ * virtualization to Phase 5.
+ */
+export {
+  OwnedModelEditorView,
+  type OwnedModelEditorViewDiagnostics,
+  type OwnedModelEditorViewHandle,
+  type OwnedModelEditorViewProps,
+} from "./react-view";

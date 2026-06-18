@@ -9,6 +9,7 @@ export type {
 export type { RichTextNodeId } from "./legacy/model/ids";
 export { calculateVirtualRange } from "./core/virtual-range";
 export * from "./core";
+export * from "./view";
 export { ensureDocumentNodeIds } from "./legacy/model/ids";
 export {
   ALIGNMENTS,
