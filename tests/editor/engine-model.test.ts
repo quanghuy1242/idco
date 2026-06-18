@@ -90,6 +90,44 @@ describe("owned-model editor core", () => {
     store.assertParentInvariant();
   });
 
+  it("does not walk the whole document on a text edit (AC9 hot path)", () => {
+    /*
+     * The reverse parent index only changes on structural steps, so the O(N)
+     * `assertParentInvariant` walk must not run on the keystroke path
+     * (010 §10.1 AC9 / 011 §10.4). It must still run after a structural edit,
+     * which is where the index can actually break.
+     */
+    const allocator = createIdAllocator(CLIENT);
+    const node = makeTextNode({
+      content: allocator.createTextSlice("alpha"),
+      id: allocator.createNodeId(),
+    });
+    const store = createEditorStore({ allocator, snapshot: snapshot([node]) });
+    const walk = vi.spyOn(store, "assertParentInvariant");
+
+    store.dispatch(
+      store.transaction().replaceText({
+        at: 1,
+        inserted: "!",
+        node: node.id,
+        removed: "",
+      }),
+    );
+    expect(walk).not.toHaveBeenCalled();
+
+    const inserted = makeTextNode({
+      content: allocator.createTextSlice("beta"),
+      id: allocator.createNodeId(),
+    });
+    store.dispatch({
+      origin: "local",
+      steps: [
+        { index: 1, node: inserted, parent: ROOT_NODE_ID, type: "insert-node" },
+      ],
+    });
+    expect(walk).toHaveBeenCalledTimes(1);
+  });
+
   it("inverts steps and undo/redo returns to deep-equal snapshots", () => {
     const allocator = createIdAllocator(CLIENT);
     const node = makeTextNode({

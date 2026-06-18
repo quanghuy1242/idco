@@ -485,7 +485,12 @@ export class EditorStore {
       settings: committed.settingsChanged,
       structure: committed.structureChanged,
     });
-    this.assertParentInvariant();
+    // The reverse parent index only changes on structural steps (the handlers
+    // that rebuild it are the same ones that set `structureChanged`). Verifying
+    // it after a pure text edit would walk the whole document for nothing, which
+    // 010 §10.1 AC9 / 011 §10.4 forbid on the keystroke hot path. Guard the O(N)
+    // check so it runs only when a structural mutation could have broken it.
+    if (committed.structureChanged) this.assertParentInvariant();
     return committed;
   }
 

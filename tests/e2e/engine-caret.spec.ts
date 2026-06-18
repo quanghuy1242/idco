@@ -297,3 +297,111 @@ test("autoscroll during a drag reaches blocks far below the viewport (AC4)", asy
   // autoscroll carried the drag past the initial viewport, not just within it.
   expect(endIndex).toBeGreaterThan(visibleEnd);
 });
+
+test("Shift+ArrowDown scrolls the viewport to follow the caret across the window edge", async ({
+  page,
+}) => {
+  await open(page);
+  const block = page.locator("[data-engine-block-id]").nth(1);
+  const box = (await block.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.2, box.y + 4);
+
+  const before = await page.evaluate(
+    (key) =>
+      (
+        window as unknown as Record<
+          string,
+          {
+            diagnostics: () => { scrollTop: number; windowEnd: number };
+          }
+        >
+      )[key].diagnostics(),
+    API,
+  );
+
+  // Extend the selection well past the block that was last mounted on entry.
+  // ArrowDown moves by visual line, and blocks wrap to several lines, so this
+  // needs enough presses to walk past the windowed slice, not just one block.
+  for (let i = 0; i < 90; i += 1) await page.keyboard.press("Shift+ArrowDown");
+
+  const sel = await focus(page);
+  expect(sel).not.toBeNull();
+  const focusIndex = await indexOfBlock(page, sel!.node);
+  expect(focusIndex).toBeGreaterThan(before.windowEnd); // crossed the window
+
+  // The viewport followed the caret instead of leaving it stranded offscreen.
+  const after = await page.evaluate(
+    (key) =>
+      (
+        window as unknown as Record<
+          string,
+          { diagnostics: () => { scrollTop: number } }
+        >
+      )[key].diagnostics().scrollTop,
+    API,
+  );
+  expect(after).toBeGreaterThan(before.scrollTop);
+
+  // The focus block is mounted AND inside the scroller's viewport: the caret is
+  // visible, not scrolled out from under the user.
+  const visible = await page.evaluate((focusId) => {
+    const scroller = document.querySelector("[data-engine-view-root]");
+    const target = document.querySelector(
+      `[data-engine-block-id="${focusId}"]`,
+    );
+    if (!scroller || !target) return false;
+    const s = scroller.getBoundingClientRect();
+    const t = target.getBoundingClientRect();
+    return t.bottom > s.top && t.top < s.bottom;
+  }, sel!.node);
+  expect(visible).toBe(true);
+});
+
+async function scrollTopOf(page: Page): Promise<number> {
+  return page.evaluate(
+    (key) =>
+      (
+        window as unknown as Record<
+          string,
+          { diagnostics: () => { scrollTop: number } }
+        >
+      )[key].diagnostics().scrollTop,
+    API,
+  );
+}
+
+test("following the caret down scrolls by the line, not by the whole block", async ({
+  page,
+}) => {
+  await open(page);
+  // Reference height: a 5-line block (index 4: 4 % 5 === 4) is the tallest in
+  // the story. The pre-fix block reveal jumped ~this much in one line-move.
+  const tall = (await page
+    .locator("[data-engine-block-id]")
+    .nth(4)
+    .boundingBox())!;
+  const blockHeight = tall.height;
+
+  // Start near the top, then walk the caret down past the fold so the reveal
+  // fires repeatedly. Each press is a one-line move.
+  const block = page.locator("[data-engine-block-id]").nth(1);
+  const box = (await block.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.2, box.y + 4);
+
+  let prev = await scrollTopOf(page);
+  let maxStep = 0;
+  let totalMoved = 0;
+  for (let i = 0; i < 40; i += 1) {
+    await page.keyboard.press("ArrowDown");
+    const now = await scrollTopOf(page);
+    maxStep = Math.max(maxStep, now - prev);
+    totalMoved += Math.max(0, now - prev);
+    prev = now;
+  }
+
+  // It did follow the caret (some scrolling happened) ...
+  expect(totalMoved).toBeGreaterThan(0);
+  // ... but no single line-move yanked a whole multi-line block into view. The
+  // pre-fix block-granular reveal would jump ~blockHeight (5 lines) at once.
+  expect(maxStep).toBeLessThan(blockHeight * 0.6);
+});

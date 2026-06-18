@@ -287,6 +287,69 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     [store, virtualize],
   );
 
+  // Keyboard caret/selection movement must keep the focus visible, the way a
+  // browser scrolls a contenteditable caret into view. We paint the caret and
+  // pass `preventScroll` on focus, so nothing scrolls for free; worse, under
+  // virtualization a focus that crosses the mounted window+overscan band would
+  // unmount, stranding the overlay. `revealBlock` reveals the *caret line*, not
+  // the whole block: a block-granular reveal would yank an entire multi-line
+  // block into view on a one-line move, the aggressive jump a native editor
+  // never makes. It scrolls the minimum needed (with a small lead margin so the
+  // caret is not flush to the edge) and only estimate-jumps when the target is
+  // off the mounted window entirely.
+  const revealBlock = useCallback(
+    (id: NodeId) => {
+      const scroller = rootRef.current;
+      if (!scroller) return;
+      const element = registryRef.current.blockRefs.get(id);
+      if (!virtualize) {
+        element?.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      if (element) {
+        const selection = store.selection;
+        const focusOffset =
+          selection?.type === "text" && selection.focus.node === id
+            ? selection.focus.offset
+            : null;
+        const targetRect =
+          focusOffset === null
+            ? element.getBoundingClientRect()
+            : (caretClientRect(element, focusOffset) ??
+              element.getBoundingClientRect());
+        const viewRect = scroller.getBoundingClientRect();
+        const top = targetRect.top - viewRect.top;
+        const bottom = targetRect.bottom - viewRect.top;
+        const margin = CARET_REVEAL_MARGIN_PX;
+        let delta = 0;
+        if (top < margin) delta = top - margin;
+        else if (bottom > scroller.clientHeight - margin)
+          delta = bottom - (scroller.clientHeight - margin);
+        if (Math.abs(delta) > 0.5) {
+          scroller.scrollTop += delta;
+          setScrollTop(scroller.scrollTop);
+        }
+        return;
+      }
+      // Focus jumped past the mounted window: estimate the target offset so it
+      // mounts near the viewport bottom; the next reveal settles it precisely.
+      const index = store.order.indexOf(id);
+      if (index < 0) return;
+      let offset = 0;
+      for (let i = 0; i < index; i += 1) {
+        offset +=
+          heightCacheRef.current.get(store.order[i]!) ?? estimateRef.current;
+      }
+      const next = Math.max(
+        0,
+        offset - scroller.clientHeight + estimateRef.current,
+      );
+      scroller.scrollTop = next;
+      setScrollTop(next);
+    },
+    [store, virtualize],
+  );
+
   const serializeSelection = useCallback(
     () => collectSelectionText(store, store.selection),
     [store],
@@ -508,6 +571,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       onRender={recordBlockRender}
       registerBlock={registerBlock}
       requestFocus={focusBlock}
+      revealBlock={revealBlock}
       store={store}
     />
   ));
@@ -583,6 +647,10 @@ const DEFAULT_VIEWPORT_HEIGHT = 480;
 const DEFAULT_OVERSCAN = 4;
 const DEFAULT_BLOCK_ESTIMATE = 40;
 const AUTOSCROLL_STEP_PX = 12;
+// Lead the caret keeps from the viewport edge when keyboard movement scrolls it
+// into view (~one line). Small enough that each line-move scrolls about one
+// line, not a whole block. Trivially promotable to a prop if a knob is wanted.
+const CARET_REVEAL_MARGIN_PX = 24;
 
 const baseViewStyle: CSSProperties = {
   border: "1px solid color-mix(in srgb, CanvasText 18%, transparent)",
@@ -614,6 +682,7 @@ function EngineBlock(props: {
   readonly registerBlock: (id: NodeId, element: HTMLElement | null) => void;
   readonly onRender: (id: NodeId) => void;
   readonly requestFocus: (id: NodeId) => void;
+  readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
 }) {
   const {
@@ -623,6 +692,7 @@ function EngineBlock(props: {
     registerBlock,
     onRender,
     requestFocus,
+    revealBlock,
     beginDrag,
   } = props;
   const node = useEditorNode(store, id);
@@ -635,6 +705,7 @@ function EngineBlock(props: {
         node={node}
         registerBlock={registerBlock}
         requestFocus={requestFocus}
+        revealBlock={revealBlock}
         store={store}
       />
     );
@@ -656,10 +727,18 @@ function EngineTextBlock(props: {
   readonly forcePolyfill: boolean;
   readonly registerBlock: (id: NodeId, element: HTMLElement | null) => void;
   readonly requestFocus: (id: NodeId) => void;
+  readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
 }) {
-  const { node, store, forcePolyfill, registerBlock, requestFocus, beginDrag } =
-    props;
+  const {
+    node,
+    store,
+    forcePolyfill,
+    registerBlock,
+    requestFocus,
+    revealBlock,
+    beginDrag,
+  } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<TextBlockController | null>(null);
 
@@ -887,8 +966,11 @@ function EngineTextBlock(props: {
       const focusNode = next.type === "text" ? next.focus.node : node.id;
       if (focusNode !== node.id) requestFocus(focusNode);
       else syncSelectionIntoEditContext();
+      // Follow the caret: scroll the focus into view on every keyboard move,
+      // including same-block moves down a tall block, so it never slides off.
+      revealBlock(focusNode);
     },
-    [node.id, requestFocus, store, syncSelectionIntoEditContext],
+    [node.id, requestFocus, revealBlock, store, syncSelectionIntoEditContext],
   );
 
   const handleKeyDown = useCallback(
