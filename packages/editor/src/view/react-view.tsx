@@ -20,18 +20,24 @@ import {
 import {
   collectSelectionText,
   createEngineScheduler,
+  createLoopbackBakeService,
   createOwnedEditorHandle,
+  createWorkerBakeService,
   orderedTextLeaves,
   pointAtOffset,
   replaceTextContent,
   sliceTextContent,
+  type BakeService,
+  type DocumentIndex,
   type EditorCommand,
   type EditorSelection,
   type EditorStore,
+  type ObjectNode,
   type OwnedEditorHandle,
   type EnginePerformanceSnapshot,
   type EngineScheduler,
   type EngineSchedulerTask,
+  type JsonValue,
   type NodeId,
   type StoreDirty,
   type TextLeafNode,
@@ -61,6 +67,13 @@ import { calculateVirtualRange } from "../core/virtual-range";
  * render, the maintained path docs/015's reader builds on.
  */
 
+export type ObjectBlockDiagnostics = {
+  readonly type: string;
+  readonly status: string;
+  readonly state: "resting" | "live";
+  readonly hasBaked: boolean;
+};
+
 export type OwnedModelEditorViewDiagnostics = {
   readonly activeNodeId: NodeId | null;
   readonly activeInputBackend: "native" | "polyfill" | null;
@@ -77,6 +90,18 @@ export type OwnedModelEditorViewDiagnostics = {
   readonly windowEnd: number;
   readonly totalHeight: number;
   readonly scrollTop: number;
+  /** The heavy object in live-edit mode, or null when all rest baked (§6.4). */
+  readonly activeObjectId: NodeId | null;
+  /** Per-object resting/live state and bake status, keyed by node id. */
+  readonly objects: Readonly<Record<NodeId, ObjectBlockDiagnostics>>;
+  /** Mounted live object-editor surfaces; the slot is capped at one (AC2). */
+  readonly liveObjectEditorCount: number;
+  /** The derived TOC/text index, once the worker round-trip resolves (AC6). */
+  readonly documentIndex: DocumentIndex | null;
+  /** True once a worker (not just main-thread fallback) returned the index. */
+  readonly indexFromWorker: boolean;
+  /** How many worker bake/index round-trips have resolved (AC6). */
+  readonly workerRoundTrips: number;
 };
 
 export type OwnedModelEditorViewHandle = {
@@ -113,6 +138,12 @@ export type OwnedModelEditorViewProps = {
   readonly viewportHeight?: number;
   /** Overscan blocks kept mounted on each side of the viewport. */
   readonly overscan?: number;
+  /**
+   * Factory for the bake/index Web Worker (docs/010 §7.5). Defaults to a worker
+   * built over `core/bake.worker`; return null to force the in-memory loopback
+   * (tests/SSR, or where `Worker` is unavailable).
+   */
+  readonly createBakeWorker?: () => Worker | null;
 };
 
 type EditContextLike = EventTarget & {
@@ -143,6 +174,8 @@ type RenderRegistry = {
   readonly blockRefs: Map<NodeId, HTMLElement>;
   readonly inputBackends: Map<NodeId, "native" | "polyfill">;
   readonly renderCounts: Map<NodeId, number>;
+  /** Mounted live object-editor surfaces; the slot is capped at one (AC2). */
+  readonly objectEditors: Set<NodeId>;
   selectionOverlayRenderCount: number;
   selectionRectCount: number;
 };
@@ -171,6 +204,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     virtualize = true,
     viewportHeight = DEFAULT_VIEWPORT_HEIGHT,
     overscan = DEFAULT_OVERSCAN,
+    createBakeWorker = defaultCreateBakeWorker,
   } = props;
   const localSchedulerRef = useRef<EngineScheduler | null>(null);
   if (!providedScheduler && !localSchedulerRef.current) {
@@ -194,6 +228,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   const registryRef = useRef<RenderRegistry>({
     blockRefs: new Map(),
     inputBackends: new Map(),
+    objectEditors: new Set(),
     renderCounts: new Map(),
     selectionOverlayRenderCount: 0,
     selectionRectCount: 0,
@@ -201,6 +236,13 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   const order = useEditorOrder(store);
   const [scrollTop, setScrollTop] = useState(0);
   const [measureVersion, setMeasureVersion] = useState(0);
+  // The off-thread bake/index service (docs/010 §7.5). The view derives the
+  // document index (TOC + plain-text) in the worker so the main thread is never
+  // blocked by the pure-compute pass; results land in refs the diagnostics read.
+  const documentIndexRef = useRef<DocumentIndex | null>(null);
+  const indexFromWorkerRef = useRef(false);
+  const workerRoundTripsRef = useRef(0);
+  const bakeServiceRef = useRef<BakeService | null>(null);
 
   /*
    * The window is the body-order slice the viewport covers plus overscan
@@ -257,6 +299,14 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   const recordBlockRender = useCallback((id: NodeId) => {
     const counts = registryRef.current.renderCounts;
     counts.set(id, (counts.get(id) ?? 0) + 1);
+  }, []);
+
+  // A live object-editor surface registers here when it mounts and unregisters
+  // on unmount, so diagnostics can assert the one-live-at-a-time cap (AC2).
+  const registerObjectEditor = useCallback((id: NodeId, mounted: boolean) => {
+    const editors = registryRef.current.objectEditors;
+    if (mounted) editors.add(id);
+    else editors.delete(id);
   }, []);
 
   const selectText = useCallback(
@@ -627,11 +677,56 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     if (changed) setMeasureVersion((value) => value + 1);
   }, [virtualize, windowRange.ids, measureVersion]);
 
+  // Create the bake/index worker once. The worker keeps pure-compute bake and
+  // indexing off the editing thread (§7.5); when `Worker` is unavailable the
+  // loopback service runs the same handler on a microtask so behaviour is equal.
+  useEffect(() => {
+    const worker = createBakeWorker();
+    indexFromWorkerRef.current = worker !== null;
+    const service = worker
+      ? createWorkerBakeService(worker)
+      : createLoopbackBakeService();
+    bakeServiceRef.current = service;
+    return () => {
+      service.dispose();
+      bakeServiceRef.current = null;
+    };
+  }, [createBakeWorker]);
+
+  // Rebuild the document index off-thread on mount and after any structural
+  // change. The round-trip is async by construction, so the index is null for
+  // the first frame and the main thread is never blocked computing it (AC6).
+  useEffect(() => {
+    const service = bakeServiceRef.current;
+    if (!service) return;
+    let cancelled = false;
+    void (async () => {
+      const index = await service.buildIndex(store.toSnapshot());
+      if (cancelled) return;
+      // The index lives in a ref the diagnostics read live; updating it must not
+      // re-render mounted blocks (that would pollute per-block render counts).
+      documentIndexRef.current = index;
+      workerRoundTripsRef.current += 1;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [store, order]);
+
   const diagnostics = useCallback((): OwnedModelEditorViewDiagnostics => {
     const blockTexts: Record<NodeId, string> = {};
+    const objects: Record<NodeId, ObjectBlockDiagnostics> = {};
     for (const id of store.order) {
       const node = store.requireNode(id);
       if (node.kind === "text") blockTexts[id] = node.content.text;
+      if (node.kind === "object") {
+        objects[id] = {
+          hasBaked: node.baked !== undefined,
+          state: store.activeObjectId === id ? "live" : "resting",
+          status: node.status,
+          type: node.type,
+        };
+      }
     }
     const activeNodeId = activeSelectionNode(store.selection);
     return {
@@ -639,8 +734,13 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
         ? (registryRef.current.inputBackends.get(activeNodeId) ?? null)
         : null,
       activeNodeId,
+      activeObjectId: store.activeObjectId,
       blockTexts,
+      documentIndex: documentIndexRef.current,
+      indexFromWorker: indexFromWorkerRef.current,
+      liveObjectEditorCount: registryRef.current.objectEditors.size,
       mountedCount: registryRef.current.blockRefs.size,
+      objects,
       order: [...store.order],
       renderCounts: Object.fromEntries(registryRef.current.renderCounts),
       scheduler: scheduler.snapshot(),
@@ -653,6 +753,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       virtualized: virtualize,
       windowEnd: windowRange.endIndex,
       windowStart: windowRange.startIndex,
+      workerRoundTrips: workerRoundTripsRef.current,
     };
   }, [scheduler, scrollTop, store, virtualize, windowRange]);
 
@@ -720,6 +821,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       onRender={recordBlockRender}
       registerBlock={registerBlock}
       registerInputBackend={registerInputBackend}
+      registerObjectEditor={registerObjectEditor}
       requestFocus={focusBlock}
       revealBlock={revealBlock}
       store={store}
@@ -836,6 +938,7 @@ function EngineBlock(props: {
   readonly requestFocus: (id: NodeId) => void;
   readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
+  readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
 }) {
   const {
     id,
@@ -847,6 +950,7 @@ function EngineBlock(props: {
     requestFocus,
     revealBlock,
     beginDrag,
+    registerObjectEditor,
   } = props;
   const node = useEditorNode(store, id);
   onRender(id);
@@ -867,6 +971,18 @@ function EngineBlock(props: {
       />
     );
   }
+  if (node.kind === "object") {
+    return (
+      <EngineObjectBlock
+        node={node}
+        registerBlock={registerBlock}
+        registerObjectEditor={registerObjectEditor}
+        store={store}
+      />
+    );
+  }
+  // Structural nodes (a `list`) still render a placeholder; nested structural
+  // rendering inside the editing surface is the Phase 5.5/8 follow-on.
   return (
     <div
       data-engine-block-id={node.id}
@@ -874,6 +990,283 @@ function EngineBlock(props: {
       style={blockStyle}
     >
       [{node.type}]
+    </div>
+  );
+}
+
+/** Build the default bake/index worker, or null where `Worker` is unavailable. */
+function defaultCreateBakeWorker(): Worker | null {
+  if (typeof Worker === "undefined") return null;
+  try {
+    return new Worker(new URL("../core/bake.worker.ts", import.meta.url), {
+      type: "module",
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One heavy object in the body (docs/010 §5.3). At rest it mounts only its baked
+ * static snapshot — no editor instance (AC1) — and activates on pointer down. The
+ * outer box is stable across resting↔live so activation never shifts layout
+ * (AC3); the live editing surface either edits in place (code) or overlays a
+ * config panel (media/embed/…) that does not affect the measured box.
+ */
+function EngineObjectBlock(props: {
+  readonly node: ObjectNode;
+  readonly store: EditorStore;
+  readonly registerBlock: (id: NodeId, element: HTMLElement | null) => void;
+  readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
+}) {
+  const { node, store, registerBlock, registerObjectEditor } = props;
+  const live = useSyncExternalStore(
+    (listener) => store.subscribeActiveObject(listener),
+    () => store.activeObjectId === node.id,
+    () => false,
+  );
+  // The resting baked content height, captured at activation. The in-place code
+  // editor opens at exactly this height so the block box does not shift (AC3).
+  const restHeightRef = useRef(0);
+  const inPlaceCode = live && node.type === "code-block";
+  return (
+    <div
+      data-engine-block-id={node.id}
+      data-engine-object-state={live ? "live" : "resting"}
+      data-engine-object-status={node.status}
+      data-engine-object-type={node.type}
+      onMouseDown={
+        live
+          ? undefined
+          : (event) => {
+              event.preventDefault();
+              const baked = (event.currentTarget as HTMLElement).querySelector(
+                "[data-engine-object-baked]",
+              );
+              restHeightRef.current =
+                baked instanceof HTMLElement ? baked.offsetHeight : 0;
+              store.activateObject(node.id);
+            }
+      }
+      ref={(element) => registerBlock(node.id, element)}
+      style={objectBlockStyle}
+    >
+      {inPlaceCode ? (
+        <CodeLiveSurface
+          initialHeight={restHeightRef.current}
+          node={node}
+          registerObjectEditor={registerObjectEditor}
+          store={store}
+        />
+      ) : (
+        <BakedObjectView node={node} />
+      )}
+      {live && !inPlaceCode ? (
+        <ObjectConfigPanel
+          node={node}
+          registerObjectEditor={registerObjectEditor}
+          store={store}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** The static, publish-ready render of an object's baked snapshot (no editor). */
+function BakedObjectView(props: { readonly node: ObjectNode }) {
+  const { node } = props;
+  const baked = node.baked;
+  if (!baked) {
+    return (
+      <div data-engine-object-baked="none" style={objectStatusStyle}>
+        {node.status === "invalid"
+          ? `⚠ ${node.type}: cannot bake (check its data)`
+          : `${node.type}: not baked yet`}
+      </div>
+    );
+  }
+  const payload = asRecord(baked.payload);
+  if (baked.kind === "code") {
+    return (
+      <pre data-engine-object-baked="code" style={codeBakedStyle}>
+        <code>{stringField(payload, "code")}</code>
+      </pre>
+    );
+  }
+  if (baked.kind === "media") {
+    const src = stringField(payload, "src");
+    const caption = stringField(payload, "caption");
+    return (
+      <figure data-engine-object-baked="media" style={mediaBakedStyle}>
+        <div style={mediaThumbStyle}>{src ? `🖼 ${src}` : "🖼 media"}</div>
+        {caption ? <figcaption>{caption}</figcaption> : null}
+      </figure>
+    );
+  }
+  if (baked.kind === "embed") {
+    return (
+      <div data-engine-object-baked="embed" style={objectStatusStyle}>
+        🔗 {stringField(payload, "title") || stringField(payload, "url")}
+      </div>
+    );
+  }
+  if (baked.kind === "post-ref") {
+    return (
+      <div data-engine-object-baked="post-ref" style={objectStatusStyle}>
+        📄 {stringField(payload, "title") || stringField(payload, "postId")}
+      </div>
+    );
+  }
+  return (
+    <div data-engine-object-baked={baked.kind} style={objectStatusStyle}>
+      {node.type} (baked: {baked.kind})
+    </div>
+  );
+}
+
+/** In-place code editing surface; commits re-bake the block through the store. */
+function CodeLiveSurface(props: {
+  readonly node: ObjectNode;
+  readonly store: EditorStore;
+  readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
+  /** Resting baked height captured at activation; opens at this height (AC3). */
+  readonly initialHeight: number;
+}) {
+  const { node, store, registerObjectEditor, initialHeight } = props;
+  const id = node.id;
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Local editing state, seeded once at activation. The store is the source of
+  // truth on commit, but the textarea owns the caret while live, so it must not
+  // re-seed from the node on every keystroke commit.
+  const [code, setCode] = useState(() => bakedCodeText(node));
+
+  // Auto-size the textarea to its content so the live box matches the resting
+  // baked <pre> (same font, padding, and line count) and activation does not
+  // shift layout (AC3, the no-drift property).
+  const autoSize = useCallback(() => {
+    const element = textareaRef.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, []);
+
+  useEffect(() => {
+    registerObjectEditor(id, true);
+    // Open at the captured resting height so the box matches exactly (AC3);
+    // subsequent edits auto-size to content.
+    const element = textareaRef.current;
+    if (element) {
+      if (initialHeight > 0) element.style.height = `${initialHeight}px`;
+      else autoSize();
+    }
+    element?.focus();
+    return () => registerObjectEditor(id, false);
+  }, [autoSize, id, initialHeight, registerObjectEditor]);
+
+  const commit = useCallback(
+    (next: string) => {
+      const record = currentObjectRecord(store, id);
+      store.command({
+        data: {
+          ...record,
+          code: next,
+          language: stringField(record, "language") || "ts",
+        },
+        node: id,
+        type: "set-object-data",
+      });
+    },
+    [id, store],
+  );
+
+  return (
+    <textarea
+      data-engine-object-editor="code"
+      onBlur={() => store.deactivateObject(id)}
+      onChange={(event) => {
+        setCode(event.target.value);
+        commit(event.target.value);
+        autoSize();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          store.deactivateObject(id);
+        }
+        // Keep keystrokes inside the object; the document key handler is for text.
+        event.stopPropagation();
+      }}
+      ref={textareaRef}
+      spellCheck={false}
+      style={codeLiveStyle}
+      value={code}
+    />
+  );
+}
+
+/** A chrome config panel (docs/006) for non-code objects; overlaid, not inline. */
+function ObjectConfigPanel(props: {
+  readonly node: ObjectNode;
+  readonly store: EditorStore;
+  readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
+}) {
+  const { node, store, registerObjectEditor } = props;
+  const id = node.id;
+  const fields = OBJECT_CONFIG_FIELDS[node.type] ?? [];
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const record = asRecord(node.data);
+    return Object.fromEntries(
+      fields.map((field) => [field.key, stringField(record, field.key)]),
+    );
+  });
+
+  useEffect(() => {
+    registerObjectEditor(id, true);
+    return () => registerObjectEditor(id, false);
+  }, [id, registerObjectEditor]);
+
+  const commit = useCallback(
+    (next: Record<string, string>) => {
+      const record = currentObjectRecord(store, id);
+      store.command({
+        data: { ...record, ...next },
+        node: id,
+        type: "set-object-data",
+      });
+    },
+    [id, store],
+  );
+
+  return (
+    <div data-engine-object-editor="config" style={objectConfigStyle}>
+      {fields.length === 0 ? (
+        <div style={{ opacity: 0.7 }}>No inline config for {node.type}.</div>
+      ) : (
+        fields.map((field) => (
+          <label key={field.key} style={objectConfigFieldStyle}>
+            <span style={{ minWidth: 64 }}>{field.label}</span>
+            <input
+              data-engine-config-field={field.key}
+              onChange={(event) => {
+                const next = { ...values, [field.key]: event.target.value };
+                setValues(next);
+                commit(next);
+              }}
+              style={objectConfigInputStyle}
+              type="text"
+              value={values[field.key] ?? ""}
+            />
+          </label>
+        ))
+      )}
+      <button
+        data-engine-object-done=""
+        onClick={() => store.deactivateObject(id)}
+        style={objectConfigDoneStyle}
+        type="button"
+      >
+        Done
+      </button>
     </div>
   );
 }
@@ -2202,6 +2595,149 @@ function activeSelectionNode(selection: EditorSelection | null): NodeId | null {
 function clampOffset(offset: number, length: number): number {
   return Math.min(Math.max(0, Math.floor(offset)), length);
 }
+
+type ObjectConfigField = { readonly key: string; readonly label: string };
+
+/** Inline config fields per object type (docs/006 chrome popover). */
+const OBJECT_CONFIG_FIELDS: Record<string, readonly ObjectConfigField[]> = {
+  embed: [
+    { key: "url", label: "URL" },
+    { key: "title", label: "Title" },
+  ],
+  media: [
+    { key: "src", label: "Source" },
+    { key: "alt", label: "Alt" },
+    { key: "caption", label: "Caption" },
+  ],
+  "post-ref": [
+    { key: "postId", label: "Post id" },
+    { key: "title", label: "Title" },
+    { key: "url", label: "URL" },
+  ],
+  "table-of-contents": [{ key: "title", label: "Title" }],
+};
+
+function asRecord(value: unknown): Record<string, JsonValue> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, JsonValue>)
+    : {};
+}
+
+function stringField(record: Record<string, JsonValue>, key: string): string {
+  const value = record[key];
+  return typeof value === "string" ? value : "";
+}
+
+/** The object's current data as a record, read live from the store. */
+function currentObjectRecord(
+  store: EditorStore,
+  id: NodeId,
+): Record<string, JsonValue> {
+  const node = store.getNode(id);
+  return node && node.kind === "object" ? asRecord(node.data) : {};
+}
+
+/** The code text for the editor surface, read from the baked snapshot. */
+function bakedCodeText(node: ObjectNode): string {
+  if (node.baked?.kind === "code") {
+    return stringField(asRecord(node.baked.payload), "code");
+  }
+  return "";
+}
+
+// The object container box must be identical whether resting or live so
+// activation never shifts layout (AC3). Padding/border are constant; only the
+// inner content swaps (in-place for code, an absolute config overlay otherwise).
+const objectBlockStyle: CSSProperties = {
+  border: "1px solid color-mix(in srgb, CanvasText 16%, transparent)",
+  borderRadius: 6,
+  margin: "4px 0",
+  padding: 8,
+  position: "relative",
+};
+
+const objectStatusStyle: CSSProperties = {
+  font: "13px/1.5 ui-sans-serif, system-ui, sans-serif",
+};
+
+const codeBakedStyle: CSSProperties = {
+  background: "color-mix(in srgb, CanvasText 6%, transparent)",
+  borderRadius: 4,
+  font: "13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace",
+  margin: 0,
+  overflow: "auto",
+  padding: 8,
+  whiteSpace: "pre",
+};
+
+const codeLiveStyle: CSSProperties = {
+  ...codeBakedStyle,
+  border: "none",
+  // border-box so width:100% fills the container exactly like the resting <pre>,
+  // and an auto-set height of scrollHeight (content + padding) matches the baked
+  // box so activation does not shift layout (AC3, the no-drift property).
+  boxSizing: "border-box",
+  color: "CanvasText",
+  display: "block",
+  outline: "2px solid color-mix(in srgb, CanvasText 28%, transparent)",
+  overflow: "hidden",
+  resize: "none",
+  width: "100%",
+};
+
+const mediaBakedStyle: CSSProperties = {
+  font: "13px/1.5 ui-sans-serif, system-ui, sans-serif",
+  margin: 0,
+};
+
+const mediaThumbStyle: CSSProperties = {
+  alignItems: "center",
+  background: "color-mix(in srgb, CanvasText 8%, transparent)",
+  borderRadius: 4,
+  display: "flex",
+  justifyContent: "center",
+  minHeight: 48,
+  padding: 8,
+};
+
+const objectConfigStyle: CSSProperties = {
+  background: "Canvas",
+  border: "1px solid color-mix(in srgb, CanvasText 28%, transparent)",
+  borderRadius: 6,
+  boxShadow: "0 6px 24px color-mix(in srgb, CanvasText 22%, transparent)",
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  left: 8,
+  padding: 10,
+  position: "absolute",
+  top: "calc(100% + 4px)",
+  width: "min(320px, 90%)",
+  zIndex: 5,
+};
+
+const objectConfigFieldStyle: CSSProperties = {
+  alignItems: "center",
+  display: "flex",
+  font: "13px/1.4 ui-sans-serif, system-ui, sans-serif",
+  gap: 8,
+};
+
+const objectConfigInputStyle: CSSProperties = {
+  border: "1px solid color-mix(in srgb, CanvasText 30%, transparent)",
+  borderRadius: 4,
+  color: "CanvasText",
+  flex: 1,
+  padding: "4px 6px",
+};
+
+const objectConfigDoneStyle: CSSProperties = {
+  alignSelf: "flex-end",
+  border: "1px solid color-mix(in srgb, CanvasText 30%, transparent)",
+  borderRadius: 4,
+  cursor: "pointer",
+  padding: "4px 10px",
+};
 
 const blockStyle: CSSProperties = {
   borderRadius: 6,

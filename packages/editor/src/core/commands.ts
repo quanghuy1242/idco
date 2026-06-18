@@ -27,6 +27,7 @@ import {
   sliceTextContent,
   type EditorNode,
   type EditorSelection,
+  type JsonValue,
   type NodeId,
   type StructuralNode,
   type TextContent,
@@ -37,6 +38,7 @@ import {
   type TextPoint,
   type TextSlice,
 } from "./model";
+import { bakeObjectData } from "./bake";
 import type { EditorStore, TransactionBuilder } from "./store";
 
 const EMPTY_SLICE: TextSlice = { runs: [], text: "" };
@@ -54,7 +56,12 @@ export type EditorCommand =
     }
   | { readonly type: "set-block-type"; readonly blockType: TextLeafType }
   | { readonly type: "indent" }
-  | { readonly type: "outdent" };
+  | { readonly type: "outdent" }
+  | {
+      readonly type: "set-object-data";
+      readonly node: NodeId;
+      readonly data: JsonValue;
+    };
 
 export type EditorCommandType = EditorCommand["type"];
 
@@ -83,6 +90,10 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
   "set-block-type": (store, command) =>
     command.type === "set-block-type"
       ? compileSetBlockType(store, command.blockType)
+      : null,
+  "set-object-data": (store, command) =>
+    command.type === "set-object-data"
+      ? compileSetObjectData(store, command.node, command.data)
       : null,
   "split-block": (store) => compileSplit(store),
   "toggle-mark": (store, command) =>
@@ -461,6 +472,54 @@ function compileSetBlockType(
     type: "set-node-type",
   });
   return tr.setSelection(store.selection as EditorSelection);
+}
+
+// ---------------------------------------------------------------------------
+// Object editing: set data + re-bake (docs/010 Phase 6 AC4).
+// ---------------------------------------------------------------------------
+
+/**
+ * Replace one object's opaque data and re-bake it in the same transaction.
+ *
+ * The bake is recomputed from the registry baker so the static snapshot the
+ * reader and export consume never drifts from the live data (docs/010 §5.9). An
+ * object whose new data has no valid bake commits with `status: "invalid"` and
+ * no baked snapshot — a recoverable error, not an unbakeable node (Phase 6 AC4).
+ */
+function compileSetObjectData(
+  store: EditorStore,
+  node: NodeId,
+  data: JsonValue,
+): TransactionBuilder | null {
+  const current = store.getNode(node);
+  if (!current || current.kind !== "object") return null;
+  // Normalize incoming data through the registry first, so the view can pass
+  // plain field values (e.g. code as a string) and the object's own shape (the
+  // code-block piece table) is reconstructed before baking.
+  const normalized = store.registry.normalizeSnapshotObject(current.type, data);
+  const nextData = normalized.data;
+  const baked = bakeObjectData(store.registry, current.type, nextData);
+  const bakedTo: JsonValue | undefined = baked.baked ?? undefined;
+  const bakedFrom: JsonValue | undefined = current.baked ?? undefined;
+  // No-op when neither the data nor the resulting bake/status changes.
+  if (
+    JSON.stringify(current.data) === JSON.stringify(nextData) &&
+    JSON.stringify(bakedFrom) === JSON.stringify(bakedTo) &&
+    current.status === baked.status
+  ) {
+    return null;
+  }
+  const tr = store.transaction();
+  tr.setObjectData({
+    bakedFrom,
+    bakedTo,
+    from: current.data,
+    node,
+    statusFrom: current.status,
+    statusTo: baked.status,
+    to: nextData,
+  });
+  return tr;
 }
 
 // ---------------------------------------------------------------------------

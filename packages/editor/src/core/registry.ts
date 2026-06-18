@@ -46,6 +46,14 @@ export type BlockDefinition = {
     value: ObjectNormalizationResult,
   ): Omit<RichTextCompatNode, "id" | "type">;
   isExportComplete?(value: ObjectNormalizationResult): boolean;
+  /**
+   * Produce the object's static baked snapshot from its opaque data, or `null`
+   * when the data cannot bake (e.g. media with no source). Pure compute and
+   * DOM-free so the bake can run in the Web Worker (docs/010 §7.5); the engine
+   * turns a `null` into a recoverable `invalid` status (Phase 6 AC4) rather than
+   * emitting an unbakeable node.
+   */
+  bake?(data: JsonValue): BakedSnapshot | null;
 };
 
 /** Registry of object-block definitions used by compat import/export. */
@@ -114,50 +122,112 @@ export function createDefaultBlockRegistry(
  */
 export const BUILT_IN_OBJECT_DEFINITIONS: readonly BlockDefinition[] = [
   codeBlockDefinition(),
-  simpleObjectDefinition("media", (node) => ({
-    data: {
-      alt: stringValue(node.alt) ?? "",
-      caption: stringValue(node.caption) ?? "",
-      mediaId: stringValue(node.mediaId) ?? "",
-      src: stringValue(node.src) ?? "",
+  simpleObjectDefinition(
+    "media",
+    (node) => ({
+      data: {
+        alt: stringValue(node.alt) ?? "",
+        caption: stringValue(node.caption) ?? "",
+        mediaId: stringValue(node.mediaId) ?? "",
+        src: stringValue(node.src) ?? "",
+      },
+      status: statusValue(node.status) ?? "ready",
+    }),
+    (data) => {
+      // Media with neither a source URL nor a media id has nothing to render, so
+      // it cannot bake. The engine surfaces that as a recoverable `invalid`.
+      const record = isJsonObject(data) ? data : {};
+      const src = stringValue(record.src) ?? "";
+      const mediaId = stringValue(record.mediaId) ?? "";
+      if (src.length === 0 && mediaId.length === 0) return null;
+      return {
+        kind: "media",
+        payload: {
+          alt: stringValue(record.alt) ?? "",
+          caption: stringValue(record.caption) ?? "",
+          mediaId,
+          src,
+        },
+      };
     },
-    status: statusValue(node.status) ?? "ready",
-  })),
-  simpleObjectDefinition("post-ref", (node) => ({
-    data: {
-      postId: stringValue(node.postId) ?? "",
-      title: stringValue(node.title) ?? "",
-      url: stringValue(node.url) ?? "",
+  ),
+  simpleObjectDefinition(
+    "post-ref",
+    (node) => ({
+      data: {
+        postId: stringValue(node.postId) ?? "",
+        title: stringValue(node.title) ?? "",
+        url: stringValue(node.url) ?? "",
+      },
+      status: statusValue(node.status) ?? "ready",
+    }),
+    (data) => {
+      const record = isJsonObject(data) ? data : {};
+      const postId = stringValue(record.postId) ?? "";
+      if (postId.length === 0) return null;
+      return {
+        kind: "post-ref",
+        payload: {
+          postId,
+          title: stringValue(record.title) ?? "",
+          url: stringValue(record.url) ?? "",
+        },
+      };
     },
-    status: statusValue(node.status) ?? "ready",
-  })),
-  simpleObjectDefinition("embed", (node) => ({
-    data: {
-      title: stringValue(node.title) ?? "",
-      url: stringValue(node.url) ?? "",
+  ),
+  simpleObjectDefinition(
+    "embed",
+    (node) => ({
+      data: {
+        title: stringValue(node.title) ?? "",
+        url: stringValue(node.url) ?? "",
+      },
+      status: statusValue(node.status) ?? "ready",
+    }),
+    (data) => {
+      const record = isJsonObject(data) ? data : {};
+      const url = stringValue(record.url) ?? "";
+      if (url.length === 0) return null;
+      return {
+        kind: "embed",
+        payload: { title: stringValue(record.title) ?? "", url },
+      };
     },
-    status: statusValue(node.status) ?? "ready",
-  })),
-  simpleObjectDefinition("table-of-contents", (node) => ({
-    data: {
-      maxLevel: numberValue(node.maxLevel) ?? 4,
-      minLevel: numberValue(node.minLevel) ?? 2,
-      numbering: stringValue(node.numbering) ?? "none",
-      placement: stringValue(node.placement) ?? "inline",
-      side: stringValue(node.side) ?? "right",
-      style: stringValue(node.style) ?? "default",
-      title: stringValue(node.title) ?? "On this page",
-    },
-    status: statusValue(node.status) ?? "ready",
-  })),
-  simpleObjectDefinition("table", (node) => ({
-    data: jsonObjectFromRecord(node),
-    status: statusValue(node.status) ?? "ready",
-  })),
-  simpleObjectDefinition("editor-table", (node) => ({
-    data: jsonObjectFromRecord(node),
-    status: statusValue(node.status) ?? "ready",
-  })),
+  ),
+  simpleObjectDefinition(
+    "table-of-contents",
+    (node) => ({
+      data: {
+        maxLevel: numberValue(node.maxLevel) ?? 4,
+        minLevel: numberValue(node.minLevel) ?? 2,
+        numbering: stringValue(node.numbering) ?? "none",
+        placement: stringValue(node.placement) ?? "inline",
+        side: stringValue(node.side) ?? "right",
+        style: stringValue(node.style) ?? "default",
+        title: stringValue(node.title) ?? "On this page",
+      },
+      status: statusValue(node.status) ?? "ready",
+    }),
+    // The TOC bakes its settings; the actual entries are derived per-document by
+    // `buildDocumentIndex` (bake.ts), since they depend on the surrounding headings.
+    (data) => ({ kind: "toc", payload: isJsonObject(data) ? data : {} }),
+  ),
+  simpleObjectDefinition(
+    "table",
+    (node) => ({
+      data: jsonObjectFromRecord(node),
+      status: statusValue(node.status) ?? "ready",
+    }),
+    (data) => ({ kind: "table", payload: data }),
+  ),
+  simpleObjectDefinition(
+    "editor-table",
+    (node) => ({
+      data: jsonObjectFromRecord(node),
+      status: statusValue(node.status) ?? "ready",
+    }),
+    (data) => ({ kind: "table", payload: data }),
+  ),
 ];
 
 function codeBlockDefinition(): BlockDefinition {
@@ -168,6 +238,20 @@ function codeBlockDefinition(): BlockDefinition {
    * a persistence migration from string to piece table.
    */
   return {
+    bake(data) {
+      // A code block always bakes: the static snapshot is the resolved source
+      // text plus its language and line count, the publish/reader representation.
+      const record = isJsonObject(data) ? data : {};
+      const code = pieceTableText(record.code);
+      return {
+        kind: "code",
+        payload: {
+          code,
+          language: stringValue(record.language) ?? "ts",
+          lineCount: code.length === 0 ? 0 : code.split("\n").length,
+        },
+      };
+    },
     fromCompatNode(node) {
       return {
         baked: bakedValue(node.baked),
@@ -221,14 +305,16 @@ function codeBlockDefinition(): BlockDefinition {
 function simpleObjectDefinition(
   type: string,
   fromCompatNode: (node: RichTextCompatNode) => ObjectNormalizationResult,
+  bake?: (data: JsonValue) => BakedSnapshot | null,
 ): BlockDefinition {
   /*
-   * Built-in Phase 3 definitions intentionally do not bake or deeply understand
-   * object internals. They preserve known fields as JSON-safe data and keep the
-   * `baked`/`status` slots alive so future object phases can replace this thin
-   * adapter without changing the store shape.
+   * Built-in object definitions preserve known fields as JSON-safe data and keep
+   * the `baked`/`status` slots alive. The optional `bake` produces the object's
+   * static snapshot from that data (Phase 6); when omitted the object has no
+   * baker and stays unresolved (docs/010 §7.5 / Phase 6 AC4).
    */
   return {
+    ...(bake ? { bake } : {}),
     fromCompatNode(node) {
       const value = fromCompatNode(node);
       return {

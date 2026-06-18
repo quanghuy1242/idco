@@ -66,6 +66,7 @@ import {
   type MapPos,
   type PointRedirect,
 } from "./mapping";
+import { createDefaultBlockRegistry, type BlockRegistry } from "./registry";
 import {
   cloneAttrsWithValue,
   type AddMarkStep,
@@ -90,6 +91,8 @@ export type EditorStoreOptions = {
   readonly allocator: IdAllocator;
   readonly snapshot?: EditorDocumentSnapshot;
   readonly selection?: EditorSelection | null;
+  /** Object-block registry; used to re-bake objects on edit. Defaults to built-ins. */
+  readonly registry?: BlockRegistry;
 };
 
 export type EditorSubscriber = (dirty: StoreDirty) => void;
@@ -182,6 +185,10 @@ export class TransactionBuilder {
     return this.push({ index, node, parent, type: "remove-node" });
   }
 
+  setObjectData(step: Omit<SetObjectDataStep, "type">): this {
+    return this.push({ ...step, type: "set-object-data" });
+  }
+
   addMark(node: NodeId, mark: TextMark): this {
     return this.push({ mark, node, type: "add-mark" });
   }
@@ -224,6 +231,7 @@ export class TransactionBuilder {
  */
 export class EditorStore {
   readonly #allocator: IdAllocator;
+  readonly #registry: BlockRegistry;
   readonly #history: HistoryState = { done: [], undone: [] };
   readonly #nodeSubscribers = new Map<NodeId, Set<EditorSubscriber>>();
   readonly #orderSubscribers = new Set<EditorSubscriber>();
@@ -235,6 +243,8 @@ export class EditorStore {
   #activeTextLeafId: NodeId | null = null;
   #activeTextLeafSnapshot: TextLeafNode | null = null;
   #activeLeafDomSynced = false;
+  #activeObjectId: NodeId | null = null;
+  readonly #activeObjectSubscribers = new Set<() => void>();
   #order: NodeId[] = [];
   #selection: EditorSelection | null;
   #settings: DocumentSettings = {};
@@ -246,6 +256,7 @@ export class EditorStore {
      * nested structural nodes without being serialized as a user block.
      */
     this.#allocator = options.allocator;
+    this.#registry = options.registry ?? createDefaultBlockRegistry();
     this.#selection = options.selection ?? null;
     const root = makeStructuralNode({
       children: options.snapshot?.body.order ?? [],
@@ -268,12 +279,22 @@ export class EditorStore {
     return this.#allocator;
   }
 
+  /** Object-block registry; the bake source for object edits. */
+  get registry(): BlockRegistry {
+    return this.#registry;
+  }
+
   get selection(): EditorSelection | null {
     return this.#selection;
   }
 
   get activeTextLeafId(): NodeId | null {
     return this.#activeTextLeafId;
+  }
+
+  /** The single heavy object in live-edit mode, or null when all rest baked. */
+  get activeObjectId(): NodeId | null {
+    return this.#activeObjectId;
   }
 
   get settings(): DocumentSettings {
@@ -362,6 +383,55 @@ export class EditorStore {
         structure: false,
       });
     }
+  }
+
+  /**
+   * Enter live-edit on one heavy object (docs/010 §5.3, §6.4). The slot is
+   * capped at one: activating B while A is live deactivates A first, so the
+   * document never holds two live objects. Activation also suspends the text
+   * caret — the active text leaf unbinds and the model selection collapses to a
+   * node selection over the object — so an in-flight composition is ended on the
+   * leaf, not stranded (Phase 6 AC5). Activation is runtime view state, not a
+   * document step, so it never enters history.
+   */
+  activateObject(id: NodeId): void {
+    const node = this.requireNode(id);
+    if (node.kind !== "object") throw new Error(`Node is not an object: ${id}`);
+    if (this.#activeObjectId === id) return;
+    if (this.#activeObjectId) this.deactivateObject();
+    // Suspend the text caret: unbind the active leaf and select the object as one
+    // atomic unit (block-atomic selection, docs/010 §6.5).
+    if (this.#activeTextLeafId) this.deactivateTextLeaf();
+    this.#activeObjectId = id;
+    if (this.#selection?.type !== "node" || this.#selection.node !== id) {
+      this.dispatch({
+        origin: "local",
+        selectionAfter: { node: id, type: "node" },
+        steps: [],
+      });
+    }
+    this.#notifyActiveObject();
+  }
+
+  /** Leave live-edit; the object re-bakes to its resting snapshot (AC2/AC5). */
+  deactivateObject(id?: NodeId): void {
+    if (id && this.#activeObjectId !== id) return;
+    if (!this.#activeObjectId) return;
+    this.#activeObjectId = null;
+    this.#notifyActiveObject();
+  }
+
+  /** Subscribe to live-object slot changes (the view's resting↔live switch). */
+  subscribeActiveObject(subscriber: () => void): () => void {
+    this.#activeObjectSubscribers.add(subscriber);
+    return () => this.#activeObjectSubscribers.delete(subscriber);
+  }
+
+  #notifyActiveObject(): void {
+    // The slot is view/runtime state, not a node mutation: the object's data is
+    // unchanged, only its resting↔live rendering. A dedicated subscription drives
+    // that switch without a no-op node re-render (the node identity is the same).
+    this.#activeObjectSubscribers.forEach((subscriber) => subscriber());
   }
 
   /**

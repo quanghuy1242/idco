@@ -17,6 +17,8 @@ import type { EditorCommand } from "./commands";
 import type {
   EditorDocumentSnapshot,
   EditorSelection,
+  JsonValue,
+  NodeId,
   RichTextCompatDocument,
 } from "./model";
 import type { BlockRegistry } from "./registry";
@@ -46,6 +48,15 @@ export type OwnedEditorHandle = {
   dispatch(command: EditorCommand): void;
   undo(): void;
   redo(): void;
+
+  /** The heavy object in live-edit mode, or null when all rest baked (§6.4). */
+  getActiveObjectId(): NodeId | null;
+  /** Enter live-edit on one object; deactivates any other live object first. */
+  activateObject(node: NodeId): void;
+  /** Leave live-edit; the object re-bakes to its resting snapshot. */
+  deactivateObject(): void;
+  /** Replace an object's data and re-bake it in one invertible transaction. */
+  setObjectData(node: NodeId, data: JsonValue): void;
 
   on(event: OwnedEditorHandleEvent, callback: () => void): () => void;
 };
@@ -88,11 +99,20 @@ export function createOwnedEditorHandle(
   });
 
   return {
+    activateObject(node) {
+      store.activateObject(node);
+    },
+    deactivateObject() {
+      store.deactivateObject();
+    },
     dispatch(command) {
       store.command(command);
     },
     focus() {
       options.focus?.();
+    },
+    getActiveObjectId() {
+      return store.activeObjectId;
     },
     getDocument() {
       return compatFromEditorStore(store, options.registry);
@@ -121,6 +141,9 @@ export function createOwnedEditorHandle(
     },
     redo() {
       store.redo();
+    },
+    setObjectData(node, data) {
+      store.command({ data, node, type: "set-object-data" });
     },
     setSelection(selection) {
       store.dispatch({ origin: "local", selectionAfter: selection, steps: [] });

@@ -63,6 +63,21 @@ export {
   createDefaultBlockRegistry,
 } from "./registry";
 export type {
+  BakeObjectResult,
+  BakeWorkerJob,
+  BakeWorkerResult,
+  DocumentIndex,
+  TextIndexEntry,
+  TocEntry,
+} from "./bake";
+export { bakeObjectData, buildDocumentIndex, runBakeWorkerJob } from "./bake";
+export type { BakeService, WorkerLike } from "./bake-service";
+export {
+  createLoopbackBakeService,
+  createLoopbackWorker,
+  createWorkerBakeService,
+} from "./bake-service";
+export type {
   AddMarkStep,
   CommittedTransaction,
   InsertNodeStep,

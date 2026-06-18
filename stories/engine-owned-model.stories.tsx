@@ -2,13 +2,20 @@ import type { Story, StoryDefault } from "@ladle/react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   OwnedModelEditorView,
+  bakeObjectData,
+  createDefaultBlockRegistry,
   createEditorStore,
   createIdAllocator,
+  makeObjectNode,
   makeStructuralNode,
   makeTextNode,
+  type BlockRegistry,
   type EditorDocumentSnapshot,
   type EditorNode,
+  type IdAllocator,
+  type JsonValue,
   type NodeId,
+  type ObjectNode,
   type OwnedModelEditorViewHandle,
   type TextLeafNode,
 } from "../packages/editor/src";
@@ -77,6 +84,20 @@ export const Phase5VariableHeights: Story = () => {
 
 export const Phase55Editing: Story = () => {
   const store = useMemo(() => createEditingStore(), []);
+  const viewRef = useRef<OwnedModelEditorViewHandle | null>(null);
+
+  return (
+    <OwnedModelStoryFrame
+      store={store}
+      viewRef={viewRef}
+      viewportHeight={PHASE5_VIEWPORT}
+      virtualize
+    />
+  );
+};
+
+export const Phase6MixedBook: Story = () => {
+  const store = useMemo(() => createMixedBookStore(), []);
   const viewRef = useRef<OwnedModelEditorViewHandle | null>(null);
 
   return (
@@ -229,6 +250,82 @@ function createEditingStore() {
     version: 1,
   };
   return createEditorStore({ allocator, snapshot });
+}
+
+function objectNode(
+  allocator: IdAllocator,
+  registry: BlockRegistry,
+  type: string,
+  rawData: JsonValue,
+): ObjectNode {
+  // Normalize through the registry (so code-block data gets its piece table) and
+  // pre-bake, so the resting block mounts its static snapshot from the first frame.
+  const normalized = registry.normalizeSnapshotObject(type, rawData);
+  const baked = bakeObjectData(registry, type, normalized.data);
+  return makeObjectNode({
+    baked: baked.baked ?? undefined,
+    data: normalized.data,
+    id: allocator.createNodeId(),
+    status: baked.status,
+    type,
+  });
+}
+
+function createMixedBookStore() {
+  // A live-book page: prose interleaved with heavy objects. Each object rests as
+  // a baked snapshot and edits as a single live surface (docs/010 Phase 6).
+  const allocator = createIdAllocator("idco_client_phase6_story");
+  const registry = createDefaultBlockRegistry();
+  const text = (value: string, type: TextLeafNode["type"] = "paragraph") =>
+    makeTextNode({
+      content: allocator.createTextSlice(value),
+      id: allocator.createNodeId(),
+      type,
+    });
+  const heading = (value: string) =>
+    makeTextNode({
+      attrs: { tag: "h2" },
+      content: allocator.createTextSlice(value),
+      id: allocator.createNodeId(),
+      type: "heading",
+    });
+
+  const topLevel: EditorNode[] = [
+    heading("Phase 6 — heavy objects, baked at rest"),
+    text(
+      "Objects below rest as baked static snapshots. Click one to edit it live; only one object is live at a time.",
+    ),
+    objectNode(allocator, registry, "code-block", {
+      code: "function greet(name) {\n  return `Hello, ${name}!`;\n}",
+      language: "ts",
+    }),
+    text(
+      "A media block bakes from its source; clearing the source makes it unbakeable.",
+    ),
+    objectNode(allocator, registry, "media", {
+      alt: "Diagram",
+      caption: "A baked media block",
+      src: "https://example.com/diagram.png",
+    }),
+    heading("Second section"),
+    text("An embed block resting baked, activatable through its config panel."),
+    objectNode(allocator, registry, "embed", {
+      title: "Reference embed",
+      url: "https://example.com/embed",
+    }),
+  ];
+  const snapshot: EditorDocumentSnapshot = {
+    body: {
+      blocks: Object.fromEntries(topLevel.map((n) => [n.id, n])) as Record<
+        NodeId,
+        EditorNode
+      >,
+      order: topLevel.map((n) => n.id),
+    },
+    settings: { phase: "6", story: "owned-model-mixed-book" },
+    version: 1,
+  };
+  return createEditorStore({ allocator, registry, snapshot });
 }
 
 function createPhase4Store(blockCount: number) {
