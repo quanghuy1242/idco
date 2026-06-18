@@ -20,12 +20,15 @@ import {
 import {
   collectSelectionText,
   createEngineScheduler,
+  createOwnedEditorHandle,
   orderedTextLeaves,
   pointAtOffset,
   replaceTextContent,
   sliceTextContent,
+  type EditorCommand,
   type EditorSelection,
   type EditorStore,
+  type OwnedEditorHandle,
   type EnginePerformanceSnapshot,
   type EngineScheduler,
   type EngineSchedulerTask,
@@ -60,6 +63,7 @@ import { calculateVirtualRange } from "../core/virtual-range";
 
 export type OwnedModelEditorViewDiagnostics = {
   readonly activeNodeId: NodeId | null;
+  readonly activeInputBackend: "native" | "polyfill" | null;
   readonly blockTexts: Readonly<Record<NodeId, string>>;
   readonly mountedCount: number;
   readonly order: readonly NodeId[];
@@ -88,6 +92,8 @@ export type OwnedModelEditorViewHandle = {
   readonly scrollToBlock: (id: NodeId) => void;
   /** The current model selection serialized to plain text (cross-virtual copy). */
   readonly serializeSelection: () => string;
+  /** The public command/undo/dirty/event control surface (docs/011 §12.2). */
+  readonly getEditorHandle: () => OwnedEditorHandle;
 };
 
 export type OwnedModelEditorViewProps = {
@@ -135,6 +141,7 @@ type TextBlockController = {
 
 type RenderRegistry = {
   readonly blockRefs: Map<NodeId, HTMLElement>;
+  readonly inputBackends: Map<NodeId, "native" | "polyfill">;
   readonly renderCounts: Map<NodeId, number>;
   selectionOverlayRenderCount: number;
   selectionRectCount: number;
@@ -157,7 +164,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   const {
     store,
     scheduler: providedScheduler,
-    forcePolyfill = false,
+    forcePolyfill = true,
     className,
     style,
     diagnosticsKey,
@@ -186,6 +193,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   const autoscrollFrameRef = useRef<number | null>(null);
   const registryRef = useRef<RenderRegistry>({
     blockRefs: new Map(),
+    inputBackends: new Map(),
     renderCounts: new Map(),
     selectionOverlayRenderCount: 0,
     selectionRectCount: 0,
@@ -229,6 +237,18 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
         registryRef.current.blockRefs.set(id, element);
       } else {
         registryRef.current.blockRefs.delete(id);
+        registryRef.current.inputBackends.delete(id);
+      }
+    },
+    [],
+  );
+
+  const registerInputBackend = useCallback(
+    (id: NodeId, backend: "native" | "polyfill" | null) => {
+      if (backend) {
+        registryRef.current.inputBackends.set(id, backend);
+      } else {
+        registryRef.current.inputBackends.delete(id);
       }
     },
     [],
@@ -367,6 +387,46 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     [store],
   );
 
+  // Focus and reveal the block the model selection now points at, after a
+  // structural/clipboard command moves the caret. Deferred a frame so the new
+  // block has mounted (React flushes the order change after the handler).
+  const syncFocusToSelection = useCallback(() => {
+    requestFrame(() => {
+      const sel = store.selection;
+      const focusNode = sel?.type === "text" ? sel.focus.node : null;
+      if (!focusNode) return;
+      registryRef.current.blockRefs
+        .get(focusNode)
+        ?.focus({ preventScroll: true });
+    });
+  }, [store]);
+
+  const onClipboardCut = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      // Cut writes the model serialization, then deletes the selection through
+      // the command layer so the delete is one invertible transaction (AC5).
+      const text = collectSelectionText(store, store.selection);
+      if (!text) return;
+      event.clipboardData?.setData("text/plain", text);
+      event.preventDefault();
+      store.command({ type: "delete-selection" });
+      syncFocusToSelection();
+    },
+    [store, syncFocusToSelection],
+  );
+
+  const onClipboardPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      // Paste inserts plain text at the selection, replacing a range (AC5).
+      const text = event.clipboardData?.getData("text/plain");
+      if (!text) return;
+      event.preventDefault();
+      store.command({ type: "insert-text", text });
+      syncFocusToSelection();
+    },
+    [store, syncFocusToSelection],
+  );
+
   const onScroll = useCallback(() => {
     if (!virtualize || scrollFrameRef.current !== null) return;
     // Coalesce scroll onto one frame; recompute the window per painted frame,
@@ -389,14 +449,16 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     // valid even though only the mounted window is in the DOM.
     const anchor = dragAnchorRef.current;
     const pointer = lastPointerRef.current;
-    const doc = rootRef.current?.ownerDocument;
-    if (!anchor || !pointer || !doc) return;
-    const hit = pointToModelPosition(doc, pointer.x, pointer.y);
+    const root = rootRef.current;
+    if (!anchor || !pointer || !root) return;
+    // Resolve to the nearest text leaf, so a drag passes through the `[list]`
+    // placeholder and the gaps instead of stalling on a non-text block.
+    const hit = resolveTextPointAt(store, root, pointer.x, pointer.y);
     if (!hit) return;
-    const target = store.getNode(hit.id);
+    const target = store.getNode(hit.node);
     if (!target || target.kind !== "text") return;
     const focus = pointAtOffset(
-      hit.id,
+      hit.node,
       target.content,
       clampOffset(hit.offset, target.content.text.length),
     );
@@ -407,6 +469,43 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     });
   }, [store]);
 
+  // Clicking the white gaps around the content (most visibly the empty area
+  // below the last block) places the caret in the nearest text leaf, the way a
+  // real editor maps a click in empty space to the closest text position. Block
+  // clicks are handled per-block; this only fires when the click misses them.
+  const onRootMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const target = event.target as Element;
+      if (target.closest("[data-engine-block-id]")) return;
+      const root = rootRef.current;
+      if (!root) return;
+      const point = resolveTextPointAt(
+        store,
+        root,
+        event.clientX,
+        event.clientY,
+      );
+      if (!point) return;
+      const node = store.requireTextNode(point.node);
+      const focus = pointAtOffset(
+        point.node,
+        node.content,
+        clampOffset(point.offset, node.content.text.length),
+      );
+      const existing = store.selection;
+      const anchor =
+        event.shiftKey && existing?.type === "text" ? existing.anchor : focus;
+      store.dispatch({
+        origin: "local",
+        selectionAfter: { anchor, focus, type: "text" },
+        steps: [],
+      });
+      focusBlock(point.node);
+      beginDrag(anchor);
+    },
+    [beginDrag, focusBlock, store],
+  );
+
   const stopAutoscroll = useCallback(() => {
     if (autoscrollFrameRef.current !== null) {
       cancelFrame(autoscrollFrameRef.current);
@@ -414,10 +513,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     }
   }, []);
 
-  const onRootPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+  const handleDragMove = useCallback(
+    (clientX: number, clientY: number) => {
       if (!draggingRef.current) return;
-      lastPointerRef.current = { x: event.clientX, y: event.clientY };
+      lastPointerRef.current = { x: clientX, y: clientY };
       extendDragToPointer();
       // Autoscroll while a drag is held near a viewport edge so the selection
       // can reach offscreen blocks (docs/010 Phase 5 AC4).
@@ -425,8 +524,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       if (!virtualize || !scroller) return;
       const rect = scroller.getBoundingClientRect();
       const edge = 28;
-      const below = event.clientY - rect.top < edge;
-      const above = rect.bottom - event.clientY < edge;
+      const below = clientY - rect.top < edge;
+      const above = rect.bottom - clientY < edge;
       if (!below && !above) {
         stopAutoscroll();
         return;
@@ -448,12 +547,32 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     [extendDragToPointer, stopAutoscroll, virtualize],
   );
 
-  const onRootPointerUp = useCallback(() => {
+  const endDrag = useCallback(() => {
     draggingRef.current = false;
     dragAnchorRef.current = null;
     lastPointerRef.current = null;
     stopAutoscroll();
   }, [stopAutoscroll]);
+
+  // Track the drag on the document, not the editor element, so it keeps
+  // extending when the pointer leaves the editor and resumes on re-entry, and
+  // ends on pointerup anywhere — the way a real text drag behaves. The listeners
+  // early-out unless a drag is active, so they are cheap when idle.
+  useEffect(() => {
+    const view = rootRef.current?.ownerDocument.defaultView ?? globalThis;
+    const onMove = (event: PointerEvent) => {
+      if (draggingRef.current) handleDragMove(event.clientX, event.clientY);
+    };
+    const onUp = () => {
+      if (draggingRef.current) endDrag();
+    };
+    view.addEventListener("pointermove", onMove);
+    view.addEventListener("pointerup", onUp);
+    return () => {
+      view.removeEventListener("pointermove", onMove);
+      view.removeEventListener("pointerup", onUp);
+    };
+  }, [endDrag, handleDragMove]);
 
   useLayoutEffect(() => {
     if (!virtualize) return;
@@ -514,8 +633,12 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       const node = store.requireNode(id);
       if (node.kind === "text") blockTexts[id] = node.content.text;
     }
+    const activeNodeId = activeSelectionNode(store.selection);
     return {
-      activeNodeId: activeSelectionNode(store.selection),
+      activeInputBackend: activeNodeId
+        ? (registryRef.current.inputBackends.get(activeNodeId) ?? null)
+        : null,
+      activeNodeId,
       blockTexts,
       mountedCount: registryRef.current.blockRefs.size,
       order: [...store.order],
@@ -533,15 +656,41 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     };
   }, [scheduler, scrollTop, store, virtualize, windowRange]);
 
+  // One public handle per store; the focuser re-points DOM focus at whatever
+  // block the model selection currently names.
+  const editorHandleRef = useRef<{
+    store: EditorStore;
+    handle: OwnedEditorHandle;
+  } | null>(null);
+  const getEditorHandle = useCallback((): OwnedEditorHandle => {
+    if (editorHandleRef.current?.store !== store) {
+      editorHandleRef.current = {
+        handle: createOwnedEditorHandle(store, {
+          focus: () => syncFocusToSelection(),
+        }),
+        store,
+      };
+    }
+    return editorHandleRef.current.handle;
+  }, [store, syncFocusToSelection]);
+
   const api = useMemo<OwnedModelEditorViewHandle>(
     () => ({
       diagnostics,
       focusBlock,
+      getEditorHandle,
       scrollToBlock,
       selectText,
       serializeSelection,
     }),
-    [diagnostics, focusBlock, scrollToBlock, selectText, serializeSelection],
+    [
+      diagnostics,
+      focusBlock,
+      getEditorHandle,
+      scrollToBlock,
+      selectText,
+      serializeSelection,
+    ],
   );
 
   useImperativeHandle(ref, () => api, [api]);
@@ -570,6 +719,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       key={id}
       onRender={recordBlockRender}
       registerBlock={registerBlock}
+      registerInputBackend={registerInputBackend}
       requestFocus={focusBlock}
       revealBlock={revealBlock}
       store={store}
@@ -583,10 +733,9 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
         className={className}
         data-engine-view-root=""
         onCopy={onClipboardCopy}
-        onCut={onClipboardCopy}
-        onPointerLeave={onRootPointerUp}
-        onPointerMove={onRootPointerMove}
-        onPointerUp={onRootPointerUp}
+        onCut={onClipboardCut}
+        onMouseDown={onRootMouseDown}
+        onPaste={onClipboardPaste}
         role="application"
         style={{ ...baseViewStyle, padding: 16, ...style }}
       >
@@ -608,10 +757,9 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       data-engine-view-root=""
       data-engine-virtualized=""
       onCopy={onClipboardCopy}
-      onCut={onClipboardCopy}
-      onPointerLeave={onRootPointerUp}
-      onPointerMove={onRootPointerMove}
-      onPointerUp={onRootPointerUp}
+      onCut={onClipboardCut}
+      onMouseDown={onRootMouseDown}
+      onPaste={onClipboardPaste}
       onScroll={onScroll}
       role="application"
       style={{
@@ -680,6 +828,10 @@ function EngineBlock(props: {
   readonly store: EditorStore;
   readonly forcePolyfill: boolean;
   readonly registerBlock: (id: NodeId, element: HTMLElement | null) => void;
+  readonly registerInputBackend: (
+    id: NodeId,
+    backend: "native" | "polyfill" | null,
+  ) => void;
   readonly onRender: (id: NodeId) => void;
   readonly requestFocus: (id: NodeId) => void;
   readonly revealBlock: (id: NodeId) => void;
@@ -690,6 +842,7 @@ function EngineBlock(props: {
     store,
     forcePolyfill,
     registerBlock,
+    registerInputBackend,
     onRender,
     requestFocus,
     revealBlock,
@@ -697,6 +850,9 @@ function EngineBlock(props: {
   } = props;
   const node = useEditorNode(store, id);
   onRender(id);
+  // The node was removed in the same tick (merge/delete); render nothing until
+  // the order change unmounts this block.
+  if (!node) return null;
   if (node.kind === "text") {
     return (
       <EngineTextBlock
@@ -704,6 +860,7 @@ function EngineBlock(props: {
         forcePolyfill={forcePolyfill}
         node={node}
         registerBlock={registerBlock}
+        registerInputBackend={registerInputBackend}
         requestFocus={requestFocus}
         revealBlock={revealBlock}
         store={store}
@@ -726,6 +883,10 @@ function EngineTextBlock(props: {
   readonly store: EditorStore;
   readonly forcePolyfill: boolean;
   readonly registerBlock: (id: NodeId, element: HTMLElement | null) => void;
+  readonly registerInputBackend: (
+    id: NodeId,
+    backend: "native" | "polyfill" | null,
+  ) => void;
   readonly requestFocus: (id: NodeId) => void;
   readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
@@ -735,6 +896,7 @@ function EngineTextBlock(props: {
     store,
     forcePolyfill,
     registerBlock,
+    registerInputBackend,
     requestFocus,
     revealBlock,
     beginDrag,
@@ -791,6 +953,10 @@ function EngineTextBlock(props: {
       inserted,
     );
     patchHostText(hostRef.current, editContext.text);
+    // The DOM text is now current, so the commit may skip re-rendering this leaf
+    // (the typing fast path). Command-driven edits never call this, so they
+    // re-render and stay visible.
+    store.markActiveLeafDomSynced();
     const steps =
       diff.removed.length > 0 || diff.inserted.length > 0
         ? [
@@ -851,11 +1017,13 @@ function EngineTextBlock(props: {
       editContext.removeEventListener("textupdate", onTextUpdate);
       (host as unknown as { editContext: EditContextLike | null }).editContext =
         null;
+      registerInputBackend(node.id, null);
       if (forcePolyfill) releaseForcedInstall();
     };
+    registerInputBackend(node.id, backend);
     controllerRef.current = { backend, destroy, editContext };
     return controllerRef.current;
-  }, [forcePolyfill, node.id, onTextUpdate, store]);
+  }, [forcePolyfill, node.id, onTextUpdate, registerInputBackend, store]);
 
   useLayoutEffect(() => {
     const controller = controllerRef.current;
@@ -890,7 +1058,8 @@ function EngineTextBlock(props: {
 
   const applyCaret = useCallback(
     (offset: number, extendFrom?: TextPoint) => {
-      const current = store.requireTextNode(node.id);
+      const current = store.getNode(node.id);
+      if (!current || current.kind !== "text") return;
       const clamped = clampOffset(offset, current.content.text.length);
       store.activateTextLeaf(node.id);
       const controller = ensureController();
@@ -921,6 +1090,30 @@ function EngineTextBlock(props: {
     applyCaret(current.content.text.length);
   }, [applyCaret, node.id, store]);
 
+  const selectRangeInBlock = useCallback(
+    (from: number, to: number) => {
+      const current = store.requireTextNode(node.id);
+      const anchor = pointAtOffset(node.id, current.content, from);
+      const focus = pointAtOffset(node.id, current.content, to);
+      store.activateTextLeaf(node.id);
+      const controller = ensureController();
+      store.dispatch({
+        origin: "local",
+        selectionAfter: { anchor, focus, type: "text" },
+        steps: [],
+      });
+      controller?.editContext.updateSelection(
+        Math.min(from, to),
+        Math.max(from, to),
+      );
+      if (controller?.backend === "polyfill" && hostRef.current) {
+        syncPolyfillSelection(hostRef.current);
+      }
+      beginDrag(anchor);
+    },
+    [beginDrag, ensureController, node.id, store],
+  );
+
   const focusAtClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       // Map the click to a model offset (docs/011 \u00a78.3 click-to-position), not
@@ -934,6 +1127,17 @@ function EngineTextBlock(props: {
           : null) ?? current.content.text.length,
         current.content.text.length,
       );
+      // Double-click selects the word under the pointer; triple-click selects
+      // the whole block (docs/011 \u00a78.3 gesture-to-range via Intl.Segmenter).
+      if (event.detail === 2) {
+        const [from, to] = wordRangeAt(current.content.text, offset);
+        selectRangeInBlock(from, to);
+        return;
+      }
+      if (event.detail >= 3) {
+        selectRangeInBlock(0, current.content.text.length);
+        return;
+      }
       const focus = pointAtOffset(node.id, current.content, offset);
       // Shift-click extends from the existing anchor; a plain click collapses.
       // Either way the anchor becomes the drag anchor so a press-move-release
@@ -954,7 +1158,7 @@ function EngineTextBlock(props: {
       }
       beginDrag(anchor);
     },
-    [beginDrag, ensureController, node.id, store],
+    [beginDrag, ensureController, node.id, selectRangeInBlock, store],
   );
 
   const moveSelection = useCallback(
@@ -973,15 +1177,105 @@ function EngineTextBlock(props: {
     [node.id, requestFocus, revealBlock, store, syncSelectionIntoEditContext],
   );
 
+  // After a command/undo/redo moves the caret, focus and reveal the block it
+  // now lives in, deferred a frame so the structural change has committed.
+  const focusSelectionSoon = useCallback(() => {
+    requestFrame(() => {
+      const sel = store.selection;
+      const focusNode = sel?.type === "text" ? sel.focus.node : null;
+      if (!focusNode) return;
+      if (focusNode !== node.id) requestFocus(focusNode);
+      else syncSelectionIntoEditContext();
+      revealBlock(focusNode);
+    });
+  }, [node.id, requestFocus, revealBlock, store, syncSelectionIntoEditContext]);
+
+  const runEditCommand = useCallback(
+    (command: EditorCommand) => {
+      if (store.command(command)) focusSelectionSoon();
+    },
+    [focusSelectionSoon, store],
+  );
+
+  const selectAll = useCallback(() => {
+    // Select the whole virtualized document, end to end, in document order.
+    const leaves = orderedTextLeaves(store);
+    if (leaves.length === 0) return;
+    const first = leaves[0]!.node;
+    const last = leaves.at(-1)!.node;
+    store.dispatch({
+      origin: "local",
+      selectionAfter: {
+        anchor: pointAtOffset(first.id, first.content, 0),
+        focus: pointAtOffset(last.id, last.content, last.content.text.length),
+        type: "text",
+      },
+      steps: [],
+    });
+    focusSelectionSoon();
+  }, [focusSelectionSoon, store]);
+
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (!event.ctrlKey && !event.metaKey && !event.altKey) {
-        event.stopPropagation();
-      }
       const selection = store.selection;
       if (selection?.type !== "text" || selection.focus.node !== node.id) {
         return;
       }
+      if (event.ctrlKey || event.metaKey) {
+        const key = event.key.toLowerCase();
+        if (key === "z") {
+          event.preventDefault();
+          if (event.shiftKey) store.redo();
+          else store.undo();
+          focusSelectionSoon();
+        } else if (key === "y") {
+          event.preventDefault();
+          store.redo();
+          focusSelectionSoon();
+        } else if (key === "a") {
+          event.preventDefault();
+          selectAll();
+        }
+        // copy/cut/paste flow through the root clipboard events, not here.
+        return;
+      }
+      // Structural editing keys compile to commands (docs/010 §6.12, AC3/AC5).
+      if (event.key === "Enter") {
+        event.preventDefault();
+        // Shift+Enter inserts a soft line break inside the current block (blocks
+        // render `\n` as pre-wrap); plain Enter splits into a new block.
+        runEditCommand(
+          event.shiftKey
+            ? { text: "\n", type: "insert-text" }
+            : { type: "split-block" },
+        );
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        runEditCommand({ type: event.shiftKey ? "outdent" : "indent" });
+        return;
+      }
+      if (event.key === "Backspace" || event.key === "Delete") {
+        const current = store.requireTextNode(node.id);
+        const collapsed = isCollapsedSelection(selection);
+        const atStart = selection.focus.offset === 0;
+        const atEnd = selection.focus.offset === current.content.text.length;
+        if (!collapsed) {
+          event.preventDefault();
+          runEditCommand({ type: "delete-selection" });
+        } else if (event.key === "Backspace" && atStart) {
+          event.preventDefault();
+          runEditCommand({ type: "delete-backward" });
+        } else if (event.key === "Delete" && atEnd) {
+          event.preventDefault();
+          runEditCommand({ type: "delete-forward" });
+        }
+        // A mid-leaf collapsed delete falls through to the input controller,
+        // which already mutates this leaf's text on the fast path.
+        return;
+      }
+      event.stopPropagation();
       const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
       // Vertical nav uses browser line geometry inside a wrapped block; at the
       // first/last line the probe lands in the inter-block gap and returns
@@ -1098,10 +1392,14 @@ function useEditorOrder(store: EditorStore): readonly NodeId[] {
 }
 
 function useEditorNode(store: EditorStore, id: NodeId) {
+  // Tolerate a just-removed node: a merge/delete notifies the removed block's
+  // subscribers before React reconciles the order change and unmounts it, so the
+  // snapshot must return undefined rather than throw. The block renders null for
+  // that one frame and then unmounts.
   return useSyncExternalStore(
     (listener) => store.subscribeNode(id, listener),
-    () => store.requireViewNode(id),
-    () => store.requireViewNode(id),
+    () => store.getViewNode(id),
+    () => store.getViewNode(id),
   );
 }
 
@@ -1178,6 +1476,24 @@ function pointForStoreOffset(
   );
 }
 
+/** The nearest text leaf to `fromIndex` in `direction`, skipping non-text blocks. */
+function adjacentTextLeaf(
+  store: EditorStore,
+  fromIndex: number,
+  direction: -1 | 1,
+): TextLeafNode | null {
+  const order = store.order;
+  for (
+    let i = fromIndex + direction;
+    i >= 0 && i < order.length;
+    i += direction
+  ) {
+    const node = store.getNode(order[i]!);
+    if (node && node.kind === "text") return node;
+  }
+  return null;
+}
+
 function selectionForNavigation(
   store: EditorStore,
   selection: Extract<EditorSelection, { type: "text" }>,
@@ -1189,31 +1505,36 @@ function selectionForNavigation(
   const currentIndex = order.indexOf(current.id);
   let targetNode = current;
   let offset = selection.focus.offset;
+  // Non-text blocks (a structural `list` placeholder) are stepped over, not
+  // treated as a wall: navigation lands on the nearest text leaf so arrows and
+  // shift+arrow cross the list to the next/previous paragraph.
   if (key === "ArrowRight") {
     if (offset < current.content.text.length) {
       offset += 1;
-    } else if (currentIndex >= 0 && currentIndex < order.length - 1) {
-      targetNode = store.requireTextNode(order[currentIndex + 1]!);
-      offset = 0;
     } else {
-      return null;
+      const next = adjacentTextLeaf(store, currentIndex, 1);
+      if (!next) return null;
+      targetNode = next;
+      offset = 0;
     }
   } else if (key === "ArrowLeft") {
     if (offset > 0) {
       offset -= 1;
-    } else if (currentIndex > 0) {
-      targetNode = store.requireTextNode(order[currentIndex - 1]!);
-      offset = targetNode.content.text.length;
     } else {
-      return null;
+      const prev = adjacentTextLeaf(store, currentIndex, -1);
+      if (!prev) return null;
+      targetNode = prev;
+      offset = prev.content.text.length;
     }
   } else if (key === "ArrowDown") {
-    if (currentIndex < 0 || currentIndex >= order.length - 1) return null;
-    targetNode = store.requireTextNode(order[currentIndex + 1]!);
+    const next = adjacentTextLeaf(store, currentIndex, 1);
+    if (!next) return null;
+    targetNode = next;
     offset = Math.min(offset, targetNode.content.text.length);
   } else if (key === "ArrowUp") {
-    if (currentIndex <= 0) return null;
-    targetNode = store.requireTextNode(order[currentIndex - 1]!);
+    const prev = adjacentTextLeaf(store, currentIndex, -1);
+    if (!prev) return null;
+    targetNode = prev;
     offset = Math.min(offset, targetNode.content.text.length);
   } else if (key === "Home") {
     offset = 0;
@@ -1265,6 +1586,16 @@ function verticalNavigation(
   return { anchor: extend ? selection.anchor : focus, focus, type: "text" };
 }
 
+/** Whether a text selection is a collapsed caret (anchor === focus). */
+function isCollapsedSelection(
+  selection: Extract<EditorSelection, { type: "text" }>,
+): boolean {
+  return (
+    selection.anchor.node === selection.focus.node &&
+    selection.anchor.offset === selection.focus.offset
+  );
+}
+
 /** Whether a navigation result leaves the caret where it already is. */
 function samePoint(
   next: EditorSelection,
@@ -1277,15 +1608,76 @@ function samePoint(
   );
 }
 
-/** Map a client point to a model offset within one block's text node. */
+/**
+ * Map a client point to a model offset within one block's text node.
+ *
+ * A click in the block's padding or at its left/right/top/bottom edge makes
+ * `caretPositionFromPoint` miss the text node (it returns the block element with
+ * a child index, or a neighbour), which previously dropped the caret at the end
+ * of the block. We clamp the point into the text's bounding box and retry, so an
+ * edge click lands on the nearest character — the reliable behaviour a user
+ * expects when clicking just outside the glyphs.
+ */
 function offsetFromClientPoint(
   host: HTMLElement,
   clientX: number,
   clientY: number,
 ): number | null {
-  const caret = caretPositionAtPoint(host.ownerDocument, clientX, clientY);
-  if (!caret || !host.contains(caret.node)) return null;
-  return caret.offset;
+  const direct = caretPositionAtPoint(host.ownerDocument, clientX, clientY);
+  if (direct && host.contains(direct.node) && isTextNode(direct.node)) {
+    return direct.offset;
+  }
+  const textRect = textBoundingRect(host);
+  if (textRect) {
+    const cx = clampNumber(clientX, textRect.left + 1, textRect.right - 1);
+    const cy = clampNumber(clientY, textRect.top + 1, textRect.bottom - 1);
+    const clamped = caretPositionAtPoint(host.ownerDocument, cx, cy);
+    if (clamped && host.contains(clamped.node)) return clamped.offset;
+  }
+  return direct && host.contains(direct.node) ? direct.offset : null;
+}
+
+function isTextNode(node: Node): boolean {
+  return node.nodeType === node.TEXT_NODE;
+}
+
+// Word segmentation for double-click selection (docs/011 §8.3: Intl.Segmenter
+// supplies the word gesture; we map it to a model range).
+const wordSegmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity: "word" })
+    : null;
+
+/** The [start, end) range of the word at `offset`, or a collapsed point. */
+function wordRangeAt(text: string, offset: number): [number, number] {
+  if (!wordSegmenter || text.length === 0) return [offset, offset];
+  let result: [number, number] = [offset, offset];
+  for (const segment of wordSegmenter.segment(text)) {
+    const start = segment.index;
+    const end = start + segment.segment.length;
+    if (offset >= start && offset < end) {
+      result = [start, end];
+      if (segment.isWordLike) return result;
+    } else if (offset === end && segment.isWordLike) {
+      // A click at the trailing edge of a word selects that word.
+      result = [start, end];
+    }
+  }
+  return result;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+/** Bounding rect of a block's rendered text (its first text node), or null. */
+function textBoundingRect(host: HTMLElement): DOMRect | null {
+  const textNode = firstTextNode(host);
+  if (!textNode) return null;
+  const range = host.ownerDocument.createRange();
+  range.selectNodeContents(textNode);
+  const rect = range.getBoundingClientRect();
+  return rect.width > 0 || rect.height > 0 ? rect : null;
 }
 
 /** Map a client point to the block id and offset it falls on. */
@@ -1303,6 +1695,56 @@ function pointToModelPosition(
   const block = element?.closest("[data-engine-block-id]");
   const id = block?.getAttribute("data-engine-block-id");
   return id ? { id: id as NodeId, offset: caret.offset } : null;
+}
+
+/**
+ * Resolve any pointer position to a model text point, mapping to the nearest
+ * text leaf when the pointer lands on a non-text block (the `[list]` placeholder)
+ * or misses the content (the white gaps). This is what lets a drag or a gap
+ * click pass through a placeholder instead of hitting a wall, and what places
+ * the caret in the nearest paragraph when clicking the empty area below the text.
+ */
+function resolveTextPointAt(
+  store: EditorStore,
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+): { node: NodeId; offset: number } | null {
+  const direct = pointToModelPosition(root.ownerDocument, clientX, clientY);
+  if (direct) {
+    const node = store.getNode(direct.id);
+    if (node && node.kind === "text")
+      return { node: direct.id, offset: direct.offset };
+  }
+  // Pick the mounted text block whose vertical span is nearest the pointer.
+  let best: {
+    id: NodeId;
+    el: HTMLElement;
+    below: boolean;
+    dist: number;
+  } | null = null;
+  for (const el of root.querySelectorAll<HTMLElement>(
+    "[data-engine-block-id]",
+  )) {
+    const id = el.getAttribute("data-engine-block-id") as NodeId;
+    const node = store.getNode(id);
+    if (!node || node.kind !== "text") continue;
+    const rect = el.getBoundingClientRect();
+    const dist =
+      clientY < rect.top
+        ? rect.top - clientY
+        : clientY > rect.bottom
+          ? clientY - rect.bottom
+          : 0;
+    if (!best || dist < best.dist) {
+      best = { below: clientY > rect.bottom, dist, el, id };
+    }
+  }
+  if (!best) return null;
+  const offset = offsetFromClientPoint(best.el, clientX, clientY);
+  if (offset !== null) return { node: best.id, offset };
+  const node = store.requireTextNode(best.id);
+  return { node: best.id, offset: best.below ? node.content.text.length : 0 };
 }
 
 /** Feature-detect the two browser point-to-caret APIs. */
@@ -1334,17 +1776,170 @@ function caretPositionAtPoint(
 
 /** Pixel rect of the collapsed caret at an offset inside one block. */
 function caretClientRect(host: HTMLElement, offset: number): DOMRect | null {
+  return robustCaretRect(host, offset) ?? host.getBoundingClientRect();
+}
+
+/**
+ * A single-line-height caret rect for a collapsed position, robust across soft
+ * line breaks. A collapsed `Range` returns no client rects at a `\n` boundary
+ * (and at the end of a block ending in `\n`), so we measure a neighbouring
+ * character and place a zero-width caret at its edge — never the block's full
+ * bounding box, which made the caret as tall as the block and grow per line.
+ */
+function robustCaretRect(host: HTMLElement, offset: number): DOMRect | null {
   const textNode = firstTextNode(host);
-  if (!textNode) return host.getBoundingClientRect();
-  const length = textNode.textContent?.length ?? 0;
-  const range = host.ownerDocument.createRange();
+  if (!textNode) return null;
+  const text = textNode.textContent ?? "";
+  const length = text.length;
   const at = clampOffset(offset, length);
-  range.setStart(textNode, at);
-  range.setEnd(textNode, at);
-  const rect = range.getBoundingClientRect();
-  return rect.height > 0 || rect.width > 0
-    ? rect
-    : host.getBoundingClientRect();
+  const doc = host.ownerDocument;
+
+  if (at > 0 && text[at - 1] === "\n") {
+    const r = softBreakCaretRect(host, doc, textNode, text, at);
+    if (r) return r;
+  }
+
+  const collapsed = boundingRectOf(doc, textNode, at, at);
+  if (collapsed && collapsed.height > 0) return collapsed;
+
+  // Caret sitting just after a visible character: its right edge.
+  if (at > 0 && text[at - 1] !== "\n") {
+    const r = edgeRectOf(doc, textNode, at - 1, at, "last");
+    if (r) return makeRect(r.right, r.top, 0, r.height);
+  }
+  // Caret sitting just before a visible character: its left edge.
+  if (at < length && text[at] !== "\n") {
+    const r = edgeRectOf(doc, textNode, at, at + 1, "first");
+    if (r) return makeRect(r.left, r.top, 0, r.height);
+  }
+  // Line boundary or empty line: measure the adjoining box and take its start.
+  if (at < length) {
+    const r = edgeRectOf(doc, textNode, at, Math.min(length, at + 1), "first");
+    if (r) return makeRect(r.left, r.top, 0, r.height);
+  }
+  if (at > 0) {
+    const r = edgeRectOf(doc, textNode, at - 1, at, "last");
+    if (r) return makeRect(r.left, r.top, 0, r.height);
+  }
+  return null;
+}
+
+/**
+ * Browser `Range` geometry reports a selected `\n` on the previous visual line.
+ * That is correct for highlighting the break character, but wrong for the
+ * collapsed caret after Shift+Enter: the caret belongs at the start of the next
+ * line even when there is no following glyph to measure. We synthesize that
+ * missing empty-line rect from the previous measurable line plus the computed
+ * line-height, preserving the glyph-height from the previous rect when possible.
+ */
+function softBreakCaretRect(
+  host: HTMLElement,
+  doc: Document,
+  textNode: Text,
+  text: string,
+  offset: number,
+): DOMRect | null {
+  const lineHeight = computedLineHeight(host);
+  const contentLeft = contentBoxLeft(host);
+  const contentTop = contentBoxTop(host);
+  let previousRect: DOMRect | null = null;
+  let previousIndex = -1;
+
+  for (let i = offset - 2; i >= 0; i -= 1) {
+    if (text[i] === "\n") continue;
+    previousRect = edgeRectOf(doc, textNode, i, i + 1, "last");
+    if (previousRect) {
+      previousIndex = i;
+      break;
+    }
+  }
+
+  const breakCount = softBreakCount(text, previousIndex + 1, offset);
+  if (breakCount === 0) return null;
+  const baseTop = previousRect?.top ?? contentTop;
+  const height = previousRect?.height ?? lineHeight;
+  return makeRect(contentLeft, baseTop + lineHeight * breakCount, 0, height);
+}
+
+function boundingRectOf(
+  doc: Document,
+  textNode: Text,
+  from: number,
+  to: number,
+): DOMRect | null {
+  const range = doc.createRange();
+  range.setStart(textNode, from);
+  range.setEnd(textNode, to);
+  if (typeof range.getBoundingClientRect !== "function") return null;
+  return range.getBoundingClientRect();
+}
+
+function edgeRectOf(
+  doc: Document,
+  textNode: Text,
+  from: number,
+  to: number,
+  pick: "first" | "last",
+): DOMRect | null {
+  const range = doc.createRange();
+  range.setStart(textNode, from);
+  range.setEnd(textNode, to);
+  if (typeof range.getClientRects !== "function") return null;
+  const rects = Array.from(range.getClientRects()).filter((r) => r.height > 0);
+  if (rects.length === 0) return null;
+  return pick === "first" ? rects[0]! : rects[rects.length - 1]!;
+}
+
+function computedLineHeight(element: HTMLElement): number {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  const lineHeight = cssPx(style?.lineHeight);
+  if (lineHeight !== null) return lineHeight;
+  const fontSize = cssPx(style?.fontSize);
+  return fontSize !== null ? fontSize * 1.2 : 18;
+}
+
+function contentBoxLeft(element: HTMLElement): number {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  return (
+    element.getBoundingClientRect().left + (cssPx(style?.paddingLeft) ?? 0)
+  );
+}
+
+function contentBoxTop(element: HTMLElement): number {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  return element.getBoundingClientRect().top + (cssPx(style?.paddingTop) ?? 0);
+}
+
+function cssPx(value: string | undefined): number | null {
+  const parsed = Number.parseFloat(value ?? "");
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function softBreakCount(text: string, from: number, to: number): number {
+  let count = 0;
+  for (let i = Math.max(0, from); i < Math.min(text.length, to); i += 1) {
+    if (text[i] === "\n") count += 1;
+  }
+  return count;
+}
+
+function makeRect(
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): DOMRect {
+  return {
+    bottom: top + height,
+    height,
+    left,
+    right: left + width,
+    toJSON: () => ({}),
+    top,
+    width,
+    x: left,
+    y: top,
+  } as DOMRect;
 }
 
 type OverlayRect = {
@@ -1421,23 +2016,25 @@ function caretRectsFromRange(
   offset: number,
   textLength: number,
 ): readonly OverlayRect[] {
-  const rects = textRangeClientRects(element, offset, offset);
-  if (rects.length > 0) {
-    return rects.map((rect) => {
-      // The line box includes leading above/below the glyphs; a caret that tall
-      // looks heavy next to a native one. Inset it and center it in the line so
-      // it reads like a real insertion bar (mirrors the spike's caret metrics).
-      const lineHeight = Math.max(14, rect.height);
-      const caretHeight = Math.round(lineHeight * 0.82);
-      return {
+  // A single-line caret rect, robust at soft-break and end-of-block boundaries
+  // (a plain collapsed Range yields nothing there). Never the block box.
+  const rect = robustCaretRect(element, offset);
+  if (rect && rect.height > 0) {
+    // The line box includes leading above/below the glyphs; a caret that tall
+    // looks heavy next to a native one. Inset it and center it in the line so
+    // it reads like a real insertion bar (mirrors the spike's caret metrics).
+    const lineHeight = Math.max(14, rect.height);
+    const caretHeight = Math.round(lineHeight * 0.82);
+    return [
+      {
         height: caretHeight,
         kind: "caret",
         left: rect.left - rootRect.left,
         node,
         top: rect.top - rootRect.top + (lineHeight - caretHeight) / 2,
         width: 1.5,
-      };
-    });
+      },
+    ];
   }
   return [fallbackCaretRect(element, rootRect, node, offset, textLength)];
 }
@@ -1608,6 +2205,10 @@ function clampOffset(offset: number, length: number): number {
 
 const blockStyle: CSSProperties = {
   borderRadius: 6,
+  // The model owns caret painting. Chromium native EditContext can still draw a
+  // platform caret on the focused host, so hide that browser caret or native
+  // comparison mode double-paints.
+  caretColor: "transparent",
   minHeight: 28,
   outline: "none",
   padding: "5px 8px",

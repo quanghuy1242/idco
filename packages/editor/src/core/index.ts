@@ -93,11 +93,32 @@ export type {
   EngineTaskRunResult,
 } from "./scheduler";
 export { createEngineScheduler } from "./scheduler";
+export {
+  compileCommand,
+  runQuery,
+  type EditorCommand,
+  type EditorCommandType,
+  type EditorQuery,
+} from "./commands";
+export {
+  createOwnedEditorHandle,
+  type OwnedEditorHandle,
+  type OwnedEditorHandleEvent,
+  type OwnedEditorHandleOptions,
+} from "./editor-handle";
+export {
+  Mapping,
+  mapTextOffset,
+  type MapBias,
+  type MapPos,
+  type PointRedirect,
+} from "./mapping";
 export { collectSelectionText, orderedTextLeaves } from "./selection";
 export {
   ROOT_NODE_ID,
   TransactionBuilder,
   createEditorStore,
+  type EditorCommitSubscriber,
   type EditorStore,
   type EditorStoreOptions,
   type EditorSubscriber,

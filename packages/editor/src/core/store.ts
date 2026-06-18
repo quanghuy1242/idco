@@ -48,9 +48,24 @@ import {
   type ParentEntry,
   type StructuralNode,
   type TextLeafNode,
+  type TextLeafType,
   type TextMark,
   type TextPoint,
+  type TextSlice,
 } from "./model";
+import {
+  compileCommand,
+  runQuery,
+  type EditorCommand,
+  type EditorQuery,
+} from "./commands";
+import {
+  Mapping,
+  mapTextOffset,
+  type MapBias,
+  type MapPos,
+  type PointRedirect,
+} from "./mapping";
 import {
   cloneAttrsWithValue,
   type AddMarkStep,
@@ -79,6 +94,8 @@ export type EditorStoreOptions = {
 
 export type EditorSubscriber = (dirty: StoreDirty) => void;
 
+export type EditorCommitSubscriber = (committed: CommittedTransaction) => void;
+
 type HistoryState = {
   readonly done: CommittedTransaction[];
   readonly undone: CommittedTransaction[];
@@ -100,6 +117,7 @@ type MutableDispatchState = {
 export class TransactionBuilder {
   readonly #allocator: IdAllocator;
   readonly #steps: Step[] = [];
+  readonly #mapping = new Mapping();
   #selectionAfter: EditorSelection | undefined;
 
   constructor(allocator: IdAllocator) {
@@ -110,50 +128,82 @@ export class TransactionBuilder {
     return this.#steps;
   }
 
+  get allocator(): IdAllocator {
+    return this.#allocator;
+  }
+
   replaceText(args: {
     readonly node: NodeId;
     readonly at: number;
     readonly removed: string;
     readonly inserted: string;
   }): this {
-    this.#steps.push({
+    return this.push({
       at: args.at,
       inserted: this.#allocator.createTextSlice(args.inserted),
       node: args.node,
       removed: { runs: [], text: args.removed },
       type: "replace-text",
     });
-    return this;
+  }
+
+  /**
+   * Replace text with an already-formed inserted slice, preserving its
+   * character ids. Split and merge move existing content between leaves and must
+   * keep its ids (docs/011 §13.9), which `replaceText` cannot do because it
+   * mints fresh ids for the inserted string.
+   */
+  spliceText(args: {
+    readonly node: NodeId;
+    readonly at: number;
+    readonly removed: string;
+    readonly inserted: TextSlice;
+  }): this {
+    return this.push({
+      at: args.at,
+      inserted: args.inserted,
+      node: args.node,
+      removed: { runs: [], text: args.removed },
+      type: "replace-text",
+    });
   }
 
   push(step: Step): this {
     this.#steps.push(step);
+    this.#mapping.append(step);
     return this;
   }
 
   insertNode(parent: NodeId, index: number, node: EditorNode): this {
-    this.#steps.push({ index, node, parent, type: "insert-node" });
-    return this;
+    return this.push({ index, node, parent, type: "insert-node" });
   }
 
   removeNode(parent: NodeId, index: number, node: EditorNode): this {
-    this.#steps.push({ index, node, parent, type: "remove-node" });
-    return this;
+    return this.push({ index, node, parent, type: "remove-node" });
   }
 
   addMark(node: NodeId, mark: TextMark): this {
-    this.#steps.push({ mark, node, type: "add-mark" });
-    return this;
+    return this.push({ mark, node, type: "add-mark" });
   }
 
   removeMark(node: NodeId, mark: TextMark): this {
-    this.#steps.push({ mark, node, type: "remove-mark" });
-    return this;
+    return this.push({ mark, node, type: "remove-mark" });
   }
 
   setSelection(selection: EditorSelection): this {
     this.#selectionAfter = selection;
     return this;
+  }
+
+  /** Register an explicit position redirect for minted/absorbed ids (§16). */
+  redirect(redirect: PointRedirect): this {
+    this.#mapping.redirect(redirect);
+    return this;
+  }
+
+  /** Map a pre-edit position through the steps pushed so far (§6.10). */
+  mapPos(pos: MapPos, bias: MapBias = 1): MapPos | null {
+    return this.#mapping.mapPos(pos, bias);
   }
 
   build(): TransactionDraft {
@@ -179,10 +229,12 @@ export class EditorStore {
   readonly #orderSubscribers = new Set<EditorSubscriber>();
   readonly #settingsSubscribers = new Set<EditorSubscriber>();
   readonly #selectionSubscribers = new Set<EditorSubscriber>();
+  readonly #commitSubscribers = new Set<EditorCommitSubscriber>();
   readonly #nodes = new Map<NodeId, EditorNode>();
   readonly #parentOf = new Map<NodeId, ParentEntry>();
   #activeTextLeafId: NodeId | null = null;
   #activeTextLeafSnapshot: TextLeafNode | null = null;
+  #activeLeafDomSynced = false;
   #order: NodeId[] = [];
   #selection: EditorSelection | null;
   #settings: DocumentSettings = {};
@@ -281,6 +333,16 @@ export class EditorStore {
     this.#activeTextLeafSnapshot = node;
   }
 
+  /**
+   * The input controller calls this after it has patched the active leaf's DOM
+   * text itself (the `textupdate` fast path), authorizing the next commit to
+   * skip re-rendering that leaf. Any commit not preceded by this re-renders the
+   * leaf, so command-driven text edits stay visible.
+   */
+  markActiveLeafDomSynced(): void {
+    this.#activeLeafDomSynced = true;
+  }
+
   deactivateTextLeaf(id?: NodeId): void {
     if (id && this.#activeTextLeafId !== id) return;
     const active = this.#activeTextLeafId;
@@ -317,9 +379,30 @@ export class EditorStore {
         ? transaction.build()
         : transaction;
     if (draft.steps.length === 0 && !draft.selectionAfter) return null;
-    const committed = this.#commit(draft, { recordHistory: true });
-    this.#history.undone.length = 0;
+    // A content-free transaction (every click and arrow key dispatches one with
+    // empty `steps`) is non-historic: recording it would make undo step back
+    // through caret moves before reaching the last edit, and a caret move must
+    // not clear the redo stack (docs/010 §10.5). Only real edits touch history.
+    const recordHistory = draft.steps.length > 0;
+    const committed = this.#commit(draft, { recordHistory });
+    if (recordHistory) this.#history.undone.length = 0;
     return committed;
+  }
+
+  /**
+   * Compile a high-level command to a transaction and dispatch it (docs/011
+   * §6.12). The only public mutation entry besides raw `dispatch`; the host and
+   * the view speak commands, never steps. Returns null when the command is a
+   * no-op for the current state.
+   */
+  command(command: EditorCommand): CommittedTransaction | null {
+    const tr = compileCommand(this, command);
+    return tr ? this.dispatch(tr) : null;
+  }
+
+  /** Answer a read-only query for toolbar active/enabled state (queries never mutate). */
+  query(query: EditorQuery): boolean | TextLeafType | null {
+    return runQuery(this, query);
   }
 
   /** Apply the latest inverse transaction and restore its stored selection. */
@@ -376,6 +459,12 @@ export class EditorStore {
     return () => this.#selectionSubscribers.delete(subscriber);
   }
 
+  /** Observe every committed transaction (the §12.2 handle's change feed). */
+  subscribeCommit(subscriber: EditorCommitSubscriber): () => void {
+    this.#commitSubscribers.add(subscriber);
+    return () => this.#commitSubscribers.delete(subscriber);
+  }
+
   toSnapshot(): EditorDocumentSnapshot {
     const blocks = Object.fromEntries(
       [...this.#nodes.entries()].filter(([id]) => id !== ROOT_NODE_ID),
@@ -392,6 +481,21 @@ export class EditorStore {
 
   parentEntry(id: NodeId): ParentEntry | undefined {
     return this.#parentOf.get(id);
+  }
+
+  /**
+   * Whether a text selection runs forward (anchor at or before focus in
+   * document order). Used pre-edit to pick the §8.8 collapse bias so a delete
+   * does not invert the selection. Defaults to forward for non-text or when a
+   * point can no longer be compared.
+   */
+  #selectionIsForward(selection: EditorSelection | null): boolean {
+    if (selection?.type !== "text") return true;
+    try {
+      return this.comparePoints(selection.anchor, selection.focus) <= 0;
+    } catch {
+      return true;
+    }
   }
 
   /** Compare two text points in document order without reading the DOM. */
@@ -437,6 +541,10 @@ export class EditorStore {
       touched: new Set<NodeId>(),
     };
     const selectionBefore = this.#selection;
+    // Capture the selection's direction while the store is still pre-edit, so a
+    // collapsing delete keeps anchor and focus in order (§8.8). comparePoints
+    // can throw once a node is removed, so it must run before `apply`.
+    const selectionForward = this.#selectionIsForward(selectionBefore);
     try {
       for (const step of draft.steps) {
         inverses.push(this.#applyAndInvert(step, state));
@@ -454,7 +562,8 @@ export class EditorStore {
       throw error;
     }
     const mappedSelection =
-      draft.selectionAfter ?? mapSelection(this, selectionBefore, draft.steps);
+      draft.selectionAfter ??
+      mapSelection(this, selectionBefore, draft.steps, selectionForward);
     this.#selection = mappedSelection;
     const selectionChanged =
       JSON.stringify(selectionBefore) !== JSON.stringify(mappedSelection);
@@ -470,13 +579,27 @@ export class EditorStore {
     };
     if (options.recordHistory) this.#history.done.push(committed);
     const dirtyNodes = new Set(committed.touched);
+    // Skipping the active leaf's re-render is only safe when its DOM was already
+    // patched out of band — that is exactly the input controller's `textupdate`
+    // path (it calls `markActiveLeafDomSynced` before dispatch). A command-driven
+    // text edit (Shift+Enter's soft break, paste) does NOT patch the DOM, so it
+    // must re-render or the change stays invisible and the EditContext desyncs.
+    const domSynced = this.#activeLeafDomSynced;
+    this.#activeLeafDomSynced = false;
     if (this.#activeTextLeafId && dirtyNodes.has(this.#activeTextLeafId)) {
-      if (canSkipActiveTextNotify(draft.steps, this.#activeTextLeafId)) {
+      const activeNode = this.getNode(this.#activeTextLeafId);
+      if (!activeNode || activeNode.kind !== "text") {
+        // The active leaf was removed/replaced by this transaction; drop it so
+        // we never pin a snapshot of a gone node (it reactivates on next focus).
+        this.#activeTextLeafId = null;
+        this.#activeTextLeafSnapshot = null;
+      } else if (
+        domSynced &&
+        canSkipActiveTextNotify(draft.steps, this.#activeTextLeafId)
+      ) {
         dirtyNodes.delete(this.#activeTextLeafId);
       } else {
-        this.#activeTextLeafSnapshot = this.requireTextNode(
-          this.#activeTextLeafId,
-        );
+        this.#activeTextLeafSnapshot = activeNode;
       }
     }
     this.#notify({
@@ -491,6 +614,10 @@ export class EditorStore {
     // 010 §10.1 AC9 / 011 §10.4 forbid on the keystroke hot path. Guard the O(N)
     // check so it runs only when a structural mutation could have broken it.
     if (committed.structureChanged) this.assertParentInvariant();
+    // A commit-level notification carries the whole transaction, so the public
+    // handle (docs/011 §12.2) can fire change/dirty/selection events for every
+    // edit, including typing the view dispatches directly.
+    this.#commitSubscribers.forEach((subscriber) => subscriber(committed));
     return committed;
   }
 
@@ -716,6 +843,17 @@ export class EditorStore {
     const children = parent.children.filter((id) => id !== step.node.id);
     this.#nodes.set(parent.id, makeStructuralNode({ ...parent, children }));
     for (const node of removed) this.#nodes.delete(node.id);
+    // If the active text leaf is in the removed subtree (a merge removes the
+    // leaf the caret was in), clear it now so the commit tail does not pin a
+    // snapshot of a node that no longer exists. The caret's new block reactivates
+    // when it next receives focus.
+    if (
+      this.#activeTextLeafId &&
+      removed.some((node) => node.id === this.#activeTextLeafId)
+    ) {
+      this.#activeTextLeafId = null;
+      this.#activeTextLeafSnapshot = null;
+    }
     this.#syncOrderFromRoot();
     this.#rebuildParentIndex();
     state.touched.add(parent.id);
@@ -982,19 +1120,26 @@ function mapSelection(
   store: EditorStore,
   selection: EditorSelection | null,
   steps: readonly Step[],
+  forward: boolean,
 ): EditorSelection | null {
   /*
    * Selection remap is part of the dispatch chokepoint. The common typing case
    * touches one text leaf and only adjusts offsets in that leaf; structural
    * removal falls back to a nearby valid text/gap selection.
+   *
+   * Anchor and focus take opposite bias when collapsing into a deleted range so
+   * the selection does not invert (§8.8: focus toward the edit, anchor away).
+   * That assignment mirrors for a backward selection.
    */
   if (!selection) return null;
+  const anchorBias: -1 | 1 = forward ? -1 : 1;
+  const focusBias: -1 | 1 = forward ? 1 : -1;
   let current: EditorSelection | null = selection;
   for (const step of steps) {
     if (!current) return null;
     if (current.type === "text") {
-      const anchor = mapPoint(store, current.anchor, step, -1);
-      const focus = mapPoint(store, current.focus, step, 1);
+      const anchor = mapPoint(store, current.anchor, step, anchorBias);
+      const focus = mapPoint(store, current.focus, step, focusBias);
       current =
         anchor && focus
           ? { anchor, focus, type: "text" }
@@ -1027,19 +1172,6 @@ function mapPoint(
   }
   if (removesNode(step, point.node)) return null;
   return point;
-}
-
-function mapTextOffset(
-  offset: number,
-  at: number,
-  removedLength: number,
-  insertedLength: number,
-  bias: -1 | 1,
-): number {
-  if (offset <= at) return offset;
-  if (offset >= at + removedLength)
-    return offset + insertedLength - removedLength;
-  return at + (bias < 0 ? 0 : insertedLength);
 }
 
 function removesNode(step: Step, node: NodeId): boolean {

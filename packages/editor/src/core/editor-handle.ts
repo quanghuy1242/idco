@@ -1,0 +1,132 @@
+/**
+ * The public control surface for the owned-model editor (docs/011 §12.2).
+ *
+ * Why this file exists
+ * --------------------
+ * The host, toolbar, shortcuts, and slash menus drive the editor through one
+ * opt-in handle that speaks commands and compat JSON, never raw steps or the
+ * store internals (§12.4). This keeps the machine room (`EditorStore`, `Step`,
+ * `mapSelection`) sealed while the host gets invertible history, scoped notify,
+ * and the no-cascade guarantee for free.
+ *
+ * It is framework-free. `focus` is the one capability that needs the DOM, so the
+ * view injects a focuser; everything else is pure store access.
+ */
+import { compatFromEditorStore } from "./compat";
+import type { EditorCommand } from "./commands";
+import type {
+  EditorDocumentSnapshot,
+  EditorSelection,
+  RichTextCompatDocument,
+} from "./model";
+import type { BlockRegistry } from "./registry";
+import type { EditorStore } from "./store";
+
+export type OwnedEditorHandleEvent =
+  | "selectionchange"
+  | "dirtychange"
+  | "change";
+
+export type OwnedEditorHandle = {
+  /** Current compat projection (the persisted JSON shape). */
+  getDocument(): RichTextCompatDocument;
+  /** The authoritative owned-model snapshot. */
+  getEditorSnapshot(): EditorDocumentSnapshot;
+  /** Whether the document changed since creation or the last `markClean`. */
+  isDirty(): boolean;
+  /** Reset the dirty baseline (call after a successful save). */
+  markClean(): void;
+
+  getSelection(): EditorSelection | null;
+  setSelection(selection: EditorSelection): void;
+  /** Move DOM focus to the editing surface (a no-op without a view focuser). */
+  focus(): void;
+
+  /** Compile and dispatch a high-level command (never a raw `Step`). */
+  dispatch(command: EditorCommand): void;
+  undo(): void;
+  redo(): void;
+
+  on(event: OwnedEditorHandleEvent, callback: () => void): () => void;
+};
+
+export type OwnedEditorHandleOptions = {
+  readonly registry?: BlockRegistry;
+  /** The view's DOM focuser; omitted in headless use. */
+  readonly focus?: () => void;
+};
+
+export function createOwnedEditorHandle(
+  store: EditorStore,
+  options: OwnedEditorHandleOptions = {},
+): OwnedEditorHandle {
+  // Dirty is edit-count based: any committed content change since the clean
+  // baseline marks the document dirty (a standard "changed since save" model),
+  // O(1) per commit instead of a per-keystroke document compare.
+  let revision = 0;
+  let cleanRevision = 0;
+  const dirtyListeners = new Set<() => void>();
+  const changeListeners = new Set<() => void>();
+  const selectionListeners = new Set<() => void>();
+
+  const isDirty = () => revision !== cleanRevision;
+
+  store.subscribeCommit((committed) => {
+    const contentChanged =
+      committed.steps.length > 0 ||
+      committed.structureChanged ||
+      committed.settingsChanged;
+    if (!contentChanged) return;
+    const wasDirty = isDirty();
+    revision += 1;
+    changeListeners.forEach((cb) => cb());
+    if (wasDirty !== isDirty()) dirtyListeners.forEach((cb) => cb());
+  });
+
+  store.subscribeSelection(() => {
+    selectionListeners.forEach((cb) => cb());
+  });
+
+  return {
+    dispatch(command) {
+      store.command(command);
+    },
+    focus() {
+      options.focus?.();
+    },
+    getDocument() {
+      return compatFromEditorStore(store, options.registry);
+    },
+    getEditorSnapshot() {
+      return store.toSnapshot();
+    },
+    getSelection() {
+      return store.selection;
+    },
+    isDirty,
+    markClean() {
+      const wasDirty = isDirty();
+      cleanRevision = revision;
+      if (wasDirty) dirtyListeners.forEach((cb) => cb());
+    },
+    on(event, callback) {
+      const set =
+        event === "change"
+          ? changeListeners
+          : event === "dirtychange"
+            ? dirtyListeners
+            : selectionListeners;
+      set.add(callback);
+      return () => set.delete(callback);
+    },
+    redo() {
+      store.redo();
+    },
+    setSelection(selection) {
+      store.dispatch({ origin: "local", selectionAfter: selection, steps: [] });
+    },
+    undo() {
+      store.undo();
+    },
+  };
+}

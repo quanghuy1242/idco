@@ -40,6 +40,9 @@ describe("owned-model React view", () => {
     const inserted = store.allocator.createTextSlice("!");
     const nextContent = replaceTextContent(target.content, 2, 0, inserted);
     await act(async () => {
+      // Model the input controller's fast path: it patches the leaf's DOM text
+      // itself, then signals the store that the commit may skip re-rendering it.
+      store.markActiveLeafDomSynced();
       store.dispatch({
         origin: "local",
         selectionAfter: {
