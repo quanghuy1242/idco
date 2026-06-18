@@ -60,3 +60,7 @@ Edit idco here → in the consumer run `pnpm dev:link` and prove `pnpm check` pa
 ## Consumer boundary audit
 
 When changing shared UI for a consumer, run the consumer's boundary scans before declaring success. For content-api admin work, the expected clean scan is `rg -n '<(div|main|section|header|footer|aside|nav|h[1-6]|p|span|ul|ol|li|a|button|dialog|form|input|select|textarea)\b|className=' packages/ui/src/admin workers/ui/src || true` from `/home/quanghuy1242/pjs/content-api`; any hit should be fixed by using or adding an `@idco/ui` primitive, not by adding custom product-local markup.
+
+## Markdown rule
+
+In Markdown files (docs, README, planning trackers), do not hard-wrap prose. Write each paragraph and each list item (including blockquote lines) as a single line and let it soft-wrap; never insert manual mid-sentence line breaks to fit a column width. Match the existing one-line-per-paragraph style of the file you are editing. Use skill stop-slop when writing docs.
