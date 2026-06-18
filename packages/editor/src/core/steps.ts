@@ -39,6 +39,11 @@ import type {
  * `removed` is checked against live content during dispatch and then replaced
  * by a fully id-bearing inserted slice. The inverse captures the removed slice
  * with its original character ids.
+ *
+ * `removedMarks` carries the marks a deletion destroys or clamps, in the
+ * leaf's pre-edit coordinates. A user command never sets it; dispatch attaches
+ * it to the inverse so undo can re-expand a clamped mark and restore a dropped
+ * one exactly, rather than reconstructing marks by guessing (docs/011 §4.5).
  */
 export type ReplaceTextStep = {
   readonly type: "replace-text";
@@ -46,6 +51,7 @@ export type ReplaceTextStep = {
   readonly at: number;
   readonly removed: TextSlice;
   readonly inserted: TextSlice;
+  readonly removedMarks?: readonly TextMark[];
 };
 
 /** Add one range mark to a text leaf. */

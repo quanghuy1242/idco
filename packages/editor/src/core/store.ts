@@ -521,10 +521,11 @@ export class EditorStore {
 
   #replaceText(step: ReplaceTextStep, state: MutableDispatchState): Step {
     const node = this.requireTextNode(step.node);
+    const removedLength = step.removed.text.length;
     const removed = sliceTextContent(
       node.content,
       step.at,
-      step.at + step.removed.text.length,
+      step.at + removedLength,
     );
     if (removed.text !== step.removed.text) {
       throw new Error("ReplaceText removed text does not match live content");
@@ -532,33 +533,57 @@ export class EditorStore {
     const nextContent = replaceTextContent(
       node.content,
       step.at,
-      step.removed.text.length,
+      removedLength,
       step.inserted,
     );
+    const survivingMarks = remapMarksForReplace(
+      node.content,
+      nextContent,
+      node.marks,
+      step.at,
+      removedLength,
+      step.inserted.text.length,
+    );
+    /*
+     * Re-expanding a clamped mark or restoring a dropped one is not derivable
+     * from the surviving marks alone (the remap only clamps), so undo replays
+     * the originals the inverse carried in `removedMarks` (docs/011 §4.5).
+     */
+    const nextMarks = step.removedMarks?.length
+      ? mergeMarksById(survivingMarks, step.removedMarks)
+      : survivingMarks;
     this.#nodes.set(
       node.id,
       makeTextNode({
         attrs: node.attrs,
         content: nextContent,
         id: node.id,
-        marks: remapMarksForReplace(
-          node.content,
-          nextContent,
-          node.marks,
-          step.at,
-          step.removed.text.length,
-          step.inserted.text.length,
-        ),
+        marks: nextMarks,
         type: node.type,
       }),
     );
     state.touched.add(node.id);
+    /*
+     * Only a deletion can destroy marks, so the inverse carries the pre-edit
+     * marks that intersect the removed span. Their character-id anchors resolve
+     * against the slice the inverse re-inserts, so the restore is exact.
+     */
+    const destroyedMarks =
+      removedLength > 0
+        ? marksIntersectingRange(
+            node.content,
+            node.marks,
+            step.at,
+            step.at + removedLength,
+          )
+        : [];
     return {
       at: step.at,
       inserted: removed,
       node: node.id,
       removed: step.inserted,
       type: "replace-text",
+      ...(destroyedMarks.length > 0 ? { removedMarks: destroyedMarks } : {}),
     };
   }
 
@@ -881,8 +906,49 @@ function remapMarksForReplace(
   }
 }
 
+function marksIntersectingRange(
+  content: TextLeafNode["content"],
+  marks: readonly TextMark[],
+  from: number,
+  to: number,
+): readonly TextMark[] {
+  /*
+   * A mark is destroyed or clamped only if it truly overlaps the removed span.
+   * Marks that merely abut an edge (mark.to === from or mark.from === to) keep
+   * their shape under the remap, so they do not need carrying in the inverse.
+   */
+  return marks.filter((mark) => {
+    const markFrom = resolveBoundaryOffset(content, mark.from);
+    const markTo = resolveBoundaryOffset(content, mark.to);
+    return markFrom < to && markTo > from;
+  });
+}
+
+function mergeMarksById(
+  base: readonly TextMark[],
+  overrides: readonly TextMark[],
+): readonly TextMark[] {
+  /*
+   * Restore by id: an override re-installs the pre-edit mark over its clamped
+   * survivor (same id) or re-adds one the deletion dropped entirely.
+   */
+  const byId = new Map(base.map((mark) => [mark.id, mark]));
+  for (const mark of overrides) byId.set(mark.id, mark);
+  return normalizeMarks([...byId.values()]);
+}
+
 function normalizeMarks(marks: readonly TextMark[]): readonly TextMark[] {
-  return [...marks].sort((a, b) => a.id.localeCompare(b.id));
+  /*
+   * docs/011 §4.4: a leaf's marks are sorted by `from`. The resolved boundary
+   * offset is the sort key, with `to` and then `id` breaking ties so the order
+   * is deterministic for round-trip and snapshot equality.
+   */
+  return [...marks].sort(
+    (a, b) =>
+      a.from.offset - b.from.offset ||
+      a.to.offset - b.to.offset ||
+      a.id.localeCompare(b.id),
+  );
 }
 
 function withAttrs(

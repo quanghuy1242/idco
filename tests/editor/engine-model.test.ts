@@ -181,6 +181,56 @@ describe("owned-model editor core", () => {
     expect(store.toSnapshot()).toEqual(after);
   });
 
+  it("restores marks a deletion destroys or clamps when the edit is undone", () => {
+    /*
+     * docs/011 §4.5: the information a clamp would lose rides in the inverse.
+     * A delete that drops a fully-covered mark and clamps an overlapping one
+     * must round-trip exactly through undo, then reproduce the lossy edit on
+     * redo.
+     */
+    const allocator = createIdAllocator(CLIENT);
+    const base = makeTextNode({
+      content: allocator.createTextSlice("abcdef"),
+      id: allocator.createNodeId(),
+    });
+    const dropped = createTextMark({
+      from: 1,
+      id: "m-dropped",
+      kind: "bold",
+      node: base,
+      to: 3,
+    });
+    const clamped = createTextMark({
+      from: 2,
+      id: "m-clamped",
+      kind: "italic",
+      node: base,
+      to: 6,
+    });
+    const node = makeTextNode({ ...base, marks: [dropped, clamped] });
+    const store = createEditorStore({ allocator, snapshot: snapshot([node]) });
+    const before = store.toSnapshot();
+
+    store.dispatch(
+      store.transaction().replaceText({
+        at: 0,
+        inserted: "",
+        node: node.id,
+        removed: "abc",
+      }),
+    );
+    const afterDelete = store.requireNode(node.id) as TextLeafNode;
+    expect(afterDelete.content.text).toBe("def");
+    expect(afterDelete.marks.map((mark) => mark.id)).toEqual(["m-clamped"]);
+    const afterDeleteSnapshot = store.toSnapshot();
+
+    store.undo();
+    expect(store.toSnapshot()).toEqual(before);
+
+    store.redo();
+    expect(store.toSnapshot()).toEqual(afterDeleteSnapshot);
+  });
+
   it("projects format range marks through compat split text nodes losslessly", () => {
     /*
      * Runtime marks can overlap, while legacy compatibility JSON only has a
