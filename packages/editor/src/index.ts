@@ -8,6 +8,7 @@ export type {
 } from "./legacy/model/schema";
 export type { RichTextNodeId } from "./legacy/model/ids";
 export { calculateVirtualRange } from "./core/virtual-range";
+export * from "./core";
 export { ensureDocumentNodeIds } from "./legacy/model/ids";
 export {
   ALIGNMENTS,

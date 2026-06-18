@@ -1,0 +1,975 @@
+/**
+ * Runtime store and transaction dispatcher for the owned-model editor.
+ *
+ * Why this file exists
+ * --------------------
+ * `model.ts` defines immutable node objects and JSON snapshot shapes. This file
+ * owns the live runtime container: one mutable `Map<NodeId, EditorNode>`, the
+ * top-level body order, the reverse `parentOf` index, model selection, inverse
+ * step history, and per-slice subscribers.
+ *
+ * The performance/architecture trade:
+ *
+ * - The Map is mutated in place so a keystroke never clones the whole document.
+ * - A changed node is replaced by a frozen object, so subscribers can compare
+ *   node identity and untouched siblings remain referentially stable.
+ * - All mutation goes through `dispatch`; this is the only place that applies
+ *   steps, captures inverses, remaps selection, updates `parentOf`, records
+ *   history, and notifies subscribers.
+ *
+ * Runtime flow:
+ *
+ *   command code -> TransactionBuilder -> TransactionDraft
+ *   TransactionDraft -> dispatch
+ *   dispatch -> apply steps + derive inverse -> remap selection
+ *   dispatch -> record history -> notify touched node/order/settings/selection
+ *
+ * There is intentionally no React, DOM, Lexical, or rendering code here.
+ */
+import {
+  boundaryAtOffset,
+  freezeNode,
+  makeObjectNode,
+  makeStructuralNode,
+  makeTextNode,
+  pointAtOffset,
+  replaceTextContent,
+  resolveBoundaryOffset,
+  resolvePointOffset,
+  sliceTextContent,
+  type DocumentSettings,
+  type EditorDocumentSnapshot,
+  type EditorNode,
+  type EditorSelection,
+  type IdAllocator,
+  type JsonObject,
+  type JsonValue,
+  type NodeId,
+  type ParentEntry,
+  type StructuralNode,
+  type TextLeafNode,
+  type TextMark,
+  type TextPoint,
+} from "./model";
+import {
+  cloneAttrsWithValue,
+  type AddMarkStep,
+  type CommittedTransaction,
+  type InsertNodeStep,
+  type MoveNodeStep,
+  type RemoveMarkStep,
+  type RemoveNodeStep,
+  type ReplaceTextStep,
+  type SetNodeAttrStep,
+  type SetNodeTypeStep,
+  type SetObjectDataStep,
+  type SetSettingsStep,
+  type Step,
+  type StoreDirty,
+  type TransactionDraft,
+} from "./steps";
+
+export const ROOT_NODE_ID = "idco_node_root" as NodeId;
+
+export type EditorStoreOptions = {
+  readonly allocator: IdAllocator;
+  readonly snapshot?: EditorDocumentSnapshot;
+  readonly selection?: EditorSelection | null;
+};
+
+export type EditorSubscriber = (dirty: StoreDirty) => void;
+
+type HistoryState = {
+  readonly done: CommittedTransaction[];
+  readonly undone: CommittedTransaction[];
+};
+
+type MutableDispatchState = {
+  readonly touched: Set<NodeId>;
+  settingsChanged: boolean;
+  structureChanged: boolean;
+};
+
+/**
+ * Side-effect-free transaction builder.
+ *
+ * Commands accumulate steps here and only mutate the store once `dispatch`
+ * applies the transaction. New ids are allocated by commands/builders, not by
+ * apply, so later steps in a composite command can reference them deterministically.
+ */
+export class TransactionBuilder {
+  readonly #allocator: IdAllocator;
+  readonly #steps: Step[] = [];
+  #selectionAfter: EditorSelection | undefined;
+
+  constructor(allocator: IdAllocator) {
+    this.#allocator = allocator;
+  }
+
+  get steps(): readonly Step[] {
+    return this.#steps;
+  }
+
+  replaceText(args: {
+    readonly node: NodeId;
+    readonly at: number;
+    readonly removed: string;
+    readonly inserted: string;
+  }): this {
+    this.#steps.push({
+      at: args.at,
+      inserted: this.#allocator.createTextSlice(args.inserted),
+      node: args.node,
+      removed: { runs: [], text: args.removed },
+      type: "replace-text",
+    });
+    return this;
+  }
+
+  push(step: Step): this {
+    this.#steps.push(step);
+    return this;
+  }
+
+  insertNode(parent: NodeId, index: number, node: EditorNode): this {
+    this.#steps.push({ index, node, parent, type: "insert-node" });
+    return this;
+  }
+
+  removeNode(parent: NodeId, index: number, node: EditorNode): this {
+    this.#steps.push({ index, node, parent, type: "remove-node" });
+    return this;
+  }
+
+  addMark(node: NodeId, mark: TextMark): this {
+    this.#steps.push({ mark, node, type: "add-mark" });
+    return this;
+  }
+
+  removeMark(node: NodeId, mark: TextMark): this {
+    this.#steps.push({ mark, node, type: "remove-mark" });
+    return this;
+  }
+
+  setSelection(selection: EditorSelection): this {
+    this.#selectionAfter = selection;
+    return this;
+  }
+
+  build(): TransactionDraft {
+    return {
+      origin: "local",
+      selectionAfter: this.#selectionAfter,
+      steps: [...this.#steps],
+    };
+  }
+}
+
+/**
+ * Mutable owned-model store with immutable node objects.
+ *
+ * The Map is mutated in place for hot-path scale, but each changed node is
+ * replaced by a frozen object. Subscribers can therefore use node object
+ * identity without cloning the whole document on every keystroke.
+ */
+export class EditorStore {
+  readonly #allocator: IdAllocator;
+  readonly #history: HistoryState = { done: [], undone: [] };
+  readonly #nodeSubscribers = new Map<NodeId, Set<EditorSubscriber>>();
+  readonly #orderSubscribers = new Set<EditorSubscriber>();
+  readonly #settingsSubscribers = new Set<EditorSubscriber>();
+  readonly #selectionSubscribers = new Set<EditorSubscriber>();
+  readonly #nodes = new Map<NodeId, EditorNode>();
+  readonly #parentOf = new Map<NodeId, ParentEntry>();
+  #order: NodeId[] = [];
+  #selection: EditorSelection | null;
+  #settings: DocumentSettings = {};
+
+  constructor(options: EditorStoreOptions) {
+    /*
+     * Snapshots persist only real document nodes. The synthetic root is runtime
+     * infrastructure: it gives body order the same parent-index machinery as
+     * nested structural nodes without being serialized as a user block.
+     */
+    this.#allocator = options.allocator;
+    this.#selection = options.selection ?? null;
+    const root = makeStructuralNode({
+      children: options.snapshot?.body.order ?? [],
+      id: ROOT_NODE_ID,
+      type: "body",
+    });
+    this.#nodes.set(ROOT_NODE_ID, root);
+    if (options.snapshot) {
+      this.#settings = options.snapshot.settings;
+      for (const node of Object.values(options.snapshot.body.blocks)) {
+        this.#nodes.set(node.id, freezeNode(node));
+      }
+      this.#order = [...options.snapshot.body.order];
+    }
+    this.#rebuildParentIndex();
+    this.assertParentInvariant();
+  }
+
+  get allocator(): IdAllocator {
+    return this.#allocator;
+  }
+
+  get selection(): EditorSelection | null {
+    return this.#selection;
+  }
+
+  get settings(): DocumentSettings {
+    return this.#settings;
+  }
+
+  get order(): readonly NodeId[] {
+    return this.#order;
+  }
+
+  getNode(id: NodeId): EditorNode | undefined {
+    return this.#nodes.get(id);
+  }
+
+  requireNode(id: NodeId): EditorNode {
+    const node = this.getNode(id);
+    if (!node) throw new Error(`Unknown node: ${id}`);
+    return node;
+  }
+
+  requireTextNode(id: NodeId): TextLeafNode {
+    const node = this.requireNode(id);
+    if (node.kind !== "text") throw new Error(`Node is not a text leaf: ${id}`);
+    return node;
+  }
+
+  transaction(): TransactionBuilder {
+    return new TransactionBuilder(this.#allocator);
+  }
+
+  /**
+   * The single document mutation chokepoint.
+   *
+   * Dispatch derives inverse steps from live pre-state, applies steps
+   * atomically, remaps selection, records history, and notifies only touched
+   * subscribers.
+   */
+  dispatch(
+    transaction: TransactionBuilder | TransactionDraft,
+  ): CommittedTransaction | null {
+    const draft =
+      transaction instanceof TransactionBuilder
+        ? transaction.build()
+        : transaction;
+    if (draft.steps.length === 0 && !draft.selectionAfter) return null;
+    const committed = this.#commit(draft, { recordHistory: true });
+    this.#history.undone.length = 0;
+    return committed;
+  }
+
+  /** Apply the latest inverse transaction and restore its stored selection. */
+  undo(): CommittedTransaction | null {
+    const entry = this.#history.done.pop();
+    if (!entry) return null;
+    const committed = this.#commit(
+      {
+        origin: "local",
+        selectionAfter: entry.selectionBefore ?? undefined,
+        steps: entry.inverse,
+      },
+      { recordHistory: false },
+    );
+    this.#history.undone.push(entry);
+    return committed;
+  }
+
+  /** Re-apply the latest undone transaction and restore its selection. */
+  redo(): CommittedTransaction | null {
+    const entry = this.#history.undone.pop();
+    if (!entry) return null;
+    const committed = this.#commit(
+      {
+        origin: "local",
+        selectionAfter: entry.selectionAfter ?? undefined,
+        steps: entry.steps,
+      },
+      { recordHistory: false },
+    );
+    this.#history.done.push(entry);
+    return committed;
+  }
+
+  subscribeNode(id: NodeId, subscriber: EditorSubscriber): () => void {
+    const set = this.#nodeSubscribers.get(id) ?? new Set<EditorSubscriber>();
+    set.add(subscriber);
+    this.#nodeSubscribers.set(id, set);
+    return () => set.delete(subscriber);
+  }
+
+  subscribeOrder(subscriber: EditorSubscriber): () => void {
+    this.#orderSubscribers.add(subscriber);
+    return () => this.#orderSubscribers.delete(subscriber);
+  }
+
+  subscribeSettings(subscriber: EditorSubscriber): () => void {
+    this.#settingsSubscribers.add(subscriber);
+    return () => this.#settingsSubscribers.delete(subscriber);
+  }
+
+  subscribeSelection(subscriber: EditorSubscriber): () => void {
+    this.#selectionSubscribers.add(subscriber);
+    return () => this.#selectionSubscribers.delete(subscriber);
+  }
+
+  toSnapshot(): EditorDocumentSnapshot {
+    const blocks = Object.fromEntries(
+      [...this.#nodes.entries()].filter(([id]) => id !== ROOT_NODE_ID),
+    ) as Record<NodeId, EditorNode>;
+    return {
+      body: {
+        blocks,
+        order: [...this.#order],
+      },
+      settings: this.#settings,
+      version: 1,
+    };
+  }
+
+  parentEntry(id: NodeId): ParentEntry | undefined {
+    return this.#parentOf.get(id);
+  }
+
+  /** Compare two text points in document order without reading the DOM. */
+  comparePoints(a: TextPoint, b: TextPoint): -1 | 0 | 1 {
+    const aNode = this.requireTextNode(a.node);
+    const bNode = this.requireTextNode(b.node);
+    const aOffset = resolvePointOffset(aNode.content, a);
+    const bOffset = resolvePointOffset(bNode.content, b);
+    if (a.node === b.node) return sign(aOffset - bOffset);
+    return compareNumberArrays(this.#pathOf(a.node), this.#pathOf(b.node));
+  }
+
+  /** Assert the reverse parent index matches every structural `children` array. */
+  assertParentInvariant(): void {
+    const seen = new Set<NodeId>();
+    const visit = (parent: NodeId, children: readonly NodeId[]) => {
+      children.forEach((childId, index) => {
+        const entry = this.#parentOf.get(childId);
+        if (!entry || entry.parent !== parent || entry.index !== index) {
+          throw new Error(`parentOf invariant failed for ${childId}`);
+        }
+        seen.add(childId);
+        const child = this.requireNode(childId);
+        if (child.kind === "structural") visit(child.id, child.children);
+      });
+    };
+    visit(ROOT_NODE_ID, this.#order);
+    for (const id of this.#nodes.keys()) {
+      if (id !== ROOT_NODE_ID && !seen.has(id)) {
+        throw new Error(`Node is detached from root: ${id}`);
+      }
+    }
+  }
+
+  #commit(
+    draft: TransactionDraft,
+    options: { readonly recordHistory: boolean },
+  ): CommittedTransaction {
+    const inverses: Step[] = [];
+    const state: MutableDispatchState = {
+      settingsChanged: false,
+      structureChanged: false,
+      touched: new Set<NodeId>(),
+    };
+    const selectionBefore = this.#selection;
+    try {
+      for (const step of draft.steps) {
+        inverses.push(this.#applyAndInvert(step, state));
+      }
+    } catch (error) {
+      // Roll back any partial application with the inverses already captured.
+      // This preserves the "dispatch is atomic" contract without snapshots.
+      for (const inverse of inverses.toReversed()) {
+        this.#applyAndInvert(inverse, {
+          settingsChanged: false,
+          structureChanged: false,
+          touched: new Set<NodeId>(),
+        });
+      }
+      throw error;
+    }
+    const mappedSelection =
+      draft.selectionAfter ?? mapSelection(this, selectionBefore, draft.steps);
+    this.#selection = mappedSelection;
+    const selectionChanged =
+      JSON.stringify(selectionBefore) !== JSON.stringify(mappedSelection);
+    const committed: CommittedTransaction = {
+      inverse: inverses.toReversed(),
+      origin: draft.origin,
+      selectionAfter: mappedSelection,
+      selectionBefore,
+      settingsChanged: state.settingsChanged,
+      steps: draft.steps,
+      structureChanged: state.structureChanged,
+      touched: new Set(state.touched),
+    };
+    if (options.recordHistory) this.#history.done.push(committed);
+    this.#notify({
+      nodes: committed.touched,
+      selection: selectionChanged,
+      settings: committed.settingsChanged,
+      structure: committed.structureChanged,
+    });
+    this.assertParentInvariant();
+    return committed;
+  }
+
+  #applyAndInvert(step: Step, state: MutableDispatchState): Step {
+    /*
+     * The switch is deliberately centralized. A new step kind is not complete
+     * until this dispatcher can apply it, derive its inverse, and mark the
+     * correct dirty slices.
+     */
+    switch (step.type) {
+      case "replace-text":
+        return this.#replaceText(step, state);
+      case "add-mark":
+        return this.#addMark(step, state);
+      case "remove-mark":
+        return this.#removeMark(step, state);
+      case "set-node-type":
+        return this.#setNodeType(step, state);
+      case "set-node-attr":
+        return this.#setNodeAttr(step, state);
+      case "insert-node":
+        return this.#insertNode(step, state);
+      case "remove-node":
+        return this.#removeNode(step, state);
+      case "move-node":
+        return this.#moveNode(step, state);
+      case "set-object-data":
+        return this.#setObjectData(step, state);
+      case "set-settings":
+        return this.#setSettings(step, state);
+    }
+  }
+
+  #replaceText(step: ReplaceTextStep, state: MutableDispatchState): Step {
+    const node = this.requireTextNode(step.node);
+    const removed = sliceTextContent(
+      node.content,
+      step.at,
+      step.at + step.removed.text.length,
+    );
+    if (removed.text !== step.removed.text) {
+      throw new Error("ReplaceText removed text does not match live content");
+    }
+    const nextContent = replaceTextContent(
+      node.content,
+      step.at,
+      step.removed.text.length,
+      step.inserted,
+    );
+    this.#nodes.set(
+      node.id,
+      makeTextNode({
+        attrs: node.attrs,
+        content: nextContent,
+        id: node.id,
+        marks: remapMarksForReplace(
+          node.content,
+          nextContent,
+          node.marks,
+          step.at,
+          step.removed.text.length,
+          step.inserted.text.length,
+        ),
+        type: node.type,
+      }),
+    );
+    state.touched.add(node.id);
+    return {
+      at: step.at,
+      inserted: removed,
+      node: node.id,
+      removed: step.inserted,
+      type: "replace-text",
+    };
+  }
+
+  #addMark(step: AddMarkStep, state: MutableDispatchState): Step {
+    const node = this.requireTextNode(step.node);
+    this.#nodes.set(
+      node.id,
+      makeTextNode({
+        attrs: node.attrs,
+        content: node.content,
+        id: node.id,
+        marks: normalizeMarks([...node.marks, step.mark]),
+        type: node.type,
+      }),
+    );
+    state.touched.add(node.id);
+    return { mark: step.mark, node: node.id, type: "remove-mark" };
+  }
+
+  #removeMark(step: RemoveMarkStep, state: MutableDispatchState): Step {
+    const node = this.requireTextNode(step.node);
+    const marks = node.marks.filter((mark) => mark.id !== step.mark.id);
+    if (marks.length === node.marks.length) {
+      throw new Error(`Unknown mark: ${step.mark.id}`);
+    }
+    this.#nodes.set(
+      node.id,
+      makeTextNode({
+        attrs: node.attrs,
+        content: node.content,
+        id: node.id,
+        marks,
+        type: node.type,
+      }),
+    );
+    state.touched.add(node.id);
+    return { mark: step.mark, node: node.id, type: "add-mark" };
+  }
+
+  #setNodeType(step: SetNodeTypeStep, state: MutableDispatchState): Step {
+    const node = this.requireTextNode(step.node);
+    if (node.type !== step.from) throw new Error("SetNodeType from mismatch");
+    this.#nodes.set(
+      node.id,
+      makeTextNode({
+        attrs: node.attrs,
+        content: node.content,
+        id: node.id,
+        marks: node.marks,
+        type: step.to,
+      }),
+    );
+    state.touched.add(node.id);
+    return {
+      from: step.to,
+      node: node.id,
+      to: step.from,
+      type: "set-node-type",
+    };
+  }
+
+  #setNodeAttr(step: SetNodeAttrStep, state: MutableDispatchState): Step {
+    const node = this.requireNode(step.node);
+    const current = node.attrs?.[step.key];
+    if (JSON.stringify(current) !== JSON.stringify(step.from)) {
+      throw new Error("SetNodeAttr from mismatch");
+    }
+    const attrs = cloneAttrsWithValue(node.attrs, step.key, step.to);
+    this.#nodes.set(node.id, withAttrs(node, attrs));
+    state.touched.add(node.id);
+    return {
+      from: step.to,
+      key: step.key,
+      node: node.id,
+      to: step.from,
+      type: "set-node-attr",
+    };
+  }
+
+  #insertNode(step: InsertNodeStep, state: MutableDispatchState): Step {
+    /*
+     * The command/builder must allocate ids before dispatch. Apply only inserts
+     * the already-formed node/subtree, then rebuilds the parent index so
+     * comparePoints and selection remap keep using truthful document order.
+     */
+    if (this.#nodes.has(step.node.id))
+      throw new Error(`Node exists: ${step.node.id}`);
+    const parent = this.#requireStructuralNode(step.parent);
+    if (step.index < 0 || step.index > parent.children.length) {
+      throw new Error("InsertNode index out of range");
+    }
+    const subtree = [step.node, ...(step.descendants ?? [])].map(freezeNode);
+    for (const node of subtree) this.#nodes.set(node.id, node);
+    const children = [
+      ...parent.children.slice(0, step.index),
+      step.node.id,
+      ...parent.children.slice(step.index),
+    ];
+    this.#nodes.set(parent.id, makeStructuralNode({ ...parent, children }));
+    this.#syncOrderFromRoot();
+    this.#rebuildParentIndex();
+    state.touched.add(parent.id);
+    state.touched.add(step.node.id);
+    state.structureChanged = true;
+    return {
+      descendants: step.descendants,
+      index: step.index,
+      node: step.node,
+      parent: step.parent,
+      type: "remove-node",
+    };
+  }
+
+  #removeNode(step: RemoveNodeStep, state: MutableDispatchState): Step {
+    /*
+     * Remove captures the entire subtree as inverse data. History therefore
+     * scales with what changed, not with the whole document, while undo can put
+     * every removed descendant back without needing a snapshot.
+     */
+    const parent = this.#requireStructuralNode(step.parent);
+    if (parent.children[step.index] !== step.node.id) {
+      throw new Error("RemoveNode index does not point to node");
+    }
+    const removed = collectSubtree(this.#nodes, step.node.id);
+    const children = parent.children.filter((id) => id !== step.node.id);
+    this.#nodes.set(parent.id, makeStructuralNode({ ...parent, children }));
+    for (const node of removed) this.#nodes.delete(node.id);
+    this.#syncOrderFromRoot();
+    this.#rebuildParentIndex();
+    state.touched.add(parent.id);
+    state.touched.add(step.node.id);
+    state.structureChanged = true;
+    return {
+      descendants: removed.slice(1),
+      index: step.index,
+      node: removed[0]!,
+      parent: step.parent,
+      type: "insert-node",
+    };
+  }
+
+  #moveNode(step: MoveNodeStep, state: MutableDispatchState): Step {
+    const fromParent = this.#requireStructuralNode(step.from.parent);
+    const toParent = this.#requireStructuralNode(step.to.parent);
+    if (fromParent.children[step.from.index] !== step.node) {
+      throw new Error("MoveNode from index does not point to node");
+    }
+    const without = fromParent.children.filter((id) => id !== step.node);
+    const adjustedToIndex =
+      step.from.parent === step.to.parent && step.from.index < step.to.index
+        ? step.to.index - 1
+        : step.to.index;
+    const targetChildren =
+      step.from.parent === step.to.parent ? without : toParent.children;
+    const nextTargetChildren = [
+      ...targetChildren.slice(0, adjustedToIndex),
+      step.node,
+      ...targetChildren.slice(adjustedToIndex),
+    ];
+    this.#nodes.set(
+      fromParent.id,
+      makeStructuralNode({
+        ...fromParent,
+        children: fromParent.id === toParent.id ? nextTargetChildren : without,
+      }),
+    );
+    if (fromParent.id !== toParent.id) {
+      this.#nodes.set(
+        toParent.id,
+        makeStructuralNode({ ...toParent, children: nextTargetChildren }),
+      );
+    }
+    this.#syncOrderFromRoot();
+    this.#rebuildParentIndex();
+    state.touched.add(fromParent.id);
+    state.touched.add(toParent.id);
+    state.touched.add(step.node);
+    state.structureChanged = true;
+    return {
+      from: {
+        index: adjustedToIndex,
+        parent: step.to.parent,
+      },
+      node: step.node,
+      to: step.from,
+      type: "move-node",
+    };
+  }
+
+  #setObjectData(step: SetObjectDataStep, state: MutableDispatchState): Step {
+    const node = this.requireNode(step.node);
+    if (node.kind !== "object")
+      throw new Error("SetObjectData target is not object");
+    if (JSON.stringify(node.data) !== JSON.stringify(step.from)) {
+      throw new Error("SetObjectData from mismatch");
+    }
+    this.#nodes.set(
+      node.id,
+      makeObjectNode({
+        attrs: node.attrs,
+        baked: bakedSnapshot(step.bakedTo),
+        data: step.to,
+        id: node.id,
+        status: step.statusTo,
+        type: node.type,
+      }),
+    );
+    state.touched.add(node.id);
+    return {
+      bakedFrom: step.bakedTo,
+      bakedTo: step.bakedFrom,
+      from: step.to,
+      node: node.id,
+      statusFrom: step.statusTo,
+      statusTo: step.statusFrom,
+      to: step.from,
+      type: "set-object-data",
+    };
+  }
+
+  #setSettings(step: SetSettingsStep, state: MutableDispatchState): Step {
+    if (JSON.stringify(this.#settings) !== JSON.stringify(step.from)) {
+      throw new Error("SetSettings from mismatch");
+    }
+    this.#settings = step.to;
+    state.settingsChanged = true;
+    return { from: step.to, to: step.from, type: "set-settings" };
+  }
+
+  #notify(dirty: StoreDirty): void {
+    for (const node of dirty.nodes) {
+      this.#nodeSubscribers
+        .get(node)
+        ?.forEach((subscriber) => subscriber(dirty));
+    }
+    if (dirty.structure) {
+      this.#orderSubscribers.forEach((subscriber) => subscriber(dirty));
+    }
+    if (dirty.settings) {
+      this.#settingsSubscribers.forEach((subscriber) => subscriber(dirty));
+    }
+    if (dirty.selection) {
+      this.#selectionSubscribers.forEach((subscriber) => subscriber(dirty));
+    }
+  }
+
+  #requireStructuralNode(id: NodeId): StructuralNode {
+    const node = this.requireNode(id);
+    if (node.kind !== "structural")
+      throw new Error(`Node is not structural: ${id}`);
+    return node;
+  }
+
+  #syncOrderFromRoot(): void {
+    this.#order = [...this.#requireStructuralNode(ROOT_NODE_ID).children];
+  }
+
+  #rebuildParentIndex(): void {
+    this.#parentOf.clear();
+    const visit = (parent: NodeId, children: readonly NodeId[]) => {
+      children.forEach((childId, index) => {
+        this.#parentOf.set(childId, { index, parent });
+        const child = this.requireNode(childId);
+        if (child.kind === "structural") visit(child.id, child.children);
+      });
+    };
+    visit(ROOT_NODE_ID, this.#order);
+  }
+
+  #pathOf(id: NodeId): readonly number[] {
+    const path: number[] = [];
+    let current = id;
+    while (current !== ROOT_NODE_ID) {
+      const entry = this.#parentOf.get(current);
+      if (!entry) throw new Error(`No parent entry for ${current}`);
+      path.push(entry.index);
+      current = entry.parent;
+    }
+    return path.toReversed();
+  }
+}
+
+export function createEditorStore(options: EditorStoreOptions): EditorStore {
+  return new EditorStore(options);
+}
+
+function remapMarksForReplace(
+  before: TextLeafNode["content"],
+  after: TextLeafNode["content"],
+  marks: readonly TextMark[],
+  at: number,
+  removedLength: number,
+  insertedLength: number,
+): readonly TextMark[] {
+  /*
+   * Phase 3 keeps the mark mapping intentionally local: a text replacement can
+   * only affect marks on the same leaf. Marks wholly before the edit stay put,
+   * marks after the edit shift by delta, and marks crossing the removed region
+   * clamp around the inserted text.
+   */
+  const delta = insertedLength - removedLength;
+  return normalizeMarks(
+    marks.flatMap((mark) => {
+      const from = mapOffset(resolveBoundaryOffset(before, mark.from));
+      const to = mapOffset(resolveBoundaryOffset(before, mark.to));
+      if (to <= from) return [];
+      return [
+        {
+          ...mark,
+          from: boundaryAtOffset(after, from, "before"),
+          to: boundaryAtOffset(after, to, "after"),
+        },
+      ];
+    }),
+  );
+
+  function mapOffset(offset: number): number {
+    if (offset <= at) return offset;
+    if (offset >= at + removedLength) return offset + delta;
+    return at + insertedLength;
+  }
+}
+
+function normalizeMarks(marks: readonly TextMark[]): readonly TextMark[] {
+  return [...marks].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function withAttrs(
+  node: EditorNode,
+  attrs: JsonObject | undefined,
+): EditorNode {
+  if (node.kind === "text") return makeTextNode({ ...node, attrs });
+  if (node.kind === "structural") return makeStructuralNode({ ...node, attrs });
+  return makeObjectNode({ ...node, attrs });
+}
+
+function collectSubtree(
+  nodes: ReadonlyMap<NodeId, EditorNode>,
+  id: NodeId,
+): EditorNode[] {
+  const node = nodes.get(id);
+  if (!node) throw new Error(`Unknown node: ${id}`);
+  const descendants =
+    node.kind === "structural"
+      ? node.children.flatMap((childId) => collectSubtree(nodes, childId))
+      : [];
+  return [node, ...descendants];
+}
+
+function mapSelection(
+  store: EditorStore,
+  selection: EditorSelection | null,
+  steps: readonly Step[],
+): EditorSelection | null {
+  /*
+   * Selection remap is part of the dispatch chokepoint. The common typing case
+   * touches one text leaf and only adjusts offsets in that leaf; structural
+   * removal falls back to a nearby valid text/gap selection.
+   */
+  if (!selection) return null;
+  let current: EditorSelection | null = selection;
+  for (const step of steps) {
+    if (!current) return null;
+    if (current.type === "text") {
+      const anchor = mapPoint(store, current.anchor, step, -1);
+      const focus = mapPoint(store, current.focus, step, 1);
+      current =
+        anchor && focus
+          ? { anchor, focus, type: "text" }
+          : fallbackSelection(store, step);
+    } else if (current.type === "node" && removesNode(step, current.node)) {
+      current = fallbackSelection(store, step);
+    } else if (current.type === "gap" && removesNode(step, current.node)) {
+      current = fallbackSelection(store, step);
+    }
+  }
+  return current;
+}
+
+function mapPoint(
+  store: EditorStore,
+  point: TextPoint,
+  step: Step,
+  bias: -1 | 1,
+): TextPoint | null {
+  if (step.type === "replace-text" && step.node === point.node) {
+    const node = store.requireTextNode(point.node);
+    const offset = mapTextOffset(
+      point.offset,
+      step.at,
+      step.removed.text.length,
+      step.inserted.text.length,
+      bias,
+    );
+    return pointAtOffset(point.node, node.content, offset, point.assoc ?? bias);
+  }
+  if (removesNode(step, point.node)) return null;
+  return point;
+}
+
+function mapTextOffset(
+  offset: number,
+  at: number,
+  removedLength: number,
+  insertedLength: number,
+  bias: -1 | 1,
+): number {
+  if (offset <= at) return offset;
+  if (offset >= at + removedLength)
+    return offset + insertedLength - removedLength;
+  return at + (bias < 0 ? 0 : insertedLength);
+}
+
+function removesNode(step: Step, node: NodeId): boolean {
+  if (step.type !== "remove-node") return false;
+  if (step.node.id === node) return true;
+  return (step.descendants ?? []).some((descendant) => descendant.id === node);
+}
+
+function fallbackSelection(
+  store: EditorStore,
+  step: Step,
+): EditorSelection | null {
+  if (step.type !== "remove-node") return store.selection;
+  const parent = store.requireNode(step.parent);
+  const siblings = parent.kind === "structural" ? parent.children : [];
+  const previous = siblings[step.index - 1];
+  if (previous) return selectionAtNodeEdge(store, previous, "after");
+  const next = siblings[step.index];
+  if (next) return selectionAtNodeEdge(store, next, "before");
+  return { node: step.parent, side: "after", type: "gap" };
+}
+
+function selectionAtNodeEdge(
+  store: EditorStore,
+  nodeId: NodeId,
+  side: "before" | "after",
+): EditorSelection {
+  const node = store.requireNode(nodeId);
+  if (node.kind === "text") {
+    const offset = side === "before" ? 0 : node.content.text.length;
+    const point = pointAtOffset(node.id, node.content, offset);
+    return { anchor: point, focus: point, type: "text" };
+  }
+  return { node: nodeId, side, type: "gap" };
+}
+
+function bakedSnapshot(value: JsonValue | undefined) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "kind" in value &&
+    typeof value.kind === "string"
+  ) {
+    return {
+      kind: value.kind,
+      payload: "payload" in value ? value.payload : null,
+    };
+  }
+  return undefined;
+}
+
+function compareNumberArrays(
+  a: readonly number[],
+  b: readonly number[],
+): -1 | 0 | 1 {
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = a[index]! - b[index]!;
+    if (difference !== 0) return sign(difference);
+  }
+  return sign(a.length - b.length);
+}
+
+function sign(value: number): -1 | 0 | 1 {
+  if (value < 0) return -1;
+  if (value > 0) return 1;
+  return 0;
+}
