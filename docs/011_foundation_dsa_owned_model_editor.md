@@ -177,6 +177,8 @@ We do not lift the TOC node's settings into `DocumentSettings`. That would split
 
 Virtualization windows over the body's top-level `children` (the body order array). A top-level block mounts with its whole subtree, so a 50-item list is one top-level block that mounts whole, which is correct because you do not virtualize within a list. The virtualization index is the body order array, and each entry resolves to its subtree by id in O(1). A pathologically huge single subtree (a 10,000-row table, a 5,000-line code block) is the deferred internal-virtualization case, handled inside that one object later, never by deforming the top-level model.
 
+Virtualization is a view-layer decision, not a model property, so it carries an on/off switch that changes nothing the model guarantees. The mount prop `virtualize` (§12.1) defaults to `true` and the engine windows the body order as above; set it to `false` and every top-level block mounts at once, which is the same render the engine produces before the windowing layer exists. Because the model owns selection, copy, find, and order (§1.3, §10.4), turning virtualization off strictly removes the offscreen case: there are no virtualized gaps to paint (§8.5) and no cross-virtual copy edge to handle. The switch is a boolean by design; an "auto by block count" mode would reintroduce a runtime threshold of the kind §3.1 rejects, so it stays a named future lever, not a third state. The cost of keeping the switch honest is that the non-virtualized path stays a maintained, tested render rather than dead code, since a small document edits with it off and the reader builds on the same all-mounted render (docs/015).
+
 ### 2.7 Atomic object internals are sequestered
 
 An atomic object's internal structure (a table's `row → cell → block` grid, §2.4) lives inside the object's opaque `data`, not in the main `nodes` Map. The outer engine never addresses a node inside a live object and never compares points across the boundary. While an object rests it is a baked snapshot. While it is live it runs its own internal model and selection, and the outer document's selection over it is a single `{type:"node", node: objectId}` (§8.2). This keeps `comparePoints` (§5.4) scoped to the outer tree, keeps focus and selection arbitration to one surface at a time (010 §6.4), and makes each heavy object a self-contained sub-engine. The cost is that an object like a table reimplements a small internal selection model, which stays isolated and bounded.
@@ -934,7 +936,8 @@ The framework's outward face has three layers. The rule under all of them: the h
 <OwnedEditor
   initialValue={compatDocument}                 // RichTextEditorDocument (the persisted compat JSON)
   onChange={(value: RichTextEditorDocument) => save(value)}   // debounced compat projection
-  mode="edit"                                   // "edit" | "read" (read = baked render only)
+  mode="edit"                                   // "edit" | "read" (read = baked render only; the server reader is docs/015)
+  virtualize={true}                             // window the body order (default); false mounts all blocks (§2.6)
 
   blocks={[codeBlock, table, mermaid, media, ...customObjectDefs]}
   indexes={[headingAnchors, toc, search, comments, ...customIndexes]}
