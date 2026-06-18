@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type CSSProperties,
   type Ref,
@@ -17,7 +18,9 @@ import {
   syncPolyfillSelection,
 } from "../core/vendor/editcontext-polyfill";
 import {
+  collectSelectionText,
   createEngineScheduler,
+  orderedTextLeaves,
   pointAtOffset,
   replaceTextContent,
   sliceTextContent,
@@ -31,6 +34,7 @@ import {
   type TextLeafNode,
   type TextPoint,
 } from "../core";
+import { calculateVirtualRange } from "../core/virtual-range";
 
 /**
  * React binding for the owned-model engine.
@@ -47,8 +51,11 @@ import {
  *   store dirty node       -> that block's external-store subscriber
  *   store dirty selection  -> scheduler frame task -> overlay subscriber
  *
- * The component is intentionally non-virtualized. Phase 5 owns windowing; Phase 4
- * proves the React/store/scheduler path while all blocks are mounted.
+ * Phase 5 adds windowing: with `virtualize` (default true, docs/011 §2.6) only
+ * the viewport slice plus overscan mounts, the selection overlay paints just the
+ * mounted edges (§8.5), and copy reads the model so a range across virtualized
+ * gaps stays whole (§13.9). `virtualize={false}` keeps the Phase 4 all-mounted
+ * render, the maintained path docs/015's reader builds on.
  */
 
 export type OwnedModelEditorViewDiagnostics = {
@@ -61,6 +68,11 @@ export type OwnedModelEditorViewDiagnostics = {
   readonly selection: EditorSelection | null;
   readonly selectionOverlayRenderCount: number;
   readonly selectionRectCount: number;
+  readonly virtualized: boolean;
+  readonly windowStart: number;
+  readonly windowEnd: number;
+  readonly totalHeight: number;
+  readonly scrollTop: number;
 };
 
 export type OwnedModelEditorViewHandle = {
@@ -72,6 +84,10 @@ export type OwnedModelEditorViewHandle = {
     focusNode: NodeId,
     focusOffset: number,
   ) => void;
+  /** Scroll an offscreen block into view, correcting after it is measured. */
+  readonly scrollToBlock: (id: NodeId) => void;
+  /** The current model selection serialized to plain text (cross-virtual copy). */
+  readonly serializeSelection: () => string;
 };
 
 export type OwnedModelEditorViewProps = {
@@ -81,6 +97,16 @@ export type OwnedModelEditorViewProps = {
   readonly className?: string;
   readonly style?: CSSProperties;
   readonly diagnosticsKey?: string;
+  /**
+   * Window the body order so only the viewport slice mounts (docs/011 §2.6).
+   * Defaults to `true`. Set `false` to mount every block, the maintained
+   * non-virtualized render Phase 4 proves and docs/015's reader builds on.
+   */
+  readonly virtualize?: boolean;
+  /** Scroller height for the virtualized path; ignored when `virtualize` is false. */
+  readonly viewportHeight?: number;
+  /** Overscan blocks kept mounted on each side of the viewport. */
+  readonly overscan?: number;
 };
 
 type EditContextLike = EventTarget & {
@@ -135,6 +161,9 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     className,
     style,
     diagnosticsKey,
+    virtualize = true,
+    viewportHeight = DEFAULT_VIEWPORT_HEIGHT,
+    overscan = DEFAULT_OVERSCAN,
   } = props;
   const localSchedulerRef = useRef<EngineScheduler | null>(null);
   if (!providedScheduler && !localSchedulerRef.current) {
@@ -142,6 +171,19 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   }
   const scheduler = providedScheduler ?? localSchedulerRef.current!;
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const heightCacheRef = useRef<Map<NodeId, number>>(new Map());
+  const estimateRef = useRef<number>(DEFAULT_BLOCK_ESTIMATE);
+  const estimateLockedRef = useRef<boolean>(false);
+  const pendingScrollRef = useRef<{
+    readonly id: NodeId;
+    readonly attempts: number;
+  } | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const dragAnchorRef = useRef<TextPoint | null>(null);
+  const draggingRef = useRef(false);
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const autoscrollFrameRef = useRef<number | null>(null);
   const registryRef = useRef<RenderRegistry>({
     blockRefs: new Map(),
     renderCounts: new Map(),
@@ -149,6 +191,37 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     selectionRectCount: 0,
   });
   const order = useEditorOrder(store);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [measureVersion, setMeasureVersion] = useState(0);
+
+  /*
+   * The window is the body-order slice the viewport covers plus overscan
+   * (docs/011 §2.6). Item sizes come from the measured height cache, falling
+   * back to a running estimate for blocks not yet mounted, so a block scrolled
+   * out and back keeps its size and the scroll geometry stays stable.
+   */
+  const windowRange = useMemo(() => {
+    if (!virtualize) {
+      return {
+        afterHeight: 0,
+        beforeHeight: 0,
+        endIndex: order.length,
+        ids: order,
+        startIndex: 0,
+        totalHeight: 0,
+      };
+    }
+    const range = calculateVirtualRange({
+      getItemSize: (index) =>
+        heightCacheRef.current.get(order[index]!) ?? estimateRef.current,
+      itemCount: order.length,
+      overscan,
+      scrollOffset: scrollTop,
+      viewportSize: viewportHeight,
+    });
+    return { ...range, ids: order.slice(range.startIndex, range.endIndex) };
+    // measureVersion forces a recompute after the height cache changes.
+  }, [virtualize, order, scrollTop, measureVersion, overscan, viewportHeight]);
 
   const registerBlock = useCallback(
     (id: NodeId, element: HTMLElement | null) => {
@@ -190,6 +263,188 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     registryRef.current.blockRefs.get(id)?.focus({ preventScroll: true });
   }, []);
 
+  const scrollToBlock = useCallback(
+    (id: NodeId) => {
+      const index = store.order.indexOf(id);
+      if (index < 0) return;
+      if (!virtualize) {
+        registryRef.current.blockRefs
+          .get(id)
+          ?.scrollIntoView({ block: "start" });
+        return;
+      }
+      let offset = 0;
+      for (let i = 0; i < index; i += 1) {
+        offset +=
+          heightCacheRef.current.get(store.order[i]!) ?? estimateRef.current;
+      }
+      // First jump uses estimated offset; the measure effect then corrects it
+      // to the target's real layout position, iterating until stable (AC3).
+      pendingScrollRef.current = { attempts: 0, id };
+      if (rootRef.current) rootRef.current.scrollTop = offset;
+      setScrollTop(offset);
+    },
+    [store, virtualize],
+  );
+
+  const serializeSelection = useCallback(
+    () => collectSelectionText(store, store.selection),
+    [store],
+  );
+
+  const onClipboardCopy = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      // Clipboard reads the model, not the DOM, so a range spanning virtualized
+      // gaps copies the full text including the offscreen middle (docs/011 §13.9).
+      const text = collectSelectionText(store, store.selection);
+      if (!text) return;
+      event.clipboardData?.setData("text/plain", text);
+      event.preventDefault();
+    },
+    [store],
+  );
+
+  const onScroll = useCallback(() => {
+    if (!virtualize || scrollFrameRef.current !== null) return;
+    // Coalesce scroll onto one frame; recompute the window per painted frame,
+    // never per scroll tick (docs/011 §10.3).
+    scrollFrameRef.current = requestFrame(() => {
+      scrollFrameRef.current = null;
+      const element = rootRef.current;
+      if (element) setScrollTop(element.scrollTop);
+    });
+  }, [virtualize]);
+
+  const beginDrag = useCallback((anchor: TextPoint) => {
+    dragAnchorRef.current = anchor;
+    draggingRef.current = true;
+  }, []);
+
+  const extendDragToPointer = useCallback(() => {
+    // Extend the model selection from the drag anchor to whatever block/offset
+    // the pointer is over (docs/011 §8.3). Reads the model, so the range is
+    // valid even though only the mounted window is in the DOM.
+    const anchor = dragAnchorRef.current;
+    const pointer = lastPointerRef.current;
+    const doc = rootRef.current?.ownerDocument;
+    if (!anchor || !pointer || !doc) return;
+    const hit = pointToModelPosition(doc, pointer.x, pointer.y);
+    if (!hit) return;
+    const target = store.getNode(hit.id);
+    if (!target || target.kind !== "text") return;
+    const focus = pointAtOffset(
+      hit.id,
+      target.content,
+      clampOffset(hit.offset, target.content.text.length),
+    );
+    store.dispatch({
+      origin: "local",
+      selectionAfter: { anchor, focus, type: "text" },
+      steps: [],
+    });
+  }, [store]);
+
+  const stopAutoscroll = useCallback(() => {
+    if (autoscrollFrameRef.current !== null) {
+      cancelFrame(autoscrollFrameRef.current);
+      autoscrollFrameRef.current = null;
+    }
+  }, []);
+
+  const onRootPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!draggingRef.current) return;
+      lastPointerRef.current = { x: event.clientX, y: event.clientY };
+      extendDragToPointer();
+      // Autoscroll while a drag is held near a viewport edge so the selection
+      // can reach offscreen blocks (docs/010 Phase 5 AC4).
+      const scroller = rootRef.current;
+      if (!virtualize || !scroller) return;
+      const rect = scroller.getBoundingClientRect();
+      const edge = 28;
+      const below = event.clientY - rect.top < edge;
+      const above = rect.bottom - event.clientY < edge;
+      if (!below && !above) {
+        stopAutoscroll();
+        return;
+      }
+      if (autoscrollFrameRef.current !== null) return;
+      const step = () => {
+        if (!draggingRef.current) {
+          autoscrollFrameRef.current = null;
+          return;
+        }
+        const delta = below ? -AUTOSCROLL_STEP_PX : AUTOSCROLL_STEP_PX;
+        scroller.scrollTop += delta;
+        setScrollTop(scroller.scrollTop);
+        extendDragToPointer();
+        autoscrollFrameRef.current = requestFrame(step);
+      };
+      autoscrollFrameRef.current = requestFrame(step);
+    },
+    [extendDragToPointer, stopAutoscroll, virtualize],
+  );
+
+  const onRootPointerUp = useCallback(() => {
+    draggingRef.current = false;
+    dragAnchorRef.current = null;
+    lastPointerRef.current = null;
+    stopAutoscroll();
+  }, [stopAutoscroll]);
+
+  useLayoutEffect(() => {
+    if (!virtualize) return;
+    const cache = heightCacheRef.current;
+    let changed = false;
+    let total = 0;
+    let count = 0;
+    for (const [id, element] of registryRef.current.blockRefs) {
+      const height = element.offsetHeight;
+      if (height <= 0) continue;
+      total += height;
+      count += 1;
+      if (cache.get(id) !== height) {
+        cache.set(id, height);
+        changed = true;
+      }
+    }
+    /*
+     * Lock the unmeasured-block estimate to the first real measurement. The
+     * offset model the window math builds (docs/011 §2.6) must stay stable
+     * across frames; letting the estimate drift per frame would re-derive every
+     * offset and walk the window away from a scroll-to-block target (AC3).
+     */
+    if (!estimateLockedRef.current && count > 0) {
+      estimateRef.current = Math.max(1, Math.round(total / count));
+      estimateLockedRef.current = true;
+    }
+    const pending = pendingScrollRef.current;
+    if (pending) {
+      const element = registryRef.current.blockRefs.get(pending.id);
+      const scroller = rootRef.current;
+      if (element && scroller) {
+        const target = element.offsetTop;
+        // Re-assert the target's real position across frames until it stops
+        // moving (newly measured blocks can shift it), so a variable-height
+        // document still lands within tolerance, not only the uniform story.
+        if (
+          Math.abs(scroller.scrollTop - target) <= 1 ||
+          pending.attempts >= 6
+        ) {
+          pendingScrollRef.current = null;
+        } else {
+          pendingScrollRef.current = {
+            attempts: pending.attempts + 1,
+            id: pending.id,
+          };
+          scroller.scrollTop = target;
+          setScrollTop(target);
+        }
+      }
+    }
+    if (changed) setMeasureVersion((value) => value + 1);
+  }, [virtualize, windowRange.ids, measureVersion]);
+
   const diagnostics = useCallback((): OwnedModelEditorViewDiagnostics => {
     const blockTexts: Record<NodeId, string> = {};
     for (const id of store.order) {
@@ -203,16 +458,27 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       order: [...store.order],
       renderCounts: Object.fromEntries(registryRef.current.renderCounts),
       scheduler: scheduler.snapshot(),
+      scrollTop: rootRef.current?.scrollTop ?? scrollTop,
       selection: store.selection,
       selectionOverlayRenderCount:
         registryRef.current.selectionOverlayRenderCount,
       selectionRectCount: registryRef.current.selectionRectCount,
+      totalHeight: windowRange.totalHeight,
+      virtualized: virtualize,
+      windowEnd: windowRange.endIndex,
+      windowStart: windowRange.startIndex,
     };
-  }, [scheduler, store]);
+  }, [scheduler, scrollTop, store, virtualize, windowRange]);
 
   const api = useMemo<OwnedModelEditorViewHandle>(
-    () => ({ diagnostics, focusBlock, selectText }),
-    [diagnostics, focusBlock, selectText],
+    () => ({
+      diagnostics,
+      focusBlock,
+      scrollToBlock,
+      selectText,
+      serializeSelection,
+    }),
+    [diagnostics, focusBlock, scrollToBlock, selectText, serializeSelection],
   );
 
   useImperativeHandle(ref, () => api, [api]);
@@ -225,44 +491,121 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     };
   }, [api, diagnosticsKey]);
 
+  useEffect(
+    () => () => {
+      if (scrollFrameRef.current !== null) cancelFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    },
+    [],
+  );
+
+  const blocks = windowRange.ids.map((id) => (
+    <EngineBlock
+      beginDrag={beginDrag}
+      forcePolyfill={forcePolyfill}
+      id={id}
+      key={id}
+      onRender={recordBlockRender}
+      registerBlock={registerBlock}
+      requestFocus={focusBlock}
+      store={store}
+    />
+  ));
+
+  if (!virtualize) {
+    return (
+      <div
+        ref={rootRef}
+        className={className}
+        data-engine-view-root=""
+        onCopy={onClipboardCopy}
+        onCut={onClipboardCopy}
+        onPointerLeave={onRootPointerUp}
+        onPointerMove={onRootPointerMove}
+        onPointerUp={onRootPointerUp}
+        role="application"
+        style={{ ...baseViewStyle, padding: 16, ...style }}
+      >
+        {blocks}
+        <SelectionOverlay
+          registry={registryRef.current}
+          rootRef={rootRef}
+          scheduler={scheduler}
+          store={store}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       ref={rootRef}
       className={className}
       data-engine-view-root=""
+      data-engine-virtualized=""
+      onCopy={onClipboardCopy}
+      onCut={onClipboardCopy}
+      onPointerLeave={onRootPointerUp}
+      onPointerMove={onRootPointerMove}
+      onPointerUp={onRootPointerUp}
+      onScroll={onScroll}
       role="application"
       style={{
-        border: "1px solid color-mix(in srgb, CanvasText 18%, transparent)",
-        borderRadius: 8,
-        color: "CanvasText",
-        fontFamily:
-          'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        lineHeight: 1.55,
-        maxWidth: 920,
-        padding: 16,
-        position: "relative",
+        ...baseViewStyle,
+        height: viewportHeight,
+        overflowY: "auto",
+        padding: 0,
         ...style,
       }}
     >
-      {order.map((id) => (
-        <EngineBlock
-          forcePolyfill={forcePolyfill}
-          id={id}
-          key={id}
-          onRender={recordBlockRender}
-          registerBlock={registerBlock}
+      <div
+        ref={contentRef}
+        data-engine-view-content=""
+        style={{ height: windowRange.totalHeight, position: "relative" }}
+      >
+        <div
+          data-engine-view-spacer="top"
+          style={{ height: windowRange.beforeHeight }}
+        />
+        {blocks}
+        <SelectionOverlay
+          registry={registryRef.current}
+          rootRef={contentRef}
+          scheduler={scheduler}
           store={store}
         />
-      ))}
-      <SelectionOverlay
-        registry={registryRef.current}
-        rootRef={rootRef}
-        scheduler={scheduler}
-        store={store}
-      />
+      </div>
     </div>
   );
 });
+
+const DEFAULT_VIEWPORT_HEIGHT = 480;
+const DEFAULT_OVERSCAN = 4;
+const DEFAULT_BLOCK_ESTIMATE = 40;
+const AUTOSCROLL_STEP_PX = 12;
+
+const baseViewStyle: CSSProperties = {
+  border: "1px solid color-mix(in srgb, CanvasText 18%, transparent)",
+  borderRadius: 8,
+  color: "CanvasText",
+  fontFamily:
+    'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  lineHeight: 1.55,
+  maxWidth: 920,
+  position: "relative",
+};
+
+function requestFrame(callback: () => void): number {
+  if (typeof requestAnimationFrame === "function") {
+    return requestAnimationFrame(callback);
+  }
+  return setTimeout(callback, 16) as unknown as number;
+}
+
+function cancelFrame(handle: number): void {
+  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(handle);
+  clearTimeout(handle);
+}
 
 function EngineBlock(props: {
   readonly id: NodeId;
@@ -270,16 +613,28 @@ function EngineBlock(props: {
   readonly forcePolyfill: boolean;
   readonly registerBlock: (id: NodeId, element: HTMLElement | null) => void;
   readonly onRender: (id: NodeId) => void;
+  readonly requestFocus: (id: NodeId) => void;
+  readonly beginDrag: (anchor: TextPoint) => void;
 }) {
-  const { id, store, forcePolyfill, registerBlock, onRender } = props;
+  const {
+    id,
+    store,
+    forcePolyfill,
+    registerBlock,
+    onRender,
+    requestFocus,
+    beginDrag,
+  } = props;
   const node = useEditorNode(store, id);
   onRender(id);
   if (node.kind === "text") {
     return (
       <EngineTextBlock
+        beginDrag={beginDrag}
         forcePolyfill={forcePolyfill}
         node={node}
         registerBlock={registerBlock}
+        requestFocus={requestFocus}
         store={store}
       />
     );
@@ -300,8 +655,11 @@ function EngineTextBlock(props: {
   readonly store: EditorStore;
   readonly forcePolyfill: boolean;
   readonly registerBlock: (id: NodeId, element: HTMLElement | null) => void;
+  readonly requestFocus: (id: NodeId) => void;
+  readonly beginDrag: (anchor: TextPoint) => void;
 }) {
-  const { node, store, forcePolyfill, registerBlock } = props;
+  const { node, store, forcePolyfill, registerBlock, requestFocus, beginDrag } =
+    props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<TextBlockController | null>(null);
 
@@ -451,29 +809,87 @@ function EngineTextBlock(props: {
     [node.id, registerBlock],
   );
 
+  const applyCaret = useCallback(
+    (offset: number, extendFrom?: TextPoint) => {
+      const current = store.requireTextNode(node.id);
+      const clamped = clampOffset(offset, current.content.text.length);
+      store.activateTextLeaf(node.id);
+      const controller = ensureController();
+      const focus = pointAtOffset(node.id, current.content, clamped);
+      store.dispatch({
+        origin: "local",
+        selectionAfter: { anchor: extendFrom ?? focus, focus, type: "text" },
+        steps: [],
+      });
+      controller?.editContext.updateSelection(clamped, clamped);
+      if (controller?.backend === "polyfill" && hostRef.current) {
+        syncPolyfillSelection(hostRef.current);
+      }
+    },
+    [ensureController, node.id, store],
+  );
+
   const focusAtEnd = useCallback(() => {
     const current = store.requireTextNode(node.id);
-    store.activateTextLeaf(node.id);
-    const controller = ensureController();
     const existing = store.selection;
-    const offset =
-      existing?.type === "text" && existing.focus.node === node.id
-        ? existing.focus.offset
-        : current.content.text.length;
-    store.dispatch({
-      origin: "local",
-      selectionAfter: {
-        anchor: pointAtOffset(node.id, current.content, offset),
-        focus: pointAtOffset(node.id, current.content, offset),
-        type: "text",
-      },
-      steps: [],
-    });
-    controller?.editContext.updateSelection(offset, offset);
-    if (controller?.backend === "polyfill" && hostRef.current) {
-      syncPolyfillSelection(hostRef.current);
+    // When focus follows the caret into this block (e.g. shift+arrow extending a
+    // range across a boundary), keep the existing anchor so the selection is not
+    // collapsed by the programmatic focus. Only a fresh focus drops a caret.
+    if (existing?.type === "text" && existing.focus.node === node.id) {
+      applyCaret(existing.focus.offset, existing.anchor);
+      return;
     }
-  }, [ensureController, node.id, store]);
+    applyCaret(current.content.text.length);
+  }, [applyCaret, node.id, store]);
+
+  const focusAtClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      // Map the click to a model offset (docs/011 \u00a78.3 click-to-position), not
+      // the end of the block. Fall back to the end only if the point misses the
+      // text (e.g. a click in the block padding).
+      const host = hostRef.current;
+      const current = store.requireTextNode(node.id);
+      const offset = clampOffset(
+        (host
+          ? offsetFromClientPoint(host, event.clientX, event.clientY)
+          : null) ?? current.content.text.length,
+        current.content.text.length,
+      );
+      const focus = pointAtOffset(node.id, current.content, offset);
+      // Shift-click extends from the existing anchor; a plain click collapses.
+      // Either way the anchor becomes the drag anchor so a press-move-release
+      // paints a range (docs/010 Phase 5 AC4 selection).
+      const existing = store.selection;
+      const anchor =
+        event.shiftKey && existing?.type === "text" ? existing.anchor : focus;
+      store.activateTextLeaf(node.id);
+      const controller = ensureController();
+      store.dispatch({
+        origin: "local",
+        selectionAfter: { anchor, focus, type: "text" },
+        steps: [],
+      });
+      controller?.editContext.updateSelection(offset, offset);
+      if (controller?.backend === "polyfill" && hostRef.current) {
+        syncPolyfillSelection(hostRef.current);
+      }
+      beginDrag(anchor);
+    },
+    [beginDrag, ensureController, node.id, store],
+  );
+
+  const moveSelection = useCallback(
+    (next: EditorSelection) => {
+      store.dispatch({ origin: "local", selectionAfter: next, steps: [] });
+      // Keep DOM focus on the block the caret now lives in, or the next
+      // keystroke (typing or another arrow) lands on the stale block. This is
+      // the focus-follows-caret rule a model-owned selection needs.
+      const focusNode = next.type === "text" ? next.focus.node : node.id;
+      if (focusNode !== node.id) requestFocus(focusNode);
+      else syncSelectionIntoEditContext();
+    },
+    [node.id, requestFocus, store, syncSelectionIntoEditContext],
+  );
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -484,18 +900,28 @@ function EngineTextBlock(props: {
       if (selection?.type !== "text" || selection.focus.node !== node.id) {
         return;
       }
-      const next = selectionForNavigation(
-        store,
-        selection,
-        event.key,
-        event.shiftKey,
-      );
-      if (!next) return;
+      const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
+      // Vertical nav uses browser line geometry inside a wrapped block; at the
+      // first/last line the probe lands in the inter-block gap and returns
+      // nothing or the same spot, so fall back to a block-level jump.
+      const lineMove = vertical
+        ? verticalNavigation(
+            store,
+            selection,
+            hostRef.current,
+            event.key === "ArrowUp" ? -1 : 1,
+            event.shiftKey,
+          )
+        : null;
+      const next =
+        lineMove && !samePoint(lineMove, selection)
+          ? lineMove
+          : selectionForNavigation(store, selection, event.key, event.shiftKey);
+      if (!next || samePoint(next, selection)) return;
       event.preventDefault();
-      store.dispatch({ origin: "local", selectionAfter: next, steps: [] });
-      syncSelectionIntoEditContext();
+      moveSelection(next);
     },
-    [node.id, store, syncSelectionIntoEditContext],
+    [moveSelection, node.id, store],
   );
 
   return (
@@ -503,9 +929,9 @@ function EngineTextBlock(props: {
       aria-label={`Block ${node.id}`}
       data-engine-block-id={node.id}
       data-engine-text-id={node.id}
-      onClick={focusAtEnd}
       onFocus={focusAtEnd}
       onKeyDown={handleKeyDown}
+      onMouseDown={focusAtClick}
       ref={bindRef}
       role="textbox"
       style={blockStyle}
@@ -539,28 +965,47 @@ function SelectionOverlay(props: {
         position: "absolute",
       }}
     >
-      {rects.map((rect, index) => (
-        <div
-          data-engine-selection-rect=""
-          key={`${rect.node}-${index}`}
-          style={{
-            background:
-              rect.kind === "caret"
+      <style>{CARET_BLINK_KEYFRAMES}</style>
+      {rects.map((rect, index) => {
+        const isCaret = rect.kind === "caret";
+        return (
+          <div
+            data-engine-caret={isCaret ? "" : undefined}
+            data-engine-selection-rect=""
+            // Keying a caret by its pixel position recreates the element when it
+            // moves, restarting the blink so it shows solid right after a move,
+            // the way a native insertion bar does (mirrors the spike).
+            key={
+              isCaret
+                ? `caret-${Math.round(rect.left)}-${Math.round(rect.top)}`
+                : `range-${rect.node}-${index}`
+            }
+            style={{
+              animation: isCaret
+                ? "idco-caret-blink 1.06s step-end infinite"
+                : undefined,
+              background: isCaret
                 ? "CanvasText"
                 : "color-mix(in srgb, Highlight 36%, transparent)",
-            borderRadius: rect.kind === "caret" ? 0 : 3,
-            height: rect.height,
-            left: rect.left,
-            opacity: rect.kind === "caret" ? 0.82 : 1,
-            position: "absolute",
-            top: rect.top,
-            width: rect.width,
-          }}
-        />
-      ))}
+              borderRadius: isCaret ? 1 : 3,
+              height: rect.height,
+              left: rect.left,
+              position: "absolute",
+              top: rect.top,
+              // The caret must snap, not slide; a global `transition: all` would
+              // otherwise animate its position and make it look laggy.
+              transition: "none",
+              width: rect.width,
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
+
+const CARET_BLINK_KEYFRAMES =
+  "@keyframes idco-caret-blink{0%,50%{opacity:1}51%,100%{opacity:0}}";
 
 function useEditorOrder(store: EditorStore): readonly NodeId[] {
   return useSyncExternalStore(
@@ -703,6 +1148,123 @@ function selectionForNavigation(
   };
 }
 
+/**
+ * Vertical caret movement by visual line, using browser geometry.
+ *
+ * docs/011 §8.3 reuses `caretPositionFromPoint`: drop a probe one line above or
+ * below the caret's current pixel position and ask the browser which model
+ * offset sits there. This moves by the rendered line, so it works inside a
+ * wrapped multi-line block, not only block-to-block. A persistent goal column
+ * across several presses is the Phase 7 refinement and is not tracked here.
+ */
+function verticalNavigation(
+  store: EditorStore,
+  selection: Extract<EditorSelection, { type: "text" }>,
+  host: HTMLElement | null,
+  direction: -1 | 1,
+  extend: boolean,
+): EditorSelection | null {
+  if (!host) return null;
+  const rect = caretClientRect(host, selection.focus.offset);
+  if (!rect) return null;
+  const probeX = rect.left;
+  const lineStep = Math.max(8, rect.height || 16);
+  const probeY =
+    direction < 0 ? rect.top - lineStep * 0.5 : rect.bottom + lineStep * 0.5;
+  const hit = pointToModelPosition(host.ownerDocument, probeX, probeY);
+  if (!hit) return null;
+  const target = store.getNode(hit.id);
+  if (!target || target.kind !== "text") return null;
+  const focus = pointAtOffset(
+    hit.id,
+    target.content,
+    clampOffset(hit.offset, target.content.text.length),
+  );
+  return { anchor: extend ? selection.anchor : focus, focus, type: "text" };
+}
+
+/** Whether a navigation result leaves the caret where it already is. */
+function samePoint(
+  next: EditorSelection,
+  current: Extract<EditorSelection, { type: "text" }>,
+): boolean {
+  return (
+    next.type === "text" &&
+    next.focus.node === current.focus.node &&
+    next.focus.offset === current.focus.offset
+  );
+}
+
+/** Map a client point to a model offset within one block's text node. */
+function offsetFromClientPoint(
+  host: HTMLElement,
+  clientX: number,
+  clientY: number,
+): number | null {
+  const caret = caretPositionAtPoint(host.ownerDocument, clientX, clientY);
+  if (!caret || !host.contains(caret.node)) return null;
+  return caret.offset;
+}
+
+/** Map a client point to the block id and offset it falls on. */
+function pointToModelPosition(
+  doc: Document,
+  clientX: number,
+  clientY: number,
+): { readonly id: NodeId; readonly offset: number } | null {
+  const caret = caretPositionAtPoint(doc, clientX, clientY);
+  if (!caret) return null;
+  const element =
+    caret.node.nodeType === caret.node.TEXT_NODE
+      ? caret.node.parentElement
+      : (caret.node as Element);
+  const block = element?.closest("[data-engine-block-id]");
+  const id = block?.getAttribute("data-engine-block-id");
+  return id ? { id: id as NodeId, offset: caret.offset } : null;
+}
+
+/** Feature-detect the two browser point-to-caret APIs. */
+function caretPositionAtPoint(
+  doc: Document,
+  clientX: number,
+  clientY: number,
+): { readonly node: Node; readonly offset: number } | null {
+  const withPosition = doc as Document & {
+    caretPositionFromPoint?: (
+      x: number,
+      y: number,
+    ) => { offsetNode: Node; offset: number } | null;
+  };
+  if (typeof withPosition.caretPositionFromPoint === "function") {
+    const position = withPosition.caretPositionFromPoint(clientX, clientY);
+    return position
+      ? { node: position.offsetNode, offset: position.offset }
+      : null;
+  }
+  if (typeof doc.caretRangeFromPoint === "function") {
+    const range = doc.caretRangeFromPoint(clientX, clientY);
+    return range
+      ? { node: range.startContainer, offset: range.startOffset }
+      : null;
+  }
+  return null;
+}
+
+/** Pixel rect of the collapsed caret at an offset inside one block. */
+function caretClientRect(host: HTMLElement, offset: number): DOMRect | null {
+  const textNode = firstTextNode(host);
+  if (!textNode) return host.getBoundingClientRect();
+  const length = textNode.textContent?.length ?? 0;
+  const range = host.ownerDocument.createRange();
+  const at = clampOffset(offset, length);
+  range.setStart(textNode, at);
+  range.setEnd(textNode, at);
+  const rect = range.getBoundingClientRect();
+  return rect.height > 0 || rect.width > 0
+    ? rect
+    : host.getBoundingClientRect();
+}
+
 type OverlayRect = {
   readonly height: number;
   readonly kind: "caret" | "range";
@@ -720,10 +1282,18 @@ function selectionRects(
   if (!root || store.selection?.type !== "text") return [];
   const selection = store.selection;
   const rootRect = root.getBoundingClientRect();
-  const order = store.order;
-  const anchorIndex = order.indexOf(selection.anchor.node);
-  const focusIndex = order.indexOf(selection.focus.node);
-  if (anchorIndex < 0 || focusIndex < 0) return [];
+  /*
+   * Index endpoints through the same document-order text-leaf walk the
+   * clipboard serializer uses (docs/011 §8.5/§13.9), not the top-level body
+   * order. That keeps nested leaves (a list item's text) paintable and skips
+   * object/structural blocks, which carry no text range to paint. Only mounted
+   * leaves produce rects, so offscreen middles are never painted (§8.5).
+   */
+  const leaves = orderedTextLeaves(store);
+  const indexOf = new Map(leaves.map((leaf, index) => [leaf.id, index]));
+  const anchorIndex = indexOf.get(selection.anchor.node);
+  const focusIndex = indexOf.get(selection.focus.node);
+  if (anchorIndex === undefined || focusIndex === undefined) return [];
   const forward =
     anchorIndex < focusIndex ||
     (anchorIndex === focusIndex &&
@@ -736,35 +1306,27 @@ function selectionRects(
     selection.anchor.node === selection.focus.node &&
     selection.anchor.offset === selection.focus.offset;
   if (collapsed) {
-    const node = store.requireTextNode(selection.focus.node);
-    const element = blockRefs.get(node.id);
+    const leaf = leaves[focusIndex]!;
+    const element = blockRefs.get(leaf.id);
     if (!element) return [];
     return caretRectsFromRange(
       element,
       rootRect,
-      node.id,
+      leaf.id,
       selection.focus.offset,
-      node.content.text.length,
+      leaf.node.content.text.length,
     );
   }
   const rects: OverlayRect[] = [];
   for (let index = startIndex; index <= endIndex; index += 1) {
-    const id = order[index];
-    if (!id) continue;
-    const node = store.requireTextNode(id);
-    const element = blockRefs.get(id);
+    const leaf = leaves[index]!;
+    const element = blockRefs.get(leaf.id);
     if (!element) continue;
-    const from = id === start.node ? start.offset : 0;
-    const to = id === end.node ? end.offset : node.content.text.length;
+    const length = leaf.node.content.text.length;
+    const from = leaf.id === start.node ? start.offset : 0;
+    const to = leaf.id === end.node ? end.offset : length;
     rects.push(
-      ...rangeRectsFromText(
-        element,
-        rootRect,
-        id,
-        from,
-        to,
-        node.content.text.length,
-      ),
+      ...rangeRectsFromText(element, rootRect, leaf.id, from, to, length),
     );
   }
   return rects;
@@ -779,14 +1341,21 @@ function caretRectsFromRange(
 ): readonly OverlayRect[] {
   const rects = textRangeClientRects(element, offset, offset);
   if (rects.length > 0) {
-    return rects.map((rect) => ({
-      height: Math.max(18, rect.height),
-      kind: "caret",
-      left: rect.left - rootRect.left,
-      node,
-      top: rect.top - rootRect.top,
-      width: 2,
-    }));
+    return rects.map((rect) => {
+      // The line box includes leading above/below the glyphs; a caret that tall
+      // looks heavy next to a native one. Inset it and center it in the line so
+      // it reads like a real insertion bar (mirrors the spike's caret metrics).
+      const lineHeight = Math.max(14, rect.height);
+      const caretHeight = Math.round(lineHeight * 0.82);
+      return {
+        height: caretHeight,
+        kind: "caret",
+        left: rect.left - rootRect.left,
+        node,
+        top: rect.top - rootRect.top + (lineHeight - caretHeight) / 2,
+        width: 1.5,
+      };
+    });
   }
   return [fallbackCaretRect(element, rootRect, node, offset, textLength)];
 }
@@ -961,5 +1530,9 @@ const blockStyle: CSSProperties = {
   outline: "none",
   padding: "5px 8px",
   position: "relative",
+  // The engine paints selection through model-derived overlay rects, so the
+  // browser's own selection must not compete during a pointer drag (§8.5).
+  userSelect: "none",
+  WebkitUserSelect: "none",
   whiteSpace: "pre-wrap",
 };

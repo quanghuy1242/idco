@@ -528,7 +528,8 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 - [ ] P2 Input + caret + selection spike
 - [x] P3 Model + transactions
 - [x] P4 React view + scheduler/frame loop
-- [ ] P5 Block virtualization
+- [x] P5 Block virtualization
+- [ ] P5.5 Structural editing + commands + public SPI
 - [ ] P6 Heavy objects + bake
 - [ ] P7 Cross-browser / mobile / a11y hardening
 - [ ] P8 Feature parity + index-backed TOC/search + opt-in ship
@@ -628,6 +629,22 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 - **Done when:** AC1–AC5 pass and G1–G6 hold.
 - **Out of scope:** live object editing (objects may render as baked/placeholder only this phase).
 
+#### Phase 5.5 — Structural editing, commands, and the public SPI (medium–large; the "feels like an editor" gate)
+
+- **Why this phase exists:** Phases 3–5 deliver the model, the view, and virtualization, but a reader can still not write prose: pressing Enter does not split a paragraph, Backspace at a block start does not merge, and there is no command layer or public `dispatch(command)` surface. 011 designed all of this (§6.10 the transaction `Mapping`, §6.12 the command compiler, §12 the public SPI) and 011 §16 said to land split/merge "early, with property tests." Phase 3 shipped the step primitives but not the composites, the `Mapping`, the command layer, or the SPI, and no later phase owned them. This phase closes that gap. It is the prerequisite for the toolbar/formatting work in Phase 8.
+- **May touch:** `core/**` (the `Mapping`, command compiler, query registry, split/merge composites, the `OwnedEditorHandle` SPI), `view/**` (key wiring: Enter/Backspace/Delete/Tab, undo/redo, select-all, cut/paste), Ladle stories, `tests/engine/**`, `tests/e2e/**`.
+- **Must not:** bypass the `dispatch` chokepoint (§6.1); expose raw `Step`s on the public surface (commands and compat JSON only, §12.4); reintroduce a whole-document subscription or a runtime structure threshold; regress any Phase 3–5 AC.
+- **Acceptance criteria:**
+  - AC1 split and merge are composite transactions over the existing step set (011 §6.2), not new step kinds: Enter splits the active leaf into two blocks (trailing inline content moves to the new block, marks and atoms preserved); Backspace at offset 0 merges into the previous block; Delete at the end merges the next. Each is one invertible transaction and a property test asserts `apply(inverse) ≡ pre-state` and undo/redo round-trips for split, merge, and split-then-merge.
+  - AC2 the intra-transaction `Mapping` (011 §6.10/§16) lands with property tests for split, merge, move, delete, undo, and redo: a position computed against pre-edit state maps correctly through earlier steps in the same transaction, in node-relative coordinates.
+  - AC3 the command compiler (011 §6.12) is the only public mutation entry: `store.command(c)` compiles a `CommandSpec` to a transaction or returns null (no-op), and a read-only query registry (`isMarkActive`, `canIndent`, …) backs toolbar state. A grep proves the view dispatches commands, not raw step drafts, for structural edits.
+  - AC4 the public `OwnedEditorHandle` (011 §12.2) exists and is the opt-in control surface: `dispatch(command)`, `undo()`, `redo()`, `getSelection`/`setSelection`, `getDocument()`/`getEditorSnapshot()`, `isDirty()`, and an `on("selectionchange"|"dirtychange"|"change")` subscription. A test drives editing entirely through it.
+  - AC5 keyboard editing is wired to commands: Enter/Backspace/Delete/Tab/Shift-Tab, Ctrl/Cmd+Z and +Shift+Z (undo/redo), Ctrl/Cmd+A (select-all over the whole virtualized document), Ctrl/Cmd+X (cut **deletes** the selection and writes the model serialization), Ctrl/Cmd+V (paste inserts plain text at the selection, replacing a range). An e2e drives each as real keyboard interaction, not the diagnostics API.
+  - AC6 list/structural editing behaviors: Tab/Shift-Tab indent and outdent a list item, Enter in a non-empty item creates a sibling item, Enter on an empty item outdents, and Backspace at an item start outdents or merges. Each is a command with a passing test.
+- **Verify:** `pnpm test`; `pnpm exec playwright test tests/e2e/engine-editing.spec.ts`.
+- **Done when:** AC1–AC6 pass and G1–G6 hold.
+- **Out of scope:** rich HTML paste parsing and sanitization (Phase 8), formatting toolbar UI (Phase 8), IME (Phase 7), heavy-object internal editing (Phase 6).
+
 #### Phase 6 — Heavy objects + bake (large; the live-book differentiator)
 
 - **Goal:** atomic heavy objects, baked at rest, one live-edit at a time, no drift.
@@ -654,8 +671,12 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
   - AC2 mobile (webkit emulation): touch selection and on-screen-keyboard editing work; if the native-`contenteditable`-active-block path is used, a round-trip test proves the model stays authoritative.
   - AC3 a11y: the editing region exposes textbox semantics; an automated a11y scan of the surface passes; selection changes are announced.
   - AC4 IME control/selection/character bounds remain correct after scroll and relayout (candidate-window position assertion where testable).
+  - AC5 the engine consumes all three EditContext event streams, not just `textupdate`: `textformatupdate` paints the composition preedit underline (the polyfill and native EditContext both supply `underlineStyle`/`underlineThickness`; the spike's `text-input-controller` is the behavior bar), and `characterboundsupdate`/`updateCharacterBounds` positions the IME candidate window at the caret. A scripted composition asserts an underlined preedit segment renders over the active leaf.
+  - AC6 the engine suppresses the native caret and `::selection` on the editing surface (`caret-color: transparent`, transparent `::selection`) so only the engine-painted caret/overlay is visible, on both the native and polyfill backends (the spike does this; the fresh view must too).
+  - AC7 vertical caret movement keeps a goal column across consecutive ArrowUp/ArrowDown presses through ragged-width lines (the column is remembered until a horizontal move resets it), matching the spike's line-box navigation.
+  - AC8 pointer selection gestures: double-click selects the word and triple-click selects the line/paragraph (via `Intl.Segmenter`), as model selections, with passing tests on chromium/webkit/firefox.
 - **Verify:** `pnpm exec playwright test tests/e2e/engine-*.spec.ts --project=chromium --project=webkit --project=firefox` (the webkit/firefox projects and browser binaries come from Phase 2; do not re-add them here); the a11y scan.
-- **Done when:** AC1–AC4 pass and G1–G6 hold.
+- **Done when:** AC1–AC8 pass and G1–G6 hold.
 - **Out of scope:** new features; this is hardening only.
 
 #### Phase 8 — Feature parity + index-backed TOC/search + opt-in ship (medium–large)
@@ -668,8 +689,10 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
   - AC2 the docs/006 toolbar and object chrome operate on the engine's model selection/focus (formatting commands apply to the model selection, not DOM).
   - AC3 a parity checklist versus the standard editor passes for the live-book surface: lists, marks, tables, links, glossary, comments — each has a passing test.
   - AC4 the engine is exposed as an explicit opt-in API; a test confirms existing callers and the default `RichTextEditor` are unchanged (G6).
+  - AC5 input-affordance parity with the legacy editor: markdown/auto-format shortcuts (`# ` → heading, `- ` → list, `` ` `` → code, smart-quote/auto-pair) compile to commands (built on the Phase 5.5 command layer), and a rich HTML paste parses to the model through the single sanitization boundary (§10.5), with passing tests.
+  - AC6 block-level authoring parity: a slash/insert menu inserts blocks and objects through the registry, and block reorder (drag handle or keyboard move) maps to a `MoveNode` command; each has a passing test and operates on the model, not the DOM.
 - **Verify:** `pnpm check`; `pnpm exec playwright test tests/e2e/engine-toc-search.spec.ts`.
-- **Done when:** AC1–AC4 pass and G1–G6 hold.
+- **Done when:** AC1–AC6 pass and G1–G6 hold.
 - **Out of scope:** auto-default, collaboration.
 
 **Future (gated, not committed):** make the engine the default for chosen workloads, and collaboration groundwork. These are §12 open decisions, decided from data after Phase 8, not scheduled now. The collaboration groundwork has a worked-through brainstorm (docs/014) and a day-one footprint already required in Phase 3 (AC10); what stays gated is the collaboration build itself, not the readiness.

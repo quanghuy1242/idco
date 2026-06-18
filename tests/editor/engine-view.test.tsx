@@ -29,6 +29,7 @@ describe("owned-model React view", () => {
         ref={ref}
         scheduler={scheduler}
         store={store}
+        virtualize={false}
       />,
     );
     const before = ref.current!.diagnostics();

@@ -93,6 +93,7 @@ export type {
   EngineTaskRunResult,
 } from "./scheduler";
 export { createEngineScheduler } from "./scheduler";
+export { collectSelectionText, orderedTextLeaves } from "./selection";
 export {
   ROOT_NODE_ID,
   TransactionBuilder,
