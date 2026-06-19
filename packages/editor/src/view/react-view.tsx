@@ -227,6 +227,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // the floating toolbar mid-drag) and whether this is a touch-first device (so
   // grips never paint on desktop).
   const [touchInteracting, setTouchInteracting] = useState(false);
+  const [touchCaretActionsOpen, setTouchCaretActionsOpen] = useState(false);
   const isTouchDevice = useTouchDevice();
   // The off-thread bake/index service (docs/010 §7.5). The view derives the
   // document index (TOC + plain-text) in the worker so the main thread is never
@@ -787,6 +788,30 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     [beginDrag, store],
   );
 
+  const isTouchOnCollapsedCaret = useCallback(
+    (clientX: number, clientY: number): boolean => {
+      const selection = store.selection;
+      if (
+        selection?.type !== "text" ||
+        selection.anchor.node !== selection.focus.node ||
+        selection.anchor.offset !== selection.focus.offset
+      ) {
+        return false;
+      }
+      const element = registryRef.current.blockRefs.get(selection.focus.node);
+      if (!element) return false;
+      const rect = caretClientRect(element, selection.focus.offset);
+      if (!rect) return false;
+      return (
+        clientX >= rect.left - TOUCH_CARET_HIT_SLOP_X &&
+        clientX <= rect.right + TOUCH_CARET_HIT_SLOP_X &&
+        clientY >= rect.top - TOUCH_CARET_HIT_SLOP_Y &&
+        clientY <= rect.bottom + TOUCH_CARET_HIT_SLOP_Y
+      );
+    },
+    [store],
+  );
+
   const touchActions = useMemo<TouchSelectionActions>(
     () => ({
       copy: () => {
@@ -827,10 +852,16 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    let mode: "idle" | "pressing" | "scrolling" | "selecting" | "handle" =
-      "idle";
+    let mode:
+      | "idle"
+      | "pressing"
+      | "scrolling"
+      | "selecting"
+      | "handle"
+      | "caret" = "idle";
     let startX = 0;
     let startY = 0;
+    let dragActivated = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const clearTimer = () => {
       if (timer !== null) {
@@ -842,9 +873,17 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       if (event.touches.length !== 1) return; // ignore pinch/multi-touch
       const touch = event.touches[0]!;
       const target = touch.target as Element | null;
-      if (target?.closest("[data-engine-sel-toolbar]")) return; // button click
+      if (
+        target?.closest(
+          "[data-engine-sel-toolbar], [data-engine-caret-toolbar]",
+        )
+      ) {
+        return; // action popover button press
+      }
+      setTouchCaretActionsOpen(false);
       startX = touch.clientX;
       startY = touch.clientY;
+      dragActivated = false;
       const handle = target?.closest("[data-engine-sel-handle]");
       if (handle) {
         event.preventDefault();
@@ -854,7 +893,6 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
             ? "start"
             : "end",
         );
-        handleDragMove(startX, startY);
         setTouchInteracting(true);
         return;
       }
@@ -867,6 +905,11 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       timer = setTimeout(() => {
         timer = null;
         if (mode !== "pressing") return;
+        if (isTouchOnCollapsedCaret(startX, startY)) {
+          mode = "caret";
+          setTouchCaretActionsOpen(true);
+          return;
+        }
         if (selectWordAtPoint(startX, startY)) {
           mode = "selecting";
           setTouchInteracting(true);
@@ -888,7 +931,31 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       }
       if (mode === "selecting" || mode === "handle") {
         event.preventDefault(); // claim the gesture from the scroller
+        if (!dragActivated) {
+          const threshold =
+            mode === "handle"
+              ? TOUCH_HANDLE_DRAG_START_PX
+              : TOUCH_SELECTION_DRAG_START_PX;
+          if (
+            Math.hypot(touch.clientX - startX, touch.clientY - startY) <
+            threshold
+          ) {
+            return;
+          }
+          dragActivated = true;
+        }
         handleDragMove(touch.clientX, touch.clientY);
+        return;
+      }
+      if (mode === "caret") {
+        event.preventDefault();
+        if (
+          Math.hypot(touch.clientX - startX, touch.clientY - startY) >
+          TOUCH_SELECTION_DRAG_START_PX
+        ) {
+          setTouchCaretActionsOpen(false);
+          mode = "idle";
+        }
       }
     };
     const onEnd = (event: TouchEvent) => {
@@ -898,8 +965,15 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
         caretAtPointAndFocus(startX, startY);
       } else if (mode === "selecting" || mode === "handle") {
         event.preventDefault(); // keep the range; no synthesized mousedown
+        const touch = event.changedTouches[0];
+        if (touch && dragActivated) {
+          lastPointerRef.current = { x: touch.clientX, y: touch.clientY };
+          extendDragToPointer();
+        }
         endDrag();
         setTouchInteracting(false);
+      } else if (mode === "caret") {
+        event.preventDefault(); // keep the paste popover; no synthesized tap
       }
       mode = "idle";
     };
@@ -908,6 +982,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       if (mode === "selecting" || mode === "handle") {
         endDrag();
         setTouchInteracting(false);
+      } else if (mode === "caret") {
+        setTouchCaretActionsOpen(false);
       }
       mode = "idle";
     };
@@ -926,7 +1002,9 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     armHandleDrag,
     caretAtPointAndFocus,
     endDrag,
+    extendDragToPointer,
     handleDragMove,
+    isTouchOnCollapsedCaret,
     selectWordAtPoint,
   ]);
 
@@ -1181,8 +1259,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
         {isTouchDevice && (
           <TouchSelectionLayer
             actions={touchActions}
+            caretActionsOpen={touchCaretActionsOpen}
             containerRef={rootRef}
             interacting={touchInteracting}
+            onCaretActionsOpenChange={setTouchCaretActionsOpen}
             registry={registryRef.current}
             scheduler={scheduler}
             store={store}
@@ -1234,8 +1314,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
         {isTouchDevice && (
           <TouchSelectionLayer
             actions={touchActions}
+            caretActionsOpen={touchCaretActionsOpen}
             containerRef={contentRef}
             interacting={touchInteracting}
+            onCaretActionsOpenChange={setTouchCaretActionsOpen}
             registry={registryRef.current}
             scheduler={scheduler}
             store={store}
@@ -1264,6 +1346,18 @@ const CARET_REVEAL_MARGIN_PX = 24;
 const TOUCH_LONG_PRESS_MS = 450;
 // Movement before the long-press fires that reclassifies the gesture as a scroll.
 const TOUCH_MOVE_CANCEL_PX = 10;
+// After long-press has selected text, require a deliberate move before extending
+// the range. Without this post-long-press slop, normal finger drift during the
+// hold turns into a range drag, which feels too light compared with native text.
+const TOUCH_SELECTION_DRAG_START_PX = 18;
+// Grip drags should start sooner than long-press drags, but still not jump from
+// the tiny movement caused by touching the handle.
+const TOUCH_HANDLE_DRAG_START_PX = 8;
+// Hit slop around the collapsed caret for the native-style "hold caret -> Paste"
+// gesture. The caret is engine-painted and very thin, so this intentionally
+// targets the line around it rather than the one-pixel bar.
+const TOUCH_CARET_HIT_SLOP_X = 24;
+const TOUCH_CARET_HIT_SLOP_Y = 30;
 // How far above the fingertip a grip drag hit-tests, so the resolved point lands
 // on the selected line instead of under the finger/grip covering it.
 const HANDLE_TOUCH_LIFT_PX = 28;

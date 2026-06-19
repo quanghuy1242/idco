@@ -9,10 +9,21 @@
  * the caret/selection overlay paints from) and renders grips at the visual range
  * ends plus a Copy/Cut/Paste/format bar above it. All gesture handling lives in
  * `react-view.tsx`'s touch controller, which finds these elements by their
- * `data-engine-sel-handle` / `data-engine-sel-toolbar` attributes; the grips are
- * inert markers, not their own listeners, so scroll-vs-select stays one decision.
+ * `data-engine-sel-handle` attributes; the grips are inert markers, not their
+ * own listeners, so scroll-vs-select stays one decision. Action chrome is an
+ * `@idco/ui` anchored popover (React Aria `Popover` + `Dialog`, DaisyUI tokens),
+ * not an editor-local floating div: outside dismissal, focus, portal placement,
+ * and viewport flipping all stay in the shared overlay primitive.
  */
-import { useEffect, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+  type ReactNode,
+} from "react";
+import { AnchoredPopover, Button } from "@quanghuy1242/idco-ui";
 import type { EditorStore, EngineScheduler, TextMarkKind } from "../core";
 import { selectionRects } from "./selection-overlay";
 import { useSelectionFrameVersion } from "./store-hooks";
@@ -27,11 +38,6 @@ export type TouchSelectionActions = {
 
 const HANDLE_HIT = 40;
 const HANDLE_DOT = 16;
-const TOOLBAR_GAP = 10;
-
-/** Keep a press on the toolbar/buttons from collapsing the model selection. */
-const suppressMouseDown = (event: { preventDefault: () => void }): void =>
-  event.preventDefault();
 
 /** True on a touch-capable device, so grips show for touch but never on a pure
  * mouse desktop. Combines the coarse-pointer media query with a touch-points
@@ -62,6 +68,9 @@ export function TouchSelectionLayer(props: {
   readonly actions: TouchSelectionActions;
   /** True while a grip/long-press drag is live; hides the toolbar mid-drag. */
   readonly interacting: boolean;
+  /** True after holding the collapsed caret; shows the paste affordance. */
+  readonly caretActionsOpen: boolean;
+  readonly onCaretActionsOpenChange: (isOpen: boolean) => void;
 }) {
   const { store, scheduler, containerRef, registry, actions, interacting } =
     props;
@@ -75,13 +84,49 @@ export function TouchSelectionLayer(props: {
   const collapsed =
     selection.anchor.node === selection.focus.node &&
     selection.anchor.offset === selection.focus.offset;
-  if (collapsed) return null;
 
-  const ranges = selectionRects(
-    store,
-    containerRef.current,
-    registry.blockRefs,
-  ).filter((rect) => rect.kind === "range");
+  const rects = selectionRects(store, containerRef.current, registry.blockRefs);
+
+  if (collapsed) {
+    const caret = rects.find((rect) => rect.kind === "caret");
+    if (!caret) return null;
+    return (
+      <div
+        data-engine-touch-selection=""
+        style={{ inset: 0, pointerEvents: "none", position: "absolute" }}
+      >
+        <PopoverAnchor
+          left={caret.left + caret.width / 2}
+          top={caret.top + caret.height}
+          variant="caret"
+        >
+          {(anchorRef) => (
+            <AnchoredPopover
+              ariaLabel="Caret actions"
+              isNonModal
+              isOpen={props.caretActionsOpen && !interacting}
+              onOpenChange={props.onCaretActionsOpenChange}
+              placement="top"
+              shouldCloseOnInteractOutside={() => true}
+              triggerRef={anchorRef}
+            >
+              <ActionRow dataAttr="data-engine-caret-toolbar">
+                <ActionButton
+                  label="Paste"
+                  onPress={() => {
+                    actions.paste();
+                    props.onCaretActionsOpenChange(false);
+                  }}
+                />
+              </ActionRow>
+            </AnchoredPopover>
+          )}
+        </PopoverAnchor>
+      </div>
+    );
+  }
+
+  const ranges = rects.filter((rect) => rect.kind === "range");
   if (ranges.length === 0) return null;
 
   const first = ranges[0]!;
@@ -99,18 +144,17 @@ export function TouchSelectionLayer(props: {
   const minLeft = Math.min(...ranges.map((r) => r.left));
   const maxRight = Math.max(...ranges.map((r) => r.left + r.width));
   const center = (minLeft + maxRight) / 2;
-  const toolbarTop = Math.max(0, first.top - TOOLBAR_GAP - 40);
+  const anchorTop = first.top;
 
   return (
     <div
-      aria-hidden="true"
       data-engine-touch-selection=""
       style={{ inset: 0, pointerEvents: "none", position: "absolute" }}
     >
       <Handle end="start" point={startPoint} />
       <Handle end="end" point={endPoint} />
       {!interacting && (
-        <SelectionToolbar actions={actions} center={center} top={toolbarTop} />
+        <SelectionToolbar actions={actions} center={center} top={anchorTop} />
       )}
     </div>
   );
@@ -123,6 +167,7 @@ function Handle(props: {
   const { end, point } = props;
   return (
     <div
+      aria-hidden="true"
       data-engine-sel-handle={end}
       style={{
         alignItems: "flex-start",
@@ -160,69 +205,111 @@ function SelectionToolbar(props: {
   readonly top: number;
 }) {
   const { actions, center, top } = props;
+  const selectionKey = useMemo(
+    () => `${Math.round(center)}:${Math.round(top)}`,
+    [center, top],
+  );
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => setDismissed(false), [selectionKey]);
+
+  return (
+    <PopoverAnchor left={center} top={top} variant="selection">
+      {(anchorRef) => (
+        <AnchoredPopover
+          ariaLabel="Selected text actions"
+          isNonModal
+          isOpen={!dismissed}
+          onOpenChange={(open) => {
+            if (!open) setDismissed(true);
+          }}
+          placement="top"
+          shouldCloseOnInteractOutside={() => true}
+          triggerRef={anchorRef}
+        >
+          <ActionRow dataAttr="data-engine-sel-toolbar">
+            <ActionButton label="Copy" onPress={actions.copy} />
+            <ActionButton label="Cut" onPress={actions.cut} />
+            <ActionButton label="Paste" onPress={actions.paste} />
+            <ActionButton
+              label="B"
+              onPress={() => actions.toggleMark("bold")}
+              title="Bold"
+            />
+            <ActionButton
+              label="I"
+              onPress={() => actions.toggleMark("italic")}
+              title="Italic"
+            />
+          </ActionRow>
+        </AnchoredPopover>
+      )}
+    </PopoverAnchor>
+  );
+}
+
+function PopoverAnchor(props: {
+  readonly left: number;
+  readonly top: number;
+  readonly variant: "caret" | "selection";
+  readonly children: (ref: RefObject<HTMLElement | null>) => ReactNode;
+}) {
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  return (
+    <>
+      <span
+        ref={anchorRef}
+        aria-hidden="true"
+        data-engine-touch-popover-anchor={props.variant}
+        style={{
+          height: 1,
+          left: props.left,
+          pointerEvents: "none",
+          position: "absolute",
+          top: props.top,
+          transform: "translate(-50%, -50%)",
+          width: 1,
+        }}
+      />
+      {props.children(anchorRef)}
+    </>
+  );
+}
+
+function ActionRow(props: {
+  readonly children: ReactNode;
+  readonly dataAttr: "data-engine-caret-toolbar" | "data-engine-sel-toolbar";
+}) {
   return (
     <div
-      data-engine-sel-toolbar=""
-      onMouseDown={suppressMouseDown}
-      style={{
-        background: "Canvas",
-        borderRadius: 8,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-        color: "CanvasText",
-        display: "flex",
-        gap: 2,
-        left: center,
-        padding: 4,
-        pointerEvents: "auto",
-        position: "absolute",
-        top,
-        transform: "translateX(-50%)",
-        zIndex: 2,
-      }}
+      {...{ [props.dataAttr]: "" }}
+      className="flex items-center gap-1"
+      onPointerDown={(event) => event.stopPropagation()}
     >
-      <ToolbarButton label="Copy" onPress={actions.copy} />
-      <ToolbarButton label="Cut" onPress={actions.cut} />
-      <ToolbarButton label="Paste" onPress={actions.paste} />
-      <ToolbarButton
-        label="B"
-        onPress={() => actions.toggleMark("bold")}
-        title="Bold"
-      />
-      <ToolbarButton
-        label="I"
-        onPress={() => actions.toggleMark("italic")}
-        title="Italic"
-      />
+      {props.children}
     </div>
   );
 }
 
-function ToolbarButton(props: {
+function ActionButton(props: {
   readonly label: string;
   readonly onPress: () => void;
   readonly title?: string;
 }) {
   const { label, onPress, title } = props;
   return (
-    <button
+    <span
       data-engine-sel-action={title ?? label}
-      onClick={onPress}
-      onMouseDown={suppressMouseDown}
-      style={{
-        background: "transparent",
-        border: "none",
-        borderRadius: 6,
-        color: "inherit",
-        cursor: "pointer",
-        font: "inherit",
-        fontSize: 14,
-        minWidth: 36,
-        padding: "6px 10px",
-      }}
-      title={title ?? label}
-      type="button"
+      onPointerDown={(event) => event.stopPropagation()}
     >
-      {label}
-    </button>
+      <Button
+        ariaLabel={title ?? label}
+        onClick={onPress}
+        size="sm"
+        tooltip={title}
+        variant="ghost"
+      >
+        {label}
+      </Button>
+    </span>
   );
 }

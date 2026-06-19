@@ -71,6 +71,12 @@ export function AnchoredPopover(props: {
   readonly placement?: Placement;
   readonly ariaLabel?: string;
   /**
+   * Keep the page/editor outside the popover interactive. Use sparingly for
+   * anchored controls like editor chrome where the anchor surface must keep
+   * handling pointer gestures while the popover is open.
+   */
+  readonly isNonModal?: PopoverProps["isNonModal"];
+  /**
    * Whether an outside interaction dismisses the popover. Default React Aria
    * behavior closes on any outside press; pass a predicate (e.g. keep open while
    * interacting within a host region) for non-modal surfaces like an in-editor
@@ -84,11 +90,13 @@ export function AnchoredPopover(props: {
     onOpenChange,
     children,
     placement = "bottom",
+    isNonModal,
     shouldCloseOnInteractOutside,
   } = props;
   return (
     <AriaPopover
       className={panelClass}
+      isNonModal={isNonModal}
       isOpen={isOpen}
       offset={4}
       onOpenChange={onOpenChange}

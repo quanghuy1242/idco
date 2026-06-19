@@ -276,6 +276,34 @@ test("AC8 two grips render for a touch selection and dragging one extends it", a
   expect(after.focus!.offset).toBeGreaterThan(before.focus!.offset);
 });
 
+test("AC8 holding the collapsed caret opens the paste popover", async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "WebKit cannot construct synthetic Touch events; AC8 runs on mobile-chromium.",
+  );
+  await open(page);
+  const block = page.locator("[data-engine-text-id]").nth(1);
+  await block.tap();
+  await expect(page.locator("[data-engine-caret]")).toBeVisible();
+
+  const caretBox = (await page.locator("[data-engine-caret]").boundingBox())!;
+  const x = caretBox.x + caretBox.width / 2;
+  const y = caretBox.y + caretBox.height / 2;
+  await touch(page, "touchstart", x, y);
+  await page.waitForTimeout(550);
+  await touch(page, "touchend", x, y);
+
+  const popover = page.locator("[data-engine-caret-toolbar]");
+  await expect(popover).toBeVisible();
+  await expect(popover.getByRole("button", { name: "Paste" })).toBeVisible();
+  await expect(
+    page.getByRole("dialog", { name: "Caret actions" }),
+  ).toBeVisible();
+});
+
 test("AC8 the selection toolbar cuts the selected word", async ({
   browserName,
   page,
@@ -294,7 +322,10 @@ test("AC8 the selection toolbar cuts the selected word", async ({
   // Fire the button's action directly: the floating bar repaints on the
   // selection frame lane (like the caret overlay), so Playwright's tap-stability
   // wait never settles; `dispatchEvent` exercises the same onClick wiring.
-  await page.locator('[data-engine-sel-action="Cut"]').dispatchEvent("click");
+  await page
+    .locator("[data-engine-sel-toolbar]")
+    .getByRole("button", { name: "Cut" })
+    .dispatchEvent("click");
 
   // The selected word is gone (clipboard write may be blocked in CI, but the
   // model delete runs regardless).
@@ -316,7 +347,10 @@ test("AC8 the selection toolbar bolds the selected word", async ({
   const box = (await block.boundingBox())!;
   await longPressWord(page, box.x + 24, box.y + 8);
 
-  await page.locator('[data-engine-sel-action="Bold"]').dispatchEvent("click");
+  await page
+    .locator("[data-engine-sel-toolbar]")
+    .getByRole("button", { name: "Bold" })
+    .dispatchEvent("click");
 
   // A bolded leaf re-renders with a semantic <strong> over the marked run.
   await expect(block.locator("strong")).toHaveCount(1);
