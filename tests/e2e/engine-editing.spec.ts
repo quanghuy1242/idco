@@ -103,9 +103,12 @@ test("Backspace at the start of a block merges it into the previous block", asyn
 
   await page.keyboard.press("Backspace");
 
+  // The merge folds the previous block into the FOCUSED block, which survives
+  // (B′) so the editable element the caret is bound to is never destroyed. The
+  // previous block is the one removed; the focused block holds the joined text.
   const after = await diag(page);
-  expect(after.order).not.toContain(secondId);
-  expect(after.blockTexts[firstId]).toBe(joined);
+  expect(after.order).not.toContain(firstId);
+  expect(after.blockTexts[secondId]).toBe(joined);
 });
 
 test("clicking the right edge of a block places the caret near the line end, not adrift", async ({

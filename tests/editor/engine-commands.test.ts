@@ -179,9 +179,14 @@ describe("owned-model commands (Phase 5.5)", () => {
 
     store.command({ type: "delete-backward" });
 
-    expect(store.order).toEqual([a.id]);
-    expect(textOf(store, a.id)).toBe("hello world");
-    const merged = store.requireTextNode(a.id);
+    // Backward merge keeps the FOCUSED leaf (`b`) alive and folds `a` into its
+    // head, so the editable element the caret/keyboard is bound to is never
+    // destroyed (no mobile keyboard flicker). The content, caret, and shifted
+    // mark range are identical to a merge-into-previous; only the surviving id
+    // changes from `a` to `b`.
+    expect(store.order).toEqual([b.id]);
+    expect(textOf(store, b.id)).toBe("hello world");
+    const merged = store.requireTextNode(b.id);
     expect(merged.marks).toHaveLength(1);
     expect(resolvedRange(merged, merged.marks[0]!)).toEqual([6, 11]);
     const sel = store.selection as { focus: { offset: number } };
@@ -197,6 +202,49 @@ describe("owned-model commands (Phase 5.5)", () => {
     store.command({ type: "delete-forward" });
     expect(store.order).toEqual([ids[0]!]);
     expect(textOf(store, ids[0]!)).toBe("helloworld");
+  });
+
+  it("backward merge keeps the focused leaf but adopts the previous block's type/attrs", () => {
+    const allocator = createIdAllocator(CLIENT);
+    const heading = makeTextNode({
+      attrs: { tag: "h2" },
+      content: allocator.createTextSlice("Title"),
+      id: allocator.createNodeId(),
+      type: "heading",
+    });
+    const para = makeTextNode({
+      content: allocator.createTextSlice("body"),
+      id: allocator.createNodeId(),
+    });
+    const store = createEditorStore({
+      allocator,
+      snapshot: {
+        body: {
+          blocks: { [heading.id]: heading, [para.id]: para },
+          order: [heading.id, para.id],
+        },
+        settings: {},
+        version: 1,
+      },
+    });
+    const before = store.toSnapshot();
+    caretAt(store, para.id, 0);
+
+    store.command({ type: "delete-backward" });
+
+    // The focused paragraph survives (its element/keyboard binding is kept), but
+    // it adopts the heading's block type and attrs so the merged block reads as a
+    // heading — the merge-into-previous result, with the focused id retained.
+    expect(store.order).toEqual([para.id]);
+    const merged = store.requireTextNode(para.id);
+    expect(merged.type).toBe("heading");
+    expect(merged.attrs?.tag).toBe("h2");
+    expect(merged.content.text).toBe("Titlebody");
+    const sel = store.selection as { focus: { offset: number } };
+    expect(sel.focus.offset).toBe(5);
+
+    store.undo();
+    expect(store.toSnapshot()).toEqual(before);
   });
 
   it("deletes a selection that spans two blocks and inverts (delete AC1)", () => {
@@ -298,11 +346,12 @@ describe("intra-transaction Mapping (Phase 5.5 AC2)", () => {
     const tailId = store.order[1]!;
     expect(textOf(store, tailId)).toBe(" world");
 
-    // Merge produces a target-relative position for a source-node position.
+    // Backward merge keeps the focused leaf and folds the previous one into it;
+    // a position in the removed previous leaf redirects into the survivor.
     const { store: s2, ids: ids2 } = paragraphStore(["hello", "world"]);
     caretAt(s2, ids2[1]!, 0);
     s2.command({ type: "delete-backward" });
-    expect(textOf(s2, ids2[0]!)).toBe("helloworld");
+    expect(textOf(s2, ids2[1]!)).toBe("helloworld");
   });
 
   it("leaves an offset inside a moved node unchanged (move maps to identity)", () => {

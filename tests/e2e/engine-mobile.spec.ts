@@ -13,6 +13,7 @@ const API = "__IDCO_ENGINE_VIEW_API__";
 
 type Diag = {
   blockTexts: Record<string, string>;
+  order: string[];
   selection: {
     type: string;
     focus?: { node: string; offset: number };
@@ -117,18 +118,16 @@ test("AC2 a range selection on mobile is model-authoritative, not DOM-driven", a
   ).toBeGreaterThan(0);
 });
 
-test("AC2 cross-block Backspace keeps editing live on the survivor without a re-tap", async ({
+test("AC2 cross-block Backspace keeps the focused block alive so editing never leaves it", async ({
   page,
 }) => {
-  // Cross-block Backspace merges the focused block into its predecessor, which
-  // unmounts the focused block. The engine focuses the survivor *synchronously*,
-  // in the same gesture, before React commits that unmount (B1) — so a focused
-  // editable is always in the DOM and the on-screen keyboard never sees a
-  // focusless moment to dismiss-then-reopen. The sub-frame flicker timing is not
-  // observable from Playwright; what this guards is the continuity property that
-  // would break if focus were lost-and-not-restored or restored to the wrong
-  // block — editing continues on the survivor with no re-tap, and the typed
-  // glyph lands at the merge point.
+  // A cross-block Backspace folds the previous block into the FOCUSED block,
+  // which survives (B′) — the editable element the on-screen keyboard is bound to
+  // is never destroyed, so the keyboard has no reason to dismiss-then-reopen and
+  // DOM focus never moves. The sub-frame flicker timing is not observable from
+  // Playwright; what this guards is the property that makes it impossible: the
+  // focused block keeps the model caret and DOM focus across the merge, and
+  // typing continues in it with no re-tap, the glyph landing at the merge point.
   await open(page);
   const blocks = page.locator("[data-engine-block-id]");
   const firstId = (await blocks.nth(1).getAttribute("data-engine-block-id"))!;
@@ -154,22 +153,26 @@ test("AC2 cross-block Backspace keeps editing live on the survivor without a re-
 
   await page.keyboard.press("Backspace");
 
-  // The survivor (first block) now holds both the model caret and DOM focus.
+  // The previous block is gone; the focused (second) block survived and still
+  // holds both the model caret and DOM focus — no hand-off happened at all.
+  await expect
+    .poll(async () => (await diag(page)).order.includes(firstId))
+    .toBe(false);
   await expect
     .poll(async () => (await diag(page)).selection?.focus?.node)
-    .toBe(firstId);
+    .toBe(secondId);
   await expect
     .poll(async () =>
       page.evaluate(() =>
         document.activeElement?.getAttribute("data-engine-block-id"),
       ),
     )
-    .toBe(firstId);
+    .toBe(secondId);
 
   // Typing right after the merge — no second tap — proves input focus stayed
-  // live across the boundary; the glyph sits at the join offset in the survivor.
+  // live in the same block; the glyph sits at the join offset.
   await page.keyboard.type("X");
   await expect
-    .poll(async () => (await diag(page)).blockTexts[firstId] ?? "")
+    .poll(async () => (await diag(page)).blockTexts[secondId] ?? "")
     .toBe(firstText + "X" + secondText);
 });

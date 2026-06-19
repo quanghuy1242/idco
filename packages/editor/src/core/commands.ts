@@ -340,13 +340,41 @@ function mergeWithNeighbor(
       return compileIndent(store, "outdent");
     return null;
   }
-  const target = direction === "backward" ? neighbor : node;
-  const source = direction === "backward" ? node : neighbor;
   const tr = store.transaction();
-  const joinOffset = target.content.text.length;
-  mergeLeafInto(tr, store, target, source, 0);
-  const finalContent = concatContent(target.content, source.content);
-  const focus = pointAtOffset(target.id, finalContent, joinOffset);
+  // Keep the FOCUSED leaf (`node`) as the surviving node so a cross-block merge
+  // never removes the editable element the caret and the OS keyboard are bound
+  // to. Destroying a just-focused EditContext host makes mobile re-evaluate the
+  // soft keyboard (the Android flicker on the native input path), and handing
+  // focus to a different leaf mid-autorepeat re-seeds a fresh controller (the
+  // held-Backspace caret glitch on the polyfill path). Forward Delete already
+  // merges the next leaf *into* `node`; backward Backspace folds the previous
+  // leaf into `node`'s head instead of the reverse, with `node` adopting the
+  // previous leaf's block type/attrs so "Backspace a paragraph into a heading"
+  // still yields a heading (merge-into-previous semantics).
+  if (direction === "forward") {
+    const joinOffset = node.content.text.length;
+    mergeLeafInto(tr, store, node, neighbor, 0);
+    const finalContent = concatContent(node.content, neighbor.content);
+    const focus = pointAtOffset(node.id, finalContent, joinOffset);
+    return tr.setSelection({ anchor: focus, focus, type: "text" });
+  }
+  // Backward. Fold in place only when the previous leaf is the immediately
+  // adjacent block. If a non-text node (an object/structural block) sits between
+  // them, `previousTextLeaf` reached across it, so keep the old merge-into-
+  // previous to leave the merged content on the same side of that node as before
+  // — a rare case where we accept removing the focused leaf to preserve order.
+  const adjacent =
+    store.order.indexOf(neighbor.id) === store.order.indexOf(node.id) - 1;
+  const joinOffset = neighbor.content.text.length;
+  if (!adjacent) {
+    mergeLeafInto(tr, store, neighbor, node, 0);
+    const finalContent = concatContent(neighbor.content, node.content);
+    const focus = pointAtOffset(neighbor.id, finalContent, joinOffset);
+    return tr.setSelection({ anchor: focus, focus, type: "text" });
+  }
+  mergeHeadInto(tr, store, node, neighbor);
+  const finalContent = concatContent(neighbor.content, node.content);
+  const focus = pointAtOffset(node.id, finalContent, joinOffset);
   return tr.setSelection({ anchor: focus, focus, type: "text" });
 }
 
@@ -394,6 +422,67 @@ function mergeLeafInto(
       ? { node: target.id, offset: targetLen + (pos.offset - srcFrom) }
       : undefined,
   );
+}
+
+/**
+ * The prepend mirror of `mergeLeafInto`: fold `head`'s content onto the FRONT of
+ * `survivor` (the focused leaf), move `head`'s marks into the survivor's new
+ * prefix, have the survivor adopt `head`'s block type/attrs, then remove `head`.
+ * Used by a backward merge that must keep the focused leaf alive so a cross-block
+ * Backspace never destroys the editable element the OS keyboard is bound to.
+ */
+function mergeHeadInto(
+  tr: TransactionBuilder,
+  store: EditorStore,
+  survivor: TextLeafNode,
+  head: TextLeafNode,
+): void {
+  const headLen = head.content.text.length;
+  const headSlice = sliceTextContent(head.content, 0, headLen);
+  // Prepend `head`'s content (char ids preserved) at the survivor's start; the
+  // replace-text remap shifts the survivor's own marks right by `headLen`.
+  tr.spliceText({ at: 0, inserted: headSlice, node: survivor.id, removed: "" });
+  const mergedContent = concatContent(head.content, survivor.content);
+  // `head`'s marks now occupy [0, headLen) of the survivor (no offset shift).
+  for (const mark of clipMarks(head.marks, head.content, 0, headLen, 0)) {
+    tr.addMark(survivor.id, reanchorMark(mark, mergedContent));
+  }
+  // Adopt `head`'s block type and attributes (merge-into-previous semantics).
+  if (survivor.type !== head.type) {
+    tr.push({
+      from: survivor.type,
+      node: survivor.id,
+      to: head.type,
+      type: "set-node-type",
+    });
+  }
+  for (const key of unionKeys(survivor.attrs, head.attrs)) {
+    const from = survivor.attrs?.[key];
+    const to = head.attrs?.[key];
+    if (JSON.stringify(from) !== JSON.stringify(to)) {
+      tr.push({ from, key, node: survivor.id, to, type: "set-node-attr" });
+    }
+  }
+  const entry = store.parentEntry(head.id);
+  if (entry) tr.removeNode(entry.parent, entry.index, head);
+  // Positions inside the removed `head` map to the same offset in the survivor
+  // (head became the survivor's prefix).
+  tr.redirect((pos) =>
+    pos.node === head.id
+      ? { node: survivor.id, offset: pos.offset }
+      : undefined,
+  );
+}
+
+/** The union of the keys present on either attribute record. */
+function unionKeys(
+  a: Readonly<Record<string, JsonValue>> | undefined,
+  b: Readonly<Record<string, JsonValue>> | undefined,
+): readonly string[] {
+  const keys = new Set<string>();
+  if (a) for (const key of Object.keys(a)) keys.add(key);
+  if (b) for (const key of Object.keys(b)) keys.add(key);
+  return [...keys];
 }
 
 /**

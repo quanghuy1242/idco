@@ -429,18 +429,23 @@ export function EngineTextBlock(props: {
     [node.id, requestFocus, revealBlock, store, syncSelectionIntoEditContext],
   );
 
-  // After a command/undo/redo moves the caret, focus and reveal the block it
-  // now lives in. We try synchronously first (B1): when an edit removes the
-  // focused block and merges into an already-mounted neighbour (cross-block
-  // Backspace/Delete, delete-selection), focusing the surviving block *now* — in
-  // this same gesture, before React commits the unmount of the removed block —
-  // keeps a focused editable in the DOM the entire time. A deferred focus runs a
-  // frame *after* React has unmounted the still-focused removed block, leaving a
-  // moment with nothing focused; on mobile that collapses the soft keyboard and
-  // re-opens it (the Android flicker, native + polyfill alike). When the caret's
-  // destination does not exist yet — a split's freshly-created block, not mounted
-  // until React commits — the synchronous attempt finds no element and we fall
-  // back to the next frame, the original behaviour.
+  // After a command/undo/redo moves the caret to a *different* block, focus and
+  // reveal it. We try synchronously first (B1): focusing the destination now — in
+  // this same gesture, before React commits any unmount — closes the focusless
+  // gap a deferred focus would leave, so on the polyfill path the OS keyboard's
+  // hidden textarea hands off without a re-tap, and any focus-switching command
+  // (the non-adjacent backward-merge fallback, cut/delete-selection, undo) keeps
+  // editing live. When the destination does not exist yet — a split's freshly-
+  // created block, not mounted until React commits — the synchronous attempt
+  // finds no element and we fall back to the next frame, the original behaviour.
+  //
+  // B1 does NOT by itself stop the native (non-polyfill) keyboard flicker on a
+  // cross-block merge: that flicker comes from *removing* the EditContext host
+  // the keyboard is bound to, which a synchronous focus elsewhere cannot prevent.
+  // The cross-block Backspace case is handled upstream in the merge command
+  // (`mergeWithNeighbor`/`mergeHeadInto`), which keeps the focused leaf alive so
+  // nothing the keyboard is bound to is destroyed — there the caret stays in this
+  // same node and the `focusNode === node.id` branch below just re-syncs it.
   const focusSelectionSoon = useCallback(() => {
     const apply = (): boolean => {
       const sel = store.selection;
