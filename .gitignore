@@ -5,3 +5,8 @@ test-results
 .ladle/build
 .wrangler
 .DS_Store
+
+# Local SQLite data dump (Payload export used for investigation; never commit)
+payloadcms.db
+payloadcms.db-shm
+payloadcms.db-wal

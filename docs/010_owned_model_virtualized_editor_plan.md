@@ -23,6 +23,8 @@
 > Foundation contract:
 >
 > - `docs/011_foundation_dsa_owned_model_editor.md` is the **data-structure and algorithm foundation** under this plan, written after it. **Division of labor:** this document (010) owns the motivation, the product thesis, the generic architecture path, and the phasing; 011 owns the foundation — the node model, the coordinate system, the mutation algebra, the history model, and the selection model. **Where the two disagree on a foundation detail, 011 wins.** 011 explicitly supersedes 010 §7.2 (flat-store tilt → normalized node graph) and 010 §5.5/§7.4 (hand-paint-as-baseline emphasis → engine overlay rects); see 011 §15 for the full correction list. The sections below that touch those areas carry an inline "→ 011" pointer; treat 011 as authoritative there.
+> - `docs/016_node_spi_and_pluggable_blocks.md` is the **node SPI** — the runnable contract realizing 011 §2.3/§2.7/§6.5: paired `NodeDefinition` (core) + `NodeView` (view), the object lifecycle, and `registerNode`. It is the authority for how a block/object node renders, edits live, and registers. Phase 8 fills its optional slots without reshaping it.
+> - `docs/017_pre_phase_8_plan.md` is the **pre-Phase-8 execution plan** — the bounded, behavior-preserving pass (view decompose, the 016 SPI lift, two latent-bug fixes, the Payload-dialect decision) that must complete before Phase 8 begins.
 >
 > External references:
 >
@@ -525,7 +527,7 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 ### 10.3 Phase Status Ledger (update on completion)
 
 - [x] P1 Groundwork
-- [ ] P2 Input + caret + selection spike
+- [x] P2 Input + caret + selection spike (shipped: `spike/**`, `stories/engine-input.stories.tsx`, `tests/e2e/engine-input.spec.ts` on chromium/webkit/firefox)
 - [x] P3 Model + transactions
 - [x] P4 React view + scheduler/frame loop
 - [x] P5 Block virtualization
@@ -700,19 +702,25 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 
 #### Phase 8 — Feature parity + index-backed TOC/search + opt-in ship (medium–large)
 
-- **Goal:** a shippable, opt-in, feature-complete live-book surface.
-- **May touch:** `core/**` and `view/**`, derived-index modules, toolbar/object-chrome wiring (docs/006), `packages/editor/src/index.ts` (new opt-in export), tests, stories.
-- **Must not:** make the engine a default; alter the standard editor's behavior (G6).
+> **Reframe (2026-06-19):** the pre-Phase-8 investigation (docs/017) found that the original AC1–AC6 assumed (a) marks only needed toolbar wiring on top of existing render, (b) the corpus already spoke a dialect `compat` reads, and (c) the `packages/reader` primitive layer existed. None hold: marks are modeled but **not rendered**, `payloadcms.db` speaks a third dialect `compat` throws on, and `packages/reader` does not exist yet. The ACs below are the reframed set. **Prerequisite:** the pre-Phase-8 pass (docs/017) — view decompose, the node SPI seam (docs/016), and two latent-bug fixes — completes first.
+
+- **Goal:** a shippable, opt-in, feature-complete live surface, blog (posts) corpus first (docs/017 §4).
+- **May touch:** `core/**` and `view/**`, derived-index modules, toolbar/object-chrome wiring (docs/006), the node SPI registries (docs/016), a Payload-Lexical import adapter, `packages/editor/src/index.ts` (new opt-in export), tests, stories.
+- **Must not:** make the engine a default; alter the standard editor's behavior (G6); reshape the node SPI contract locked in docs/016 (fill its optional slots, do not change its shape).
 - **Acceptance criteria:**
-  - AC1 TOC, model text search, and comment indexes build from the document; navigating to an offscreen heading/result scrolls to and reveals it under virtualization.
-  - AC2 the docs/006 toolbar and object chrome operate on the engine's model selection/focus (formatting commands apply to the model selection, not DOM).
-  - AC3 a parity checklist versus the standard editor passes for the live-book surface: lists, marks, tables, links, glossary, comments — each has a passing test.
-  - AC4 the engine is exposed as an explicit opt-in API; a test confirms existing callers and the default `RichTextEditor` are unchanged (G6).
-  - AC5 input-affordance parity with the legacy editor: markdown/auto-format shortcuts (`# ` → heading, `- ` → list, `` ` `` → code, smart-quote/auto-pair) compile to commands (built on the Phase 5.5 command layer), and a rich HTML paste parses to the model through the single sanitization boundary (§10.5), with passing tests.
-  - AC6 block-level authoring parity: a slash/insert menu inserts blocks and objects through the registry, and block reorder (drag handle or keyboard move) maps to a `MoveNode` command; each has a passing test and operates on the model, not the DOM.
+  - AC1 TOC, model text search, and comment indexes build from the document; navigating to an offscreen heading/result scrolls to and reveals it under virtualization. The model search index is wired to an **in-editor find UI that intercepts Ctrl/Cmd+F** (§10.5), and object internals are searched through the node SPI `plainText`/`anchors` adapters (docs/016 §6.1), never silently skipped.
+  - AC2 the docs/006 toolbar and object chrome operate on the engine's model selection/focus (formatting commands apply to the model selection, not DOM), built with `@idco/ui` (§7.1).
+  - **AC3 (mark render).** Range marks (bold/italic/strikethrough/underline/code/highlight, and `link`) **render to the DOM** as styled spans at rest and live, and the caret/selection overlay geometry stays correct across the resulting multi-text-node block (reabsorbing the spike's model-offset-over-split-spans behavior). A passing test covers caret/selection across a formatted run.
+  - AC4 a parity checklist versus the standard editor passes for the live surface: lists, marks, tables, links, glossary, comments — each has a passing test.
+  - AC5 the engine is exposed as an explicit opt-in API; a test confirms existing callers and the default `RichTextEditor` are unchanged (G6).
+  - **AC6 (node contract).** A new block node is added end to end through the docs/016 SPI — `NodeDefinition` (core) + `NodeView` (view) registered via `registerNode`, with **no edits to view internals** — proven by a node-fixture test; `divider` and `image` ship as the two worked examples.
+  - **AC7 (corpus import).** A Payload-Lexical → owned-model import adapter covers the real corpus node types (docs/017 §3.4 matrix): `upload → media`, `youtube → embed`, `horizontalrule → divider`, inline `link`/`epub-internal-link` → `link` mark, with a passing round-trip test on real-shaped fixtures. `block` (Payload Blocks), `epub-internal-link` semantics, and faithful `table` grid editing are book-corpus items and may be deferred past blog-first ship, but the adapter must not throw on them (drop-with-report, not crash).
+  - AC8 input-affordance parity with the legacy editor: markdown/auto-format shortcuts (`# ` → heading, `- ` → list, `` ` `` → code, smart-quote/auto-pair) compile to commands (built on the Phase 5.5 command layer), and a rich HTML paste parses to the model through the single sanitization boundary (§10.5), with passing tests.
+  - AC9 block-level authoring parity: a slash/insert menu inserts blocks and objects through the node SPI `insert` affordance (docs/016 §6.2), and block reorder (drag handle or keyboard move) maps to a `MoveNode` command; each has a passing test and operates on the model, not the DOM.
+  - AC10 the §10.5 `[blocking-for-v1]` items not covered above hold or are explicitly deferred: autosave/dirty-state + stale-write guard, image drag-drop → host upload binding → media node, and the sanitization boundary. The undo-coalescing/content-free-transaction fix (§10.5) is closed before any undo is bound (landed in docs/017 §3.3).
 - **Verify:** `pnpm check`; `pnpm exec playwright test tests/e2e/engine-toc-search.spec.ts`.
-- **Done when:** AC1–AC6 pass and G1–G6 hold.
-- **Out of scope:** auto-default, collaboration.
+- **Done when:** AC1–AC10 pass and G1–G6 hold.
+- **Out of scope:** auto-default, collaboration. **Deferred past blog-first (named, not foreclosed):** Payload `block` per-type import, `epub-internal-link` semantics, faithful table grid editing.
 
 **Future (gated, not committed):** make the engine the default for chosen workloads, and collaboration groundwork. These are §12 open decisions, decided from data after Phase 8, not scheduled now. The collaboration groundwork has a worked-through brainstorm (docs/014) and a day-one footprint already required in Phase 3 (AC10); what stays gated is the collaboration build itself, not the readiness.
 

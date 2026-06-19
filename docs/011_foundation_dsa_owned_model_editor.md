@@ -185,6 +185,8 @@ An atomic object's internal structure (a table's `row → cell → block` grid, 
 
 Opaque to the outer mutation engine does not mean invisible to document services. A `BlockDefinition` for an object with meaningful internal content must expose object-level adapters for whole-node copy, plain-text search, export/bake completeness, and any indexable anchors it owns. The outer selection still treats the object as one unit; when that unit is copied, searched, exported, or indexed, the object definition supplies the internal projection. If a definition omits an adapter, the service treats the object as atomic and uses the baked fallback or reports the capability as unsupported, never silently pretending table cells or code lines were searched.
 
+> These adapters (`plainText`/`anchors`) are the optional `NodeDefinition` slots in the node SPI, docs/016 §6.1. docs/016 is the runnable contract that realizes this section together with §2.3 and §6.5; this section remains the authority on *what* the adapters must guarantee.
+
 ---
 
 ## 3. Text Representation: The Per-Leaf DSA
@@ -455,6 +457,8 @@ An atomic object's `data` is opaque to the engine. Its edits stay invertible wit
 - Registry patch: a `BlockDefinition` may provide `applyEdit(data, patch) → data'` plus `invertPatch(patch, dataBefore) → patch'` for objects that want fine-grained, cheap-to-store edits (a large grid).
 
 Either way the engine never reads object internals to undo them. The registry contract therefore carries an invertibility obligation, not just a parse and serialize one.
+
+> `applyEdit`/`invertPatch` are the optional fine-grained-invert slots in the node SPI, docs/016 §6.1; the wholesale `SetObjectData` swap is the default when a definition omits them.
 
 ### 6.6 Structural sharing on apply
 
