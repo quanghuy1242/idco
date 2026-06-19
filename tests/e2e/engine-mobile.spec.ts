@@ -116,3 +116,60 @@ test("AC2 a range selection on mobile is model-authoritative, not DOM-driven", a
     await page.locator("[data-engine-selection-rect]").count(),
   ).toBeGreaterThan(0);
 });
+
+test("AC2 cross-block Backspace keeps editing live on the survivor without a re-tap", async ({
+  page,
+}) => {
+  // Cross-block Backspace merges the focused block into its predecessor, which
+  // unmounts the focused block. The engine focuses the survivor *synchronously*,
+  // in the same gesture, before React commits that unmount (B1) — so a focused
+  // editable is always in the DOM and the on-screen keyboard never sees a
+  // focusless moment to dismiss-then-reopen. The sub-frame flicker timing is not
+  // observable from Playwright; what this guards is the continuity property that
+  // would break if focus were lost-and-not-restored or restored to the wrong
+  // block — editing continues on the survivor with no re-tap, and the typed
+  // glyph lands at the merge point.
+  await open(page);
+  const blocks = page.locator("[data-engine-block-id]");
+  const firstId = (await blocks.nth(1).getAttribute("data-engine-block-id"))!;
+  const secondId = (await blocks.nth(2).getAttribute("data-engine-block-id"))!;
+  const before = await diag(page);
+  const firstText = before.blockTexts[firstId]!;
+  const secondText = before.blockTexts[secondId]!;
+
+  // Edit the second block (on-screen keyboard up), caret at its very start.
+  await page.locator(`[data-engine-block-id="${secondId}"]`).tap();
+  await page.evaluate(
+    ({ key, node }) => {
+      const api = (
+        window as unknown as Record<
+          string,
+          { selectText: (a: string, b: number, c: string, d: number) => void }
+        >
+      )[key];
+      api.selectText(node, 0, node, 0);
+    },
+    { key: API, node: secondId },
+  );
+
+  await page.keyboard.press("Backspace");
+
+  // The survivor (first block) now holds both the model caret and DOM focus.
+  await expect
+    .poll(async () => (await diag(page)).selection?.focus?.node)
+    .toBe(firstId);
+  await expect
+    .poll(async () =>
+      page.evaluate(() =>
+        document.activeElement?.getAttribute("data-engine-block-id"),
+      ),
+    )
+    .toBe(firstId);
+
+  // Typing right after the merge — no second tap — proves input focus stayed
+  // live across the boundary; the glyph sits at the join offset in the survivor.
+  await page.keyboard.type("X");
+  await expect
+    .poll(async () => (await diag(page)).blockTexts[firstId] ?? "")
+    .toBe(firstText + "X" + secondText);
+});

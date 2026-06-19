@@ -302,8 +302,15 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     [store],
   );
 
-  const focusBlock = useCallback((id: NodeId) => {
-    registryRef.current.blockRefs.get(id)?.focus({ preventScroll: true });
+  // Returns whether the block was mounted and focused. The caller uses this to
+  // tell "focused synchronously, now" from "not mounted yet" so it can focus a
+  // merge survivor in the same gesture but defer a split's new block a frame
+  // (B1, the mobile-keyboard fix in `focusSelectionSoon`).
+  const focusBlock = useCallback((id: NodeId): boolean => {
+    const element = registryRef.current.blockRefs.get(id);
+    if (!element) return false;
+    element.focus({ preventScroll: true });
+    return true;
   }, []);
 
   const scrollToBlock = useCallback(
@@ -435,15 +442,20 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // structural/clipboard command moves the caret. Deferred a frame so the new
   // block has mounted (React flushes the order change after the handler).
   const syncFocusToSelection = useCallback(() => {
-    requestFrame(() => {
+    // Sync-first focus (B1): when an edit (cut, delete-selection) removes the
+    // focused block and the caret lands in an already-mounted block, focus it
+    // now — in the same gesture, before React commits the unmount of the removed
+    // block — so the mobile soft keyboard never sees a focusless moment and does
+    // not flicker. Only fall back to the next frame when the destination is not
+    // mounted yet (e.g. paste inserting fresh blocks above the caret).
+    const apply = (): boolean => {
       const sel = store.selection;
       const focusNode = sel?.type === "text" ? sel.focus.node : null;
-      if (!focusNode) return;
-      registryRef.current.blockRefs
-        .get(focusNode)
-        ?.focus({ preventScroll: true });
-    });
-  }, [store]);
+      if (!focusNode) return false;
+      return focusBlock(focusNode);
+    };
+    if (!apply()) requestFrame(apply);
+  }, [focusBlock, store]);
 
   const onClipboardCut = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
@@ -1009,7 +1021,7 @@ function EngineBlock(props: {
     backend: "native" | "polyfill" | null,
   ) => void;
   readonly onRender: (id: NodeId) => void;
-  readonly requestFocus: (id: NodeId) => void;
+  readonly requestFocus: (id: NodeId) => boolean;
   readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
   readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;

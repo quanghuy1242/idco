@@ -69,7 +69,7 @@ export function EngineTextBlock(props: {
     id: NodeId,
     backend: "native" | "polyfill" | null,
   ) => void;
-  readonly requestFocus: (id: NodeId) => void;
+  readonly requestFocus: (id: NodeId) => boolean;
   readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
   readonly goalColumnRef: RefObject<number | null>;
@@ -430,16 +430,32 @@ export function EngineTextBlock(props: {
   );
 
   // After a command/undo/redo moves the caret, focus and reveal the block it
-  // now lives in, deferred a frame so the structural change has committed.
+  // now lives in. We try synchronously first (B1): when an edit removes the
+  // focused block and merges into an already-mounted neighbour (cross-block
+  // Backspace/Delete, delete-selection), focusing the surviving block *now* — in
+  // this same gesture, before React commits the unmount of the removed block —
+  // keeps a focused editable in the DOM the entire time. A deferred focus runs a
+  // frame *after* React has unmounted the still-focused removed block, leaving a
+  // moment with nothing focused; on mobile that collapses the soft keyboard and
+  // re-opens it (the Android flicker, native + polyfill alike). When the caret's
+  // destination does not exist yet — a split's freshly-created block, not mounted
+  // until React commits — the synchronous attempt finds no element and we fall
+  // back to the next frame, the original behaviour.
   const focusSelectionSoon = useCallback(() => {
-    requestFrame(() => {
+    const apply = (): boolean => {
       const sel = store.selection;
       const focusNode = sel?.type === "text" ? sel.focus.node : null;
-      if (!focusNode) return;
-      if (focusNode !== node.id) requestFocus(focusNode);
-      else syncSelectionIntoEditContext();
+      if (!focusNode) return false;
+      if (focusNode === node.id) {
+        syncSelectionIntoEditContext();
+        revealBlock(focusNode);
+        return true;
+      }
+      if (!requestFocus(focusNode)) return false;
       revealBlock(focusNode);
-    });
+      return true;
+    };
+    if (!apply()) requestFrame(apply);
   }, [node.id, requestFocus, revealBlock, store, syncSelectionIntoEditContext]);
 
   const runEditCommand = useCallback(
