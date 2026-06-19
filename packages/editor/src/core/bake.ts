@@ -25,12 +25,13 @@
  * with a default registry, while custom objects bake on the main thread through
  * the same `bakeObjectData` call.
  */
-import type {
-  BakedSnapshot,
-  EditorDocumentSnapshot,
-  JsonValue,
-  NodeId,
-  ObjectNodeStatus,
+import {
+  resolveBoundaryOffset,
+  type BakedSnapshot,
+  type EditorDocumentSnapshot,
+  type JsonValue,
+  type NodeId,
+  type ObjectNodeStatus,
 } from "./model";
 import { createDefaultBlockRegistry, type BlockRegistry } from "./registry";
 
@@ -51,17 +52,26 @@ export type TocEntry = {
   readonly text: string;
 };
 
-/** One plain-text index entry for a top-level text block. */
+/** One plain-text index entry for a top-level text block or object. */
 export type TextIndexEntry = {
   readonly id: NodeId;
   readonly type: string;
   readonly text: string;
 };
 
-/** The pure derived index for a document (TOC + plain-text search source). */
+/** One comment/glossary index entry, derived from a leaf's range marks. */
+export type CommentIndexEntry = {
+  readonly id: string;
+  readonly node: NodeId;
+  readonly kind: "comment" | "glossary";
+  readonly text: string;
+};
+
+/** The pure derived index for a document (TOC + plain-text + comments). */
 export type DocumentIndex = {
   readonly toc: readonly TocEntry[];
   readonly text: readonly TextIndexEntry[];
+  readonly comments: readonly CommentIndexEntry[];
 };
 
 /** Bake one object, never throwing: an unbakeable object reports `invalid`. */
@@ -106,22 +116,48 @@ export function bakeObjectData(
   }
 }
 
-/** Derive the TOC and plain-text index from a serialized document. */
+/**
+ * Derive the TOC, plain-text index, and comment index from a serialized document.
+ *
+ * Text leaves contribute their text (and headings the TOC); object blocks
+ * contribute their SPI `plainText` so search reaches object internals rather than
+ * silently skipping them (011 §2.7, docs/010 Phase 8 AC1). Comment/glossary range
+ * marks contribute the comment index. The registry is injectable so the worker
+ * (built-ins only) and a custom-object main-thread caller run the same code.
+ */
 export function buildDocumentIndex(
   snapshot: EditorDocumentSnapshot,
+  registry: BlockRegistry = createDefaultBlockRegistry(),
 ): DocumentIndex {
   const toc: TocEntry[] = [];
   const text: TextIndexEntry[] = [];
+  const comments: CommentIndexEntry[] = [];
   for (const id of snapshot.body.order) {
     const node = snapshot.body.blocks[id];
-    if (!node || node.kind !== "text") continue;
-    const content = node.content.text;
-    text.push({ id, text: content, type: node.type });
-    if (node.type === "heading") {
-      toc.push({ id, level: headingLevel(node.attrs?.tag), text: content });
+    if (!node) continue;
+    if (node.kind === "text") {
+      const content = node.content.text;
+      text.push({ id, text: content, type: node.type });
+      if (node.type === "heading") {
+        toc.push({ id, level: headingLevel(node.attrs?.tag), text: content });
+      }
+      for (const mark of node.marks) {
+        if (mark.kind !== "comment" && mark.kind !== "glossary") continue;
+        const from = resolveBoundaryOffset(node.content, mark.from);
+        const to = resolveBoundaryOffset(node.content, mark.to);
+        comments.push({
+          id: mark.id,
+          kind: mark.kind,
+          node: id,
+          text: content.slice(from, to),
+        });
+      }
+    } else if (node.kind === "object") {
+      const plain = registry.get(node.type)?.plainText?.(node.data);
+      if (plain) text.push({ id, text: plain, type: node.type });
     }
   }
-  return { text, toc };
+  return { comments, text, toc };
 }
 
 /** A job the worker (or main thread) can run; both are pure compute. */
@@ -173,7 +209,7 @@ export function runBakeWorkerJob(
   return {
     id: job.id,
     kind: "build-index",
-    result: buildDocumentIndex(job.snapshot),
+    result: buildDocumentIndex(job.snapshot, registry),
   };
 }
 

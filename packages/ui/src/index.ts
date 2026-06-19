@@ -21,6 +21,7 @@ export * from "./command-palette";
 export * from "./tooltip";
 export * from "./toast";
 export * from "./info-popover";
+export * from "./popover";
 export * from "./page-intro";
 export * from "./code-block";
 export * from "./data-table";

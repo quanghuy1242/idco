@@ -27,6 +27,7 @@ import { useSelectionFrameVersion } from "./store-hooks";
 import {
   CARET_BLINK_KEYFRAMES,
   ENGINE_SURFACE_SUPPRESS_CSS,
+  ENGINE_TYPOGRAPHY_CSS,
   visuallyHiddenStyle,
 } from "./styles";
 import type { EditContextLike, RenderRegistry, SerializedRect } from "./types";
@@ -276,7 +277,11 @@ export function SelectionOverlay(props: {
         position: "absolute",
       }}
     >
-      <style>{CARET_BLINK_KEYFRAMES + ENGINE_SURFACE_SUPPRESS_CSS}</style>
+      <style>
+        {CARET_BLINK_KEYFRAMES +
+          ENGINE_SURFACE_SUPPRESS_CSS +
+          ENGINE_TYPOGRAPHY_CSS}
+      </style>
       {rects.map((rect, index) => {
         const isCaret = rect.kind === "caret";
         const isPreedit = rect.kind === "preedit";

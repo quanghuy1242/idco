@@ -21,6 +21,7 @@ export {
 } from "./navigation";
 export {
   getNodeView,
+  listInsertableNodes,
   registerNode,
   registerNodeView,
   type NodeView,
@@ -29,3 +30,29 @@ export {
   type NodeViewRestingArgs,
   type RegisterNodeArgs,
 } from "./node-view";
+export {
+  OwnedModelEditor,
+  type OwnedModelEditorHandle,
+  type OwnedModelEditorProps,
+} from "./owned-model-editor";
+export { EditorToolbar } from "./editor-chrome";
+export {
+  FindBar,
+  findMatches,
+  useFindController,
+  type FindController,
+  type FindMatch,
+} from "./find-bar";
+export { renderLeafMarks } from "./mark-render";
+export { sanitizeHtmlToCompat } from "./paste-html";
+export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
+export {
+  useAutosave,
+  type AutosaveOptions,
+  type AutosaveState,
+} from "./use-autosave";
+export {
+  RestingDocument,
+  RestingLeaf,
+  type RestingDocumentProps,
+} from "./resting-document";

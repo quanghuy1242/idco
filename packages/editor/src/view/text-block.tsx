@@ -15,6 +15,7 @@ import {
   type RefObject,
 } from "react";
 import {
+  detectMarkdownShortcut,
   orderedTextLeaves,
   pointAtOffset,
   type EditorCommand,
@@ -46,6 +47,7 @@ import {
   wordRangeAt,
 } from "./navigation";
 import { requestFrame } from "./raf";
+import { leafHasMarks, renderLeafMarks } from "./mark-render";
 import { ariaLabelForLeaf } from "./selection-overlay";
 import { blockStyle } from "./styles";
 import type {
@@ -106,20 +108,46 @@ export function EngineTextBlock(props: {
     // Typing is a horizontal change; drop any remembered vertical goal column.
     goalColumnRef.current = null;
     const editContext = controller.editContext;
+    // The typing fast path patches the single rendered text node and authorizes
+    // the commit to skip re-rendering this leaf. A leaf with marks renders as
+    // nested mark elements (many text nodes), so a `textContent` patch would wipe
+    // the formatting — those leaves re-render from the model instead (AC3). The
+    // unformatted common case keeps the fast path.
+    const current = store.getNode(node.id);
+    const hasMarks = current?.kind === "text" && leafHasMarks(current);
+    const onBeforeDispatch = hasMarks
+      ? undefined
+      : () => {
+          patchHostText(hostRef.current, editContext.text);
+          store.markActiveLeafDomSynced();
+        };
     applyEditContextText(
       store,
       node.id,
       editContext.text,
       editContext.selectionStart,
       editContext.selectionEnd,
-      () => {
-        // Patch the rendered text node ourselves and authorize the commit to
-        // skip re-rendering this leaf (the typing fast path). Command-driven
-        // edits never call this, so they re-render and stay visible.
-        patchHostText(hostRef.current, editContext.text);
-        store.markActiveLeafDomSynced();
-      },
+      onBeforeDispatch,
     );
+    // After the text lands, fire any markdown shortcut at the caret (AC8). The
+    // detector is cheap and returns null for ordinary typing; block prefixes
+    // compile to a real conversion, inline-code is the Phase 9 no-op. This is a
+    // second transaction after the text insert (the conversion is separately
+    // undoable); merging the two is the Phase 9 undo-coalescing work (docs/018).
+    const updated = store.getNode(node.id);
+    const selection = store.selection;
+    if (
+      updated?.kind === "text" &&
+      selection?.type === "text" &&
+      selection.focus.node === node.id
+    ) {
+      const shortcut = detectMarkdownShortcut(
+        updated.content.text,
+        selection.focus.offset,
+        updated.type,
+      );
+      if (shortcut) store.command({ shortcut, type: "apply-markdown" });
+    }
   }, [node.id, store]);
 
   // IME preedit: a fully owned view gets no browser-drawn composition underline,
@@ -520,6 +548,12 @@ export function EngineTextBlock(props: {
       aria-label={ariaLabelForLeaf(node)}
       aria-multiline="true"
       data-engine-block-id={node.id}
+      data-engine-block-type={node.type}
+      data-engine-heading={
+        node.type === "heading" && typeof node.attrs?.tag === "string"
+          ? node.attrs.tag
+          : undefined
+      }
       data-engine-text-id={node.id}
       onFocus={focusAtEnd}
       onKeyDown={handleKeyDown}
@@ -529,7 +563,7 @@ export function EngineTextBlock(props: {
       style={blockStyle}
       tabIndex={0}
     >
-      {node.content.text.length > 0 ? node.content.text : "\u200b"}
+      {renderLeafMarks(node)}
     </div>
   );
 }

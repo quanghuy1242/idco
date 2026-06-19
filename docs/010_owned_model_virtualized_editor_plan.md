@@ -534,7 +534,9 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 - [x] P5.5 Structural editing + commands + public SPI
 - [x] P6 Heavy objects + bake
 - [x] P7 Cross-browser / mobile / a11y hardening
-- [ ] P8 Feature parity + index-backed TOC/search + opt-in ship
+- [x] Pre-Phase-8 (docs/017): view decompose + node SPI (docs/016) + latent-bug fixes
+- [x] P8 Feature parity + index-backed TOC/search + opt-in ship
+- [ ] P9 Polish + deferred parity (docs/018)
 
 ### 10.4 Phases
 
@@ -721,6 +723,30 @@ These hold for the lifetime of the work. A phase is not done if any is violated,
 - **Verify:** `pnpm check`; `pnpm exec playwright test tests/e2e/engine-toc-search.spec.ts`.
 - **Done when:** AC1–AC10 pass and G1–G6 hold.
 - **Out of scope:** auto-default, collaboration. **Deferred past blog-first (named, not foreclosed):** Payload `block` per-type import, `epub-internal-link` semantics, faithful table grid editing.
+- **Status: landed.** All ten ACs are implemented and tested, opt-in, with the standard editor untouched (G6). What shipped:
+  - **AC3 mark render (the keystone).** Range marks render as nested *semantic* elements (`<strong>`/`<em>`/`<u>`/`<s>`/`<code>`/`<mark>`/`<a>`/comment+glossary spans) so DaisyUI typography themes them (`view/mark-render.tsx`), and the offset↔DOM geometry was rewritten to walk a block's descendant text nodes (`view/geometry.ts` `textNodesOf`/`resolveOffsetToDom`/`modelOffsetFromDom`/`modelRange`) so caret/selection stay correct across the many-text-node block. Segmentation is pure compute in `core/marks.ts` (`segmentText`), shared with the resting render. Links are inert in the editor, navigable in the reader (`LinkMode`). The unformatted leaf still renders one bare text node, preserving the typing fast path. Tests: `engine-mark-render.test.tsx` (segmentation + offset round-trip) and `engine-marks.spec.ts` (render + selection + click-to-offset across a formatted run, chromium).
+  - **AC2 toolbar + object chrome.** `view/editor-chrome.tsx` is the `@idco/ui` (React Aria + DaisyUI + lucide icons) toolbar: format toggles, a block-type menu, list/indent, a link editor, an insert menu, undo/redo — all driving `store.command`/`store.query` on the model selection, with focus returned to the EditContext host after each command. The object config panel and image live surface migrated to `@idco/ui` controls (`object-block.tsx`); the code live surface stays an engine-owned textarea (box-drift/native caret, note.md §2).
+  - **AC1 index-backed TOC/search/comments + find.** `buildDocumentIndex` now indexes object internals through the SPI `plainText` adapter and builds a comment/glossary index; `view/find-bar.tsx` is the in-editor find UI that intercepts Ctrl/Cmd+F, searches the model (offscreen included) plus object internals, and reveals/selects matches under virtualization.
+  - **AC9 insert menu + reorder.** The insert menu inserts nodes through each `NodeView.insert` affordance (`insert-object` command); `move-block` compiles to a `MoveNode` step.
+  - **AC6 node SPI worked examples.** `divider` and `image` ship end to end; `image` gains a `renderLive` surface with the upload affordance. Proven by `engine-node-spi.test.ts` (synthetic node) + `engine-phase8-integration.test.tsx`.
+  - **AC7 Payload import adapter.** `core/payload-import.ts` maps `upload→media`, `youtube→embed`, `horizontalrule→divider`, inline `link`/`epub-internal-link`→`link` mark, flattens lists, and drops-with-report `block`/unknowns without throwing (`engine-payload-import.test.ts`).
+  - **AC8 input affordances.** Markdown block-prefix shortcuts (`# `/`## `/`- `/`> `/`1. `) compile to commands (`core/markdown-shortcuts.ts` + `apply-markdown`); rich HTML paste parses through the single `sanitizeHtmlToCompat` boundary (`view/paste-html.ts`) into the model. Inline-code wrap + smart-quote/auto-pair are the named Phase 9 typing-loop follow-on.
+  - **AC10 autosave + upload + sanitization.** `view/use-autosave.ts` is debounced autosave with a dirty-state model, an in-flight-clobber token guard, and a stale-write seam (host `onSave` does optimistic concurrency); `view/upload-context.tsx` is the host image-upload binding used by the image live surface and the editor drop handler; the sanitization boundary is `sanitizeHtmlToCompat`. The undo content-free-transaction fix landed in docs/017.
+  - **AC4 parity + AC5 opt-in.** `engine-parity.test.ts` checks lists/marks/tables/links/glossary/comments on the model (link marks now round-trip through compat as `link` element nodes); `OwnedModelEditor` is the explicit opt-in surface and `RichTextEditor` is exported unchanged.
+  - Theming: the surface and resting render carry the DaisyUI `prose` class (`view/owned-model-editor.tsx`, `view/resting-document.tsx`), so document theming is typography, not inline styles. The Ladle stories are `Engine / Phase 8` (full editor + resting read) and `Engine / Owned Model · Phase8FormattedRun`.
+
+#### Phase 9 — Polish + deferred parity (medium; docs/018)
+
+- **Goal:** the genuine polish and deferred-parity items surfaced during Phase 8, gathered so they are tracked, not lost. **This is not a place to defer Phase 8 work** — every Phase 8 AC landed; these are refinements and book-corpus items that were explicitly out of blog-first scope.
+- **Items (full list + rationale in docs/018):**
+  - Typing-loop affordances: inline-code wrap on the closing backtick (the detector exists in `core/markdown-shortcuts.ts` and is tested; only the IME-safe wiring is deferred), smart-quote substitution, and bracket auto-pairing.
+  - Composition-commit granularity (011 §9.4: one atomic undo per IME composition) and full typing-run undo coalescing (§10.5).
+  - Accessibility depth: a full axe-core audit and `aria-activedescendant` for atomic objects (Phase 7 deferred these here).
+  - Caret paging: `PageUp`/`PageDown` and horizontal reveal of a long unwrapped line (§11).
+  - Reader package: move the resting object/mark render onto `packages/reader` L1 primitives when it lands (docs/015), retiring the in-editor `resting-document.tsx` shim.
+  - Book-corpus parity (deferred past blog-first, 010 Phase 8 out-of-scope): Payload `block` per-type import, `epub-internal-link` semantics, and faithful `table` grid editing (`NodeView.renderLive` for tables, the largest future node).
+  - Firefox cross-block drag-select fix (the §11 known-failure) and the Firefox synthetic-ClipboardEvent harness limit.
+- **Out of scope:** auto-default and collaboration (still §12 open decisions).
 
 **Future (gated, not committed):** make the engine the default for chosen workloads, and collaboration groundwork. These are §12 open decisions, decided from data after Phase 8, not scheduled now. The collaboration groundwork has a worked-through brainstorm (docs/014) and a day-one footprint already required in Phase 3 (AC10); what stays gated is the collaboration build itself, not the readiness.
 

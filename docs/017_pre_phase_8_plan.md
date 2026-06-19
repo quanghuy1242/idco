@@ -1,6 +1,6 @@
 # 017 - Pre-Phase-8 Plan: View Decompose, Node SPI Lift, And Foundation Cleanup
 
-> Status: execution plan (ready to start). A bounded, behavior-preserving pass that must complete before docs/010 Phase 8 begins.
+> Status: DONE. The bounded, behavior-preserving pass landed (view decompose, the node SPI lift per docs/016, the two latent-bug fixes, the Payload-dialect decision) and Phase 8 (docs/010) has since built on it. Kept as the record of that pass.
 >
 > Date: 2026-06-19
 >

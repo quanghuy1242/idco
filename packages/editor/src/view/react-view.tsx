@@ -17,6 +17,7 @@ import {
   createLoopbackBakeService,
   createOwnedEditorHandle,
   createWorkerBakeService,
+  editorSnapshotFromCompat,
   pointAtOffset,
   type BakeService,
   type DocumentIndex,
@@ -37,6 +38,7 @@ import {
   SelectionOverlay,
 } from "./selection-overlay";
 import { EngineObjectBlock } from "./object-block";
+import { sanitizeHtmlToCompat } from "./paste-html";
 import { cancelFrame, requestFrame } from "./raf";
 import { useEditorNode, useEditorOrder } from "./store-hooks";
 import { EngineTextBlock } from "./text-block";
@@ -117,6 +119,8 @@ export type OwnedModelEditorViewHandle = {
   ) => void;
   /** Scroll an offscreen block into view, correcting after it is measured. */
   readonly scrollToBlock: (id: NodeId) => void;
+  /** Drop the caret at a client point (used by drag-drop to insert at the drop). */
+  readonly placeCaretAt: (clientX: number, clientY: number) => void;
   /** The current model selection serialized to plain text (cross-virtual copy). */
   readonly serializeSelection: () => string;
   /** The public command/undo/dirty/event control surface (docs/011 §12.2). */
@@ -390,6 +394,27 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     [store],
   );
 
+  const placeCaretAt = useCallback(
+    (clientX: number, clientY: number) => {
+      const root = rootRef.current;
+      if (!root) return;
+      const point = resolveTextPointAt(store, root, clientX, clientY);
+      if (!point) return;
+      const node = store.requireTextNode(point.node);
+      const focus = pointAtOffset(
+        point.node,
+        node.content,
+        clampOffset(point.offset, node.content.text.length),
+      );
+      store.dispatch({
+        origin: "local",
+        selectionAfter: { anchor: focus, focus, type: "text" },
+        steps: [],
+      });
+    },
+    [store],
+  );
+
   const onClipboardCopy = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
       // Clipboard reads the model, not the DOM, so a range spanning virtualized
@@ -432,7 +457,29 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
 
   const onClipboardPaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
-      // Paste inserts plain text at the selection, replacing a range (AC5).
+      // Rich HTML paste parses through the single sanitization boundary into
+      // model blocks (AC8); plain text falls back to an inline insert (AC5).
+      const html = event.clipboardData?.getData("text/html");
+      if (html) {
+        const compat = sanitizeHtmlToCompat(html);
+        if (compat.length > 0) {
+          event.preventDefault();
+          const snapshot = editorSnapshotFromCompat(
+            { root: { children: compat } },
+            {
+              allocator: store.allocator,
+              registry: store.registry,
+              unknownObjectPolicy: "drop",
+            },
+          );
+          const nodes = snapshot.body.order.map(
+            (id) => snapshot.body.blocks[id]!,
+          );
+          store.command({ nodes, type: "insert-blocks" });
+          syncFocusToSelection();
+          return;
+        }
+      }
       const text = event.clipboardData?.getData("text/plain");
       if (!text) return;
       event.preventDefault();
@@ -761,6 +808,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       diagnostics,
       focusBlock,
       getEditorHandle,
+      placeCaretAt,
       scrollToBlock,
       selectText,
       serializeSelection,
@@ -769,6 +817,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       diagnostics,
       focusBlock,
       getEditorHandle,
+      placeCaretAt,
       scrollToBlock,
       selectText,
       serializeSelection,

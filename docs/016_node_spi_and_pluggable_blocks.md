@@ -1,6 +1,6 @@
 # 016 - Node SPI: Object Lifecycle And The Pluggable Block System
 
-> Status: design sketch (pre-implementation). The contract is being locked before the internals are refactored to it (SPI-first).
+> Status: IMPLEMENTED. The contract was locked pre-Phase-8 (docs/017) and Phase 8 (docs/010) filled its optional slots without reshaping it: `NodeView.renderLive` (image), `plainText` (code/media/embed/post-ref, wired to find + index), and `NodeView.insert` (the slash/insert menu). `divider` and `image` are the two worked examples; `registerNode` adds a node with no edit to view internals. Where this document and the code differ, the code (and 011) win.
 >
 > Date: 2026-06-19
 >

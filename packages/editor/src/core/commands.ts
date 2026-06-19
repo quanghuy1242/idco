@@ -19,6 +19,7 @@
  */
 import {
   boundaryAtOffset,
+  makeObjectNode,
   makeStructuralNode,
   makeTextNode,
   pointAtOffset,
@@ -39,6 +40,8 @@ import {
   type TextSlice,
 } from "./model";
 import { bakeObjectData } from "./bake";
+import type { MarkdownShortcut } from "./markdown-shortcuts";
+import { safeHref } from "./url-safety";
 import type { EditorStore, TransactionBuilder } from "./store";
 
 const EMPTY_SLICE: TextSlice = { runs: [], text: "" };
@@ -54,9 +57,38 @@ export type EditorCommand =
       readonly type: "toggle-mark";
       readonly mark: TextMarkKind;
     }
-  | { readonly type: "set-block-type"; readonly blockType: TextLeafType }
+  | {
+      readonly type: "set-link";
+      readonly href: string;
+    }
+  | { readonly type: "clear-link" }
+  | {
+      readonly type: "set-block-type";
+      readonly blockType: TextLeafType;
+      /** Optional heading tag (`h1`..`h6`) carried as a `tag` attr. */
+      readonly tag?: string;
+    }
   | { readonly type: "indent" }
   | { readonly type: "outdent" }
+  | {
+      readonly type: "move-block";
+      readonly node: NodeId;
+      /** New index in the body order (clamped). */
+      readonly toIndex: number;
+    }
+  | {
+      readonly type: "insert-object";
+      readonly objectType: string;
+      readonly data: JsonValue;
+    }
+  | {
+      readonly type: "apply-markdown";
+      readonly shortcut: MarkdownShortcut;
+    }
+  | {
+      readonly type: "insert-blocks";
+      readonly nodes: readonly EditorNode[];
+    }
   | {
       readonly type: "set-object-data";
       readonly node: NodeId;
@@ -70,7 +102,8 @@ export type EditorQuery =
   | { readonly type: "is-mark-active"; readonly mark: TextMarkKind }
   | { readonly type: "can-indent" }
   | { readonly type: "can-outdent" }
-  | { readonly type: "current-block-type" };
+  | { readonly type: "current-block-type" }
+  | { readonly type: "active-link-href" };
 
 type CommandCompiler = (
   store: EditorStore,
@@ -78,19 +111,38 @@ type CommandCompiler = (
 ) => TransactionBuilder | null;
 
 const compilers: { [K in EditorCommandType]: CommandCompiler } = {
+  "apply-markdown": (store, command) =>
+    command.type === "apply-markdown"
+      ? compileApplyMarkdown(store, command.shortcut)
+      : null,
+  "clear-link": (store) => compileLink(store, null),
   "delete-backward": (store) => compileDelete(store, -1),
   "delete-forward": (store) => compileDelete(store, 1),
   "delete-selection": (store) => compileDeleteSelection(store),
   indent: (store) => compileIndent(store, "indent"),
+  "insert-blocks": (store, command) =>
+    command.type === "insert-blocks"
+      ? compileInsertBlocks(store, command.nodes)
+      : null,
+  "insert-object": (store, command) =>
+    command.type === "insert-object"
+      ? compileInsertObject(store, command.objectType, command.data)
+      : null,
   "insert-text": (store, command) =>
     command.type === "insert-text"
       ? compileInsertText(store, command.text)
       : null,
+  "move-block": (store, command) =>
+    command.type === "move-block"
+      ? compileMoveBlock(store, command.node, command.toIndex)
+      : null,
   outdent: (store) => compileIndent(store, "outdent"),
   "set-block-type": (store, command) =>
     command.type === "set-block-type"
-      ? compileSetBlockType(store, command.blockType)
+      ? compileSetBlockType(store, command.blockType, command.tag)
       : null,
+  "set-link": (store, command) =>
+    command.type === "set-link" ? compileLink(store, command.href) : null,
   "set-object-data": (store, command) =>
     command.type === "set-object-data"
       ? compileSetObjectData(store, command.node, command.data)
@@ -114,7 +166,7 @@ export function compileCommand(
 export function runQuery(
   store: EditorStore,
   query: EditorQuery,
-): boolean | TextLeafType | null {
+): boolean | TextLeafType | string | null {
   switch (query.type) {
     case "is-mark-active":
       return isMarkActive(store, query.mark);
@@ -124,6 +176,8 @@ export function runQuery(
       return canOutdent(store);
     case "current-block-type":
       return currentBlockType(store);
+    case "active-link-href":
+      return activeLinkHref(store);
   }
 }
 
@@ -421,37 +475,139 @@ function deleteRange(
 // Marks and block type.
 // ---------------------------------------------------------------------------
 
+/** One text leaf intersected by a selection, with the local `[from, to)` range. */
+type LeafRange = {
+  readonly node: TextLeafNode;
+  readonly from: number;
+  readonly to: number;
+};
+
+/**
+ * The text leaves a selection covers, each with its local range. A single-leaf
+ * selection yields one entry; a cross-leaf selection walks the body order from
+ * the start leaf to the end leaf (top-level prose, which is blog parity — nested
+ * list-item leaves are a books follow-on). Zero-length local ranges are dropped.
+ */
+function leafRangesInSelection(store: EditorStore): readonly LeafRange[] {
+  const range = textRange(store);
+  if (!range) return [];
+  if (range.start.node === range.end.node) {
+    const node = store.requireTextNode(range.start.node);
+    if (range.start.offset === range.end.offset) return [];
+    return [{ from: range.start.offset, node, to: range.end.offset }];
+  }
+  const order = store.order;
+  const startIndex = order.indexOf(range.start.node);
+  const endIndex = order.indexOf(range.end.node);
+  if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return [];
+  const out: LeafRange[] = [];
+  for (let i = startIndex; i <= endIndex; i += 1) {
+    const node = store.getNode(order[i]!);
+    if (!node || node.kind !== "text") continue;
+    const from = i === startIndex ? range.start.offset : 0;
+    const to = i === endIndex ? range.end.offset : node.content.text.length;
+    if (to > from) out.push({ from, node, to });
+  }
+  return out;
+}
+
+/** Every text leaf a (possibly collapsed) range touches, start..end inclusive. */
+function coveredTextLeaves(
+  store: EditorStore,
+  range: TextRange,
+): readonly TextLeafNode[] {
+  if (range.start.node === range.end.node) {
+    return [store.requireTextNode(range.start.node)];
+  }
+  const order = store.order;
+  const startIndex = order.indexOf(range.start.node);
+  const endIndex = order.indexOf(range.end.node);
+  if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return [];
+  const out: TextLeafNode[] = [];
+  for (let i = startIndex; i <= endIndex; i += 1) {
+    const node = store.getNode(order[i]!);
+    if (node && node.kind === "text") out.push(node);
+  }
+  return out;
+}
+
 function compileToggleMark(
   store: EditorStore,
   kind: TextMarkKind,
 ): TransactionBuilder | null {
-  const range = textRange(store);
-  // Phase 5.5 toggles a real range on one leaf; a collapsed caret (pending
-  // format) and cross-leaf toggles are Phase 8 toolbar work.
-  if (!range || range.start.node !== range.end.node) return null;
-  if (range.start.offset === range.end.offset) return null;
-  const node = store.requireTextNode(range.start.node);
-  const from = range.start.offset;
-  const to = range.end.offset;
+  const leaves = leafRangesInSelection(store);
+  if (leaves.length === 0) return null;
   const tr = store.transaction();
-  if (isRangeMarked(node, kind, from, to)) {
-    // Remove the covering marks of this kind, re-adding the parts outside the
-    // toggled range so a partial overlap keeps its remaining formatting.
-    for (const mark of node.marks) {
-      if (mark.kind !== kind) continue;
-      const mFrom = resolveBoundaryOffset(node.content, mark.from);
-      const mTo = resolveBoundaryOffset(node.content, mark.to);
-      if (mTo <= from || mFrom >= to) continue;
-      tr.removeMark(node.id, mark);
-      if (mFrom < from) {
-        tr.addMark(node.id, markOver(node, kind, mFrom, from, `${mark.id}_l`));
-      }
-      if (mTo > to) {
-        tr.addMark(node.id, markOver(node, kind, to, mTo, `${mark.id}_r`));
-      }
+  // Toggle semantics: if every covered range already carries the mark, remove it
+  // everywhere; otherwise add it to the parts that lack it. This matches a native
+  // toolbar across single- and multi-block selections (AC2).
+  const allMarked = leaves.every(({ node, from, to }) =>
+    isRangeMarked(node, kind, from, to),
+  );
+  for (const { node, from, to } of leaves) {
+    if (allMarked) {
+      removeMarkOverRange(tr, store, node, kind, from, to);
+    } else if (!isRangeMarked(node, kind, from, to)) {
+      tr.addMark(node.id, markOver(node, kind, from, to, newMarkId(store)));
     }
-  } else {
-    tr.addMark(node.id, markOver(node, kind, from, to, newMarkId(store)));
+  }
+  return tr.setSelection(store.selection as EditorSelection);
+}
+
+/** Remove a mark kind from `[from, to)` on one leaf, re-adding the outside parts. */
+function removeMarkOverRange(
+  tr: TransactionBuilder,
+  store: EditorStore,
+  node: TextLeafNode,
+  kind: TextMarkKind,
+  from: number,
+  to: number,
+): void {
+  for (const mark of node.marks) {
+    if (mark.kind !== kind) continue;
+    const mFrom = resolveBoundaryOffset(node.content, mark.from);
+    const mTo = resolveBoundaryOffset(node.content, mark.to);
+    if (mTo <= from || mFrom >= to) continue;
+    tr.removeMark(node.id, mark);
+    if (mFrom < from) {
+      tr.addMark(
+        node.id,
+        cloneMarkOver(node, mark, mFrom, from, `${mark.id}_l`),
+      );
+    }
+    if (mTo > to) {
+      tr.addMark(node.id, cloneMarkOver(node, mark, to, mTo, `${mark.id}_r`));
+    }
+  }
+}
+
+/**
+ * Set or clear a `link` mark over the current selection (AC4 link editing). A
+ * non-null href adds/replaces the link with its href attr; null removes it.
+ */
+function compileLink(
+  store: EditorStore,
+  href: string | null,
+): TransactionBuilder | null {
+  const leaves = leafRangesInSelection(store);
+  if (leaves.length === 0) return null;
+  // Sanitize the href at the model boundary so an unsafe URL never reaches a
+  // navigable anchor in the reader render (docs/010 §10.5). An unsafe/empty href
+  // clears the link rather than storing a dangerous one.
+  const cleaned = href === null ? "" : safeHref(href);
+  const tr = store.transaction();
+  for (const { node, from, to } of leaves) {
+    // Clear any existing link over the range first so set replaces, not stacks.
+    removeMarkOverRange(tr, store, node, "link", from, to);
+    if (cleaned.length > 0) {
+      tr.addMark(node.id, {
+        attrs: { href: cleaned },
+        from: boundaryAtOffset(node.content, from, "before"),
+        id: newMarkId(store),
+        kind: "link",
+        to: boundaryAtOffset(node.content, to, "after"),
+      });
+    }
   }
   return tr.setSelection(store.selection as EditorSelection);
 }
@@ -459,19 +615,189 @@ function compileToggleMark(
 function compileSetBlockType(
   store: EditorStore,
   blockType: TextLeafType,
+  tag?: string,
 ): TransactionBuilder | null {
   const range = textRange(store);
   if (!range) return null;
-  const node = store.requireTextNode(range.start.node);
-  if (node.type === blockType) return null;
+  // Apply across every covered leaf so a multi-block selection retypes as one
+  // transaction (e.g. turn three paragraphs into headings). Works for a collapsed
+  // caret too (start.node === end.node), which the range-based helper would drop.
+  const targets = coveredTextLeaves(store, range);
+  if (targets.length === 0) return null;
+  const tr = store.transaction();
+  let changed = false;
+  for (const node of targets) {
+    if (node.type !== blockType) {
+      tr.push({
+        from: node.type,
+        node: node.id,
+        to: blockType,
+        type: "set-node-type",
+      });
+      changed = true;
+    }
+    // Heading level rides on the `tag` attr; set it (or clear it for non-headings).
+    const currentTag = node.attrs?.tag;
+    const nextTag = blockType === "heading" ? (tag ?? "h2") : undefined;
+    if (currentTag !== nextTag) {
+      tr.push({
+        from: currentTag,
+        key: "tag",
+        node: node.id,
+        to: nextTag,
+        type: "set-node-attr",
+      });
+      changed = true;
+    }
+  }
+  if (!changed) return null;
+  return tr.setSelection(store.selection as EditorSelection);
+}
+
+/**
+ * Apply a detected markdown shortcut (AC8). Block prefixes strip the prefix and
+ * retype the block in one invertible transaction; inline-code wrapping is the
+ * docs/010 Phase 9 typing-loop follow-on and compiles to a no-op here.
+ */
+function compileApplyMarkdown(
+  store: EditorStore,
+  shortcut: MarkdownShortcut,
+): TransactionBuilder | null {
+  if (shortcut.kind !== "block") return null;
+  const sel = store.selection;
+  if (sel?.type !== "text") return null;
+  const node = store.getNode(sel.focus.node);
+  if (!node || node.kind !== "text") return null;
+  const text = node.content.text;
+  if (text.length < shortcut.removeTo) return null;
+  const tr = store.transaction();
+  tr.replaceText({
+    at: 0,
+    inserted: "",
+    node: node.id,
+    removed: text.slice(0, shortcut.removeTo),
+  });
+  if (node.type !== shortcut.blockType) {
+    tr.push({
+      from: node.type,
+      node: node.id,
+      to: shortcut.blockType,
+      type: "set-node-type",
+    });
+  }
+  const nextTag =
+    shortcut.blockType === "heading" ? (shortcut.tag ?? "h2") : undefined;
+  if (node.attrs?.tag !== nextTag) {
+    tr.push({
+      from: node.attrs?.tag,
+      key: "tag",
+      node: node.id,
+      to: nextTag,
+      type: "set-node-attr",
+    });
+  }
+  const finalContent = replaceTextContent(
+    node.content,
+    0,
+    shortcut.removeTo,
+    EMPTY_SLICE,
+  );
+  const focus = pointAtOffset(node.id, finalContent, 0);
+  return tr.setSelection({ anchor: focus, focus, type: "text" });
+}
+
+/** Reorder a top-level block to a new body index (AC9 block reorder). */
+function compileMoveBlock(
+  store: EditorStore,
+  node: NodeId,
+  toIndex: number,
+): TransactionBuilder | null {
+  const entry = store.parentEntry(node);
+  if (!entry) return null;
+  const parent = store.requireNode(entry.parent);
+  if (parent.kind !== "structural") return null;
+  const clamped = Math.max(0, Math.min(parent.children.length - 1, toIndex));
+  if (clamped === entry.index) return null;
   const tr = store.transaction();
   tr.push({
-    from: node.type,
-    node: node.id,
-    to: blockType,
-    type: "set-node-type",
+    from: { index: entry.index, parent: entry.parent },
+    node,
+    to: { index: clamped, parent: entry.parent },
+    type: "move-node",
   });
   return tr.setSelection(store.selection as EditorSelection);
+}
+
+/**
+ * Insert a new object block after the current block (AC9 slash/insert menu). The
+ * data is normalized and baked through the registry so the inserted node is
+ * publish-ready immediately, exactly like a compat import.
+ */
+function compileInsertObject(
+  store: EditorStore,
+  objectType: string,
+  data: JsonValue,
+): TransactionBuilder | null {
+  const definition = store.registry.get(objectType);
+  if (!definition) return null;
+  const normalized = definition.normalizeData(data);
+  const result = bakeObjectData(store.registry, objectType, normalized.data);
+  const id = store.allocator.createNodeId();
+  const objectNode = makeObjectNode({
+    baked: result.baked ?? undefined,
+    data: normalized.data,
+    id,
+    status: result.status,
+    type: objectType,
+  });
+  const insertIndex = insertionIndexAfterSelection(store);
+  const tr = store.transaction();
+  tr.insertNode(store.bodyId, insertIndex, objectNode);
+  return tr.setSelection({ node: id, type: "node" });
+}
+
+/**
+ * Insert pre-built blocks after the current block (AC8 HTML paste). The view
+ * builds the nodes from sanitized HTML through the compat importer with the
+ * store's allocator, so their ids are unique; this just splices them into the
+ * body order and lands the caret at the end of the last inserted leaf.
+ */
+function compileInsertBlocks(
+  store: EditorStore,
+  nodes: readonly EditorNode[],
+): TransactionBuilder | null {
+  if (nodes.length === 0) return null;
+  const insertIndex = insertionIndexAfterSelection(store);
+  const tr = store.transaction();
+  nodes.forEach((node, i) =>
+    tr.insertNode(store.bodyId, insertIndex + i, node),
+  );
+  const last = nodes[nodes.length - 1]!;
+  if (last.kind === "text") {
+    const focus = pointAtOffset(
+      last.id,
+      last.content,
+      last.content.text.length,
+    );
+    tr.setSelection({ anchor: focus, focus, type: "text" });
+  } else {
+    tr.setSelection({ node: last.id, type: "node" });
+  }
+  return tr;
+}
+
+/** Body index just after the current selection's top-level block (or the end). */
+function insertionIndexAfterSelection(store: EditorStore): number {
+  const sel = store.selection;
+  const anchorId =
+    sel?.type === "text"
+      ? sel.focus.node
+      : sel?.type === "node" || sel?.type === "gap"
+        ? sel.node
+        : null;
+  if (!anchorId) return store.order.length;
+  const index = store.order.indexOf(anchorId);
+  return index < 0 ? store.order.length : index + 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -664,8 +990,11 @@ function compileOutdentItem(
 
 function isMarkActive(store: EditorStore, kind: TextMarkKind): boolean {
   const range = textRange(store);
-  if (!range || range.start.node !== range.end.node) return false;
-  if (range.start.offset === range.end.offset) {
+  if (!range) return false;
+  if (
+    range.start.node === range.end.node &&
+    range.start.offset === range.end.offset
+  ) {
     // Collapsed: active if any mark of this kind contains the caret.
     const node = store.requireTextNode(range.start.node);
     return node.marks.some((mark) => {
@@ -675,8 +1004,14 @@ function isMarkActive(store: EditorStore, kind: TextMarkKind): boolean {
       return mFrom <= range.start.offset && range.start.offset <= mTo;
     });
   }
-  const node = store.requireTextNode(range.start.node);
-  return isRangeMarked(node, kind, range.start.offset, range.end.offset);
+  // A (possibly cross-leaf) selection is active only when every covered leaf
+  // range is fully marked — the mirror of the cross-leaf toggle, so the toolbar
+  // toggle and its active state agree on multi-block selections (AC2).
+  const leaves = leafRangesInSelection(store);
+  return (
+    leaves.length > 0 &&
+    leaves.every(({ node, from, to }) => isRangeMarked(node, kind, from, to))
+  );
 }
 
 function canIndent(store: EditorStore): boolean {
@@ -851,6 +1186,42 @@ function markOver(
     kind,
     to: boundaryAtOffset(node.content, to, "after"),
   };
+}
+
+/** A copy of `mark` re-spanned to `[from, to)`, preserving its kind and attrs. */
+function cloneMarkOver(
+  node: TextLeafNode,
+  mark: TextMark,
+  from: number,
+  to: number,
+  id: string,
+): TextMark {
+  return {
+    ...(mark.attrs ? { attrs: mark.attrs } : {}),
+    from: boundaryAtOffset(node.content, from, "before"),
+    id,
+    kind: mark.kind,
+    to: boundaryAtOffset(node.content, to, "after"),
+  };
+}
+
+/** The href of a `link` mark covering the caret/selection start, or null. */
+function activeLinkHref(store: EditorStore): string | null {
+  const range = textRange(store);
+  if (!range) return null;
+  const node = store.getNode(range.start.node);
+  if (!node || node.kind !== "text") return null;
+  const at = range.start.offset;
+  for (const mark of node.marks) {
+    if (mark.kind !== "link") continue;
+    const mFrom = resolveBoundaryOffset(node.content, mark.from);
+    const mTo = resolveBoundaryOffset(node.content, mark.to);
+    if (mFrom <= at && at <= mTo) {
+      const href = mark.attrs?.href;
+      return typeof href === "string" ? href : "";
+    }
+  }
+  return null;
 }
 
 function isRangeMarked(

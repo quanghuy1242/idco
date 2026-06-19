@@ -1,10 +1,12 @@
 import type { Story, StoryDefault } from "@ladle/react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
+  OwnedModelEditor,
   OwnedModelEditorView,
   bakeObjectData,
   createDefaultBlockRegistry,
   createEditorStore,
+  createEditorStoreFromCompat,
   createIdAllocator,
   makeObjectNode,
   makeStructuralNode,
@@ -92,6 +94,38 @@ export const Phase55Editing: Story = () => {
       viewRef={viewRef}
       viewportHeight={PHASE5_VIEWPORT}
       virtualize
+    />
+  );
+};
+
+/**
+ * Phase 8 AC3 — a paragraph whose text carries overlapping bold/italic and a
+ * link mark, so the leaf renders as many DOM text nodes across semantic mark
+ * elements. The e2e drives caret/selection across that formatted run to prove
+ * the offset↔DOM geometry stays correct over split spans.
+ */
+export const Phase8FormattedRun: Story = () => {
+  const store = useMemo(() => createFormattedRunStore(), []);
+  const viewRef = useRef<OwnedModelEditorViewHandle | null>(null);
+
+  return (
+    <OwnedModelStoryFrame store={store} viewRef={viewRef} virtualize={false} />
+  );
+};
+
+/**
+ * Phase 8 — the full opt-in editor (toolbar + find) over a seeded document,
+ * exposing the view diagnostics so the e2e can drive the toolbar and assert the
+ * commands land on the model.
+ */
+export const Phase8ToolbarEditor: Story = () => {
+  const store = useMemo(() => createFormattedRunStore(), []);
+  return (
+    <OwnedModelEditor
+      diagnosticsKey={ENGINE_VIEW_API_KEY}
+      forcePolyfill
+      store={store}
+      virtualize={false}
     />
   );
 };
@@ -279,6 +313,32 @@ function objectNode(
     id: allocator.createNodeId(),
     status: baked.status,
     type,
+  });
+}
+
+function createFormattedRunStore() {
+  // A paragraph with overlapping bold/italic plus a link, imported through compat
+  // so the marks render as nested semantic elements (Phase 8 AC3).
+  return createEditorStoreFromCompat({
+    root: {
+      children: [
+        {
+          children: [
+            { format: 0, text: "plain ", type: "text" },
+            { format: 1, text: "bold", type: "text" },
+            { format: 3, text: "bolditalic", type: "text" },
+            { format: 0, text: " then ", type: "text" },
+            {
+              children: [{ format: 0, text: "a link", type: "text" }],
+              type: "link",
+              url: "https://idco.dev",
+            },
+            { format: 0, text: " end", type: "text" },
+          ],
+          type: "paragraph",
+        },
+      ],
+    },
   });
 }
 

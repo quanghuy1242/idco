@@ -157,10 +157,10 @@ test("AC4 editing an object re-bakes it; an unbakeable edit is recoverable", asy
   // Clearing the media source produces a recoverable invalid object, not a crash.
   const mediaId = objectId(afterEdit, "media");
   await page.locator(`[data-engine-block-id="${mediaId}"]`).click();
-  await page
-    .locator('[data-engine-config-field="src"]')
-    .waitFor({ state: "visible" });
-  await page.locator('[data-engine-config-field="src"]').fill("");
+  // The media config field is an @idco/ui Input labelled "Source" (Phase 8 chrome).
+  const sourceField = page.getByLabel("Source", { exact: true });
+  await sourceField.waitFor({ state: "visible" });
+  await sourceField.fill("");
   await expect
     .poll(async () => (await diag(page)).objects[mediaId]!.status)
     .toBe("invalid");

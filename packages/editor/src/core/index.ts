@@ -75,6 +75,26 @@ export type {
   TocEntry,
 } from "./bake";
 export { bakeObjectData, buildDocumentIndex, runBakeWorkerJob } from "./bake";
+export {
+  resolveLeafMarks,
+  segmentLeaf,
+  segmentText,
+  type ResolvedMark,
+  type TextSegment,
+} from "./marks";
+export {
+  importPayloadLexical,
+  type PayloadImportReport,
+  type PayloadImportResult,
+  type PayloadLexicalInput,
+} from "./payload-import";
+export {
+  detectMarkdownShortcut,
+  type BlockShortcut,
+  type InlineCodeShortcut,
+  type MarkdownShortcut,
+} from "./markdown-shortcuts";
+export { safeHref } from "./url-safety";
 export type { BakeService, WorkerLike } from "./bake-service";
 export {
   createLoopbackBakeService,

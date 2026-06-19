@@ -15,18 +15,23 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { EditorStore, JsonValue, NodeId, ObjectNode } from "../core";
+import { AnchoredPopover, Button, Input } from "@quanghuy1242/idco-ui";
+import {
+  bakeObjectData,
+  type EditorStore,
+  type JsonValue,
+  type NodeId,
+  type ObjectNode,
+} from "../core";
 import { getNodeView, registerNodeView } from "./node-view";
+import { useUpload } from "./upload-context";
 import {
   codeBakedStyle,
   codeLiveStyle,
   mediaBakedStyle,
   mediaThumbStyle,
   objectBlockStyle,
-  objectConfigDoneStyle,
   objectConfigFieldStyle,
-  objectConfigInputStyle,
-  objectConfigStyle,
   objectStatusStyle,
 } from "./styles";
 
@@ -34,8 +39,8 @@ import {
  * One heavy object in the body (docs/010 §5.3). At rest it mounts only its baked
  * static snapshot — no editor instance (AC1) — and activates on pointer down. The
  * outer box is stable across resting↔live so activation never shifts layout
- * (AC3); the live editing surface either edits in place (a `NodeView.renderLive`)
- * or overlays a config panel that does not affect the measured box.
+ * (AC3); the live editing surface either edits in place (`liveMode: "in-place"`,
+ * code) or opens an anchored React Aria popover that floats over the baked view.
  */
 export function EngineObjectBlock(props: {
   readonly node: ObjectNode;
@@ -52,10 +57,15 @@ export function EngineObjectBlock(props: {
   // The resting baked content height, captured at activation. The in-place live
   // editor opens at exactly this height so the block box does not shift (AC3).
   const restHeightRef = useRef(0);
+  const containerRef = useRef<HTMLElement | null>(null);
   const view = getNodeView(node.type);
-  // A node renders in place while live only when its view supplies a live
-  // surface (code today); otherwise the config panel overlays the baked view.
-  const inPlaceLive = live && view?.renderLive !== undefined;
+  // "in-place" live surfaces (code) replace the baked view at the captured
+  // height; everything else keeps the baked view and edits in an anchored React
+  // Aria popover, so the chrome is a real popover (docs/010 §7.1), not a
+  // hand-positioned div.
+  const inPlaceLive =
+    live && view?.renderLive !== undefined && view.liveMode === "in-place";
+  const popoverLive = live && !inPlaceLive;
   return (
     <div
       data-engine-block-id={node.id}
@@ -75,7 +85,10 @@ export function EngineObjectBlock(props: {
               store.activateObject(node.id);
             }
       }
-      ref={(element) => registerBlock(node.id, element)}
+      ref={(element) => {
+        containerRef.current = element;
+        registerBlock(node.id, element);
+      }}
       style={objectBlockStyle}
     >
       {inPlaceLive ? (
@@ -86,14 +99,32 @@ export function EngineObjectBlock(props: {
           store,
         })
       ) : (
-        <BakedObjectView node={node} />
+        <BakedObjectView node={node} store={store} />
       )}
-      {live && !inPlaceLive ? (
-        <ObjectConfigPanel
-          node={node}
-          registerObjectEditor={registerObjectEditor}
-          store={store}
-        />
+      {popoverLive ? (
+        <AnchoredPopover
+          ariaLabel={`Edit ${node.type}`}
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) store.deactivateObject(node.id);
+          }}
+          triggerRef={containerRef}
+        >
+          {view?.renderLive ? (
+            view.renderLive({
+              initialHeight: restHeightRef.current,
+              node,
+              registerObjectEditor,
+              store,
+            })
+          ) : (
+            <ObjectConfigPanel
+              node={node}
+              registerObjectEditor={registerObjectEditor}
+              store={store}
+            />
+          )}
+        </AnchoredPopover>
       ) : null}
     </div>
   );
@@ -103,10 +134,19 @@ export function EngineObjectBlock(props: {
  * The static, publish-ready render of an object's baked snapshot. Dispatches to
  * the registered `NodeView.renderResting`; an unbaked node shows its status and a
  * node with no registered view falls back to a generic placeholder (docs/016 §10).
+ *
+ * When the node carries no baked snapshot (e.g. freshly imported — compat does
+ * not bake, to keep the round-trip deep-equal, docs/010 §14), it is baked here
+ * *for display only* through the registry; the result is never written back to
+ * the model, so the projection stays clean while the object still renders.
  */
-function BakedObjectView(props: { readonly node: ObjectNode }) {
-  const { node } = props;
-  const baked = node.baked;
+function BakedObjectView(props: {
+  readonly node: ObjectNode;
+  readonly store: EditorStore;
+}) {
+  const { node, store } = props;
+  const baked =
+    node.baked ?? bakeObjectData(store.registry, node.type, node.data).baked;
   if (!baked) {
     return (
       <div data-engine-object-baked="none" style={objectStatusStyle}>
@@ -205,7 +245,7 @@ function CodeLiveSurface(props: {
   );
 }
 
-/** A chrome config panel (docs/006) for non-code objects; overlaid, not inline. */
+/** The default config form (docs/006) for non-code objects, shown in the popover. */
 function ObjectConfigPanel(props: {
   readonly node: ObjectNode;
   readonly store: EditorStore;
@@ -239,35 +279,42 @@ function ObjectConfigPanel(props: {
   );
 
   return (
-    <div data-engine-object-editor="config" style={objectConfigStyle}>
+    <div className="grid w-72 gap-2" data-engine-object-editor="config">
       {fields.length === 0 ? (
-        <div style={{ opacity: 0.7 }}>No inline config for {node.type}.</div>
+        <div className="text-sm opacity-70">
+          No inline config for {node.type}.
+        </div>
       ) : (
         fields.map((field) => (
-          <label key={field.key} style={objectConfigFieldStyle}>
-            <span style={{ minWidth: 64 }}>{field.label}</span>
-            <input
-              data-engine-config-field={field.key}
-              onChange={(event) => {
-                const next = { ...values, [field.key]: event.target.value };
+          <label
+            data-engine-config-field={field.key}
+            key={field.key}
+            style={objectConfigFieldStyle}
+          >
+            <span className="min-w-16 text-sm">{field.label}</span>
+            <Input
+              ariaLabel={field.label}
+              onChange={(value) => {
+                const next = { ...values, [field.key]: value };
                 setValues(next);
                 commit(next);
               }}
-              style={objectConfigInputStyle}
-              type="text"
+              size="sm"
               value={values[field.key] ?? ""}
             />
           </label>
         ))
       )}
-      <button
-        data-engine-object-done=""
-        onClick={() => store.deactivateObject(id)}
-        style={objectConfigDoneStyle}
-        type="button"
-      >
-        Done
-      </button>
+      <div className="flex justify-end">
+        <Button
+          ariaLabel="Done"
+          onClick={() => store.deactivateObject(id)}
+          size="sm"
+          variant="primary"
+        >
+          Done
+        </Button>
+      </div>
     </div>
   );
 }
@@ -325,6 +372,9 @@ function bakedCodeText(node: ObjectNode): string {
 // lifted verbatim behind the registry, plus the divider worked example.
 
 registerNodeView({
+  // Code edits in place (the textarea replaces the baked <pre> at its height),
+  // so activation does not shift layout (AC3); everything else uses the popover.
+  liveMode: "in-place",
   renderLive: (args) => (
     <CodeLiveSurface
       initialHeight={args.initialHeight}
@@ -341,6 +391,122 @@ registerNodeView({
   type: "code-block",
 });
 
+/**
+ * The image worked example's live surface (docs/016 §9, docs/010 Phase 8 AC6).
+ *
+ * Rendered inside the block's anchored React Aria popover (the baked figure stays
+ * mounted behind it, so the box does not shift, AC3). `@idco/ui` Source/Alt/
+ * Caption fields plus an upload affordance; upload transport is the host's
+ * `uploadImage` binding (AC10, §10.5) — the node only receives a resolved `src`.
+ */
+function MediaLiveSurface(props: {
+  readonly node: ObjectNode;
+  readonly store: EditorStore;
+  readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
+}) {
+  const { node, store, registerObjectEditor } = props;
+  const id = node.id;
+  const upload = useUpload();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const record = asRecord(node.data);
+    return {
+      alt: stringField(record, "alt"),
+      caption: stringField(record, "caption"),
+      src: stringField(record, "src"),
+    };
+  });
+
+  useEffect(() => {
+    registerObjectEditor(id, true);
+    return () => registerObjectEditor(id, false);
+  }, [id, registerObjectEditor]);
+
+  const commit = useCallback(
+    (next: Record<string, string>) => {
+      const record = currentObjectRecord(store, id);
+      store.command({
+        data: { ...record, ...next },
+        node: id,
+        type: "set-object-data",
+      });
+    },
+    [id, store],
+  );
+
+  const onFile = useCallback(
+    async (file: File | undefined) => {
+      if (!file || !upload) return;
+      const result = await upload(file);
+      const next = {
+        ...values,
+        alt: result.alt ?? values.alt,
+        src: result.src,
+      };
+      setValues(next);
+      commit(next);
+    },
+    [commit, upload, values],
+  );
+
+  return (
+    <div className="grid w-72 gap-2" data-engine-object-editor="media">
+      {(["src", "alt", "caption"] as const).map((key) => (
+        <label
+          data-engine-config-field={key}
+          key={key}
+          style={objectConfigFieldStyle}
+        >
+          <span className="min-w-16 text-sm capitalize">{key}</span>
+          <Input
+            ariaLabel={
+              key === "src" ? "Source" : key === "alt" ? "Alt" : "Caption"
+            }
+            onChange={(value) => {
+              const next = { ...values, [key]: value };
+              setValues(next);
+              commit(next);
+            }}
+            size="sm"
+            value={values[key] ?? ""}
+          />
+        </label>
+      ))}
+      <div className="flex items-center justify-end gap-2">
+        {upload ? (
+          <>
+            <input
+              accept="image/*"
+              aria-hidden="true"
+              hidden
+              onChange={(event) => void onFile(event.target.files?.[0])}
+              ref={fileRef}
+              type="file"
+            />
+            <Button
+              ariaLabel="Upload image"
+              iconName="Upload"
+              onClick={() => fileRef.current?.click()}
+              size="sm"
+              variant="secondary"
+            >
+              Upload
+            </Button>
+          </>
+        ) : null}
+        <Button
+          ariaLabel="Done"
+          onClick={() => store.deactivateObject(id)}
+          size="sm"
+          variant="primary"
+        >
+          Done
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 registerNodeView({
   insert: {
     createData: () => ({ alt: "", caption: "", src: "" }),
@@ -348,6 +514,13 @@ registerNodeView({
     keywords: ["img", "photo", "upload"],
     label: "Image",
   },
+  renderLive: (args) => (
+    <MediaLiveSurface
+      node={args.node}
+      registerObjectEditor={args.registerObjectEditor}
+      store={args.store}
+    />
+  ),
   renderResting: ({ baked }) => {
     const payload = asRecord(baked.payload);
     const src = stringField(payload, "src");

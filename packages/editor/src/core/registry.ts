@@ -208,6 +208,13 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
         },
       };
     },
+    // Caption + alt are the searchable internals of a media node (011 §2.7).
+    (data) => {
+      const record = isJsonObject(data) ? data : {};
+      return [stringValue(record.caption) ?? "", stringValue(record.alt) ?? ""]
+        .filter(Boolean)
+        .join(" ");
+    },
   ),
   simpleObjectDefinition(
     "post-ref",
@@ -232,6 +239,7 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
         },
       };
     },
+    (data) => stringValue((isJsonObject(data) ? data : {}).title) ?? "",
   ),
   simpleObjectDefinition(
     "embed",
@@ -251,6 +259,7 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
         payload: { title: stringValue(record.title) ?? "", url },
       };
     },
+    (data) => stringValue((isJsonObject(data) ? data : {}).title) ?? "",
   ),
   simpleObjectDefinition(
     "table-of-contents",
@@ -341,6 +350,11 @@ function codeBlockDefinition(): NodeDefinition {
         status: statusValue(node.status) ?? "ready",
       };
     },
+    // The code source is the searchable internal content of a code block (011
+    // §2.7, docs/016 §6.1) so find-in-page reaches inside code, not just prose.
+    plainText(data) {
+      return pieceTableText((isJsonObject(data) ? data : {}).code);
+    },
     normalizeData(value) {
       const normalized: ObjectNormalizationResult = isObjectNormalizationResult(
         value,
@@ -383,15 +397,18 @@ function simpleObjectDefinition(
   type: string,
   fromCompatNode: (node: RichTextCompatNode) => ObjectNormalizationResult,
   bake?: (data: JsonValue) => BakedSnapshot | null,
+  plainText?: (data: JsonValue) => string,
 ): NodeDefinition {
   /*
    * Built-in object definitions preserve known fields as JSON-safe data and keep
    * the `baked`/`status` slots alive. The optional `bake` produces the object's
    * static snapshot from that data (Phase 6); when omitted the object has no
-   * baker and stays unresolved (docs/010 §7.5 / Phase 6 AC4).
+   * baker and stays unresolved (docs/010 §7.5 / Phase 6 AC4). The optional
+   * `plainText` is the search/index adapter (011 §2.7, docs/016 §6.1).
    */
   return {
     ...(bake ? { bake } : {}),
+    ...(plainText ? { plainText } : {}),
     fromCompatNode(node) {
       const value = fromCompatNode(node);
       return {

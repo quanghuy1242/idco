@@ -68,6 +68,7 @@ import {
   type UnknownObjectPolicy,
 } from "./registry";
 import { createEditorStore, type EditorStore } from "./store";
+import { safeHref } from "./url-safety";
 
 /**
  * Lexical-compatible text-format bitmask.
@@ -374,6 +375,10 @@ function importCompatNode(
    */
   if (isObjectNodeType(node.type, state.registry)) {
     const value = state.registry.normalizeCompatObject(node);
+    // Import keeps the source's baked field as-is (no bake here) so the compat
+    // round-trip stays deep-equal except ids (docs/010 §14). An object that
+    // arrives without a baked snapshot is baked *for display* in the view
+    // (object-block `BakedObjectView`), never written back to the model.
     state.blocks.set(
       id,
       makeObjectNode({
@@ -476,11 +481,26 @@ export function compatInlineChildren(
    * then emit one text node for each segment with a stable bitmask for exactly
    * that segment. Adjacent identical segments are merged to avoid noisy output.
    */
+  // Link marks project back to legacy `link` element nodes wrapping their inline
+  // children (the inverse of the import fix), so a link round-trips with its href.
+  const links = node.marks
+    .filter((mark) => mark.kind === "link")
+    .map((mark) => ({
+      from: resolveBoundaryOffset(node.content, mark.from),
+      href: typeof mark.attrs?.href === "string" ? mark.attrs.href : "",
+      to: resolveBoundaryOffset(node.content, mark.to),
+    }))
+    .sort((a, b) => a.from - b.from);
+
   const breakpoints = new Set([0, node.content.text.length]);
   for (const mark of node.marks) {
     if (!isFormatMark(mark.kind)) continue;
     breakpoints.add(resolveBoundaryOffset(node.content, mark.from));
     breakpoints.add(resolveBoundaryOffset(node.content, mark.to));
+  }
+  for (const link of links) {
+    breakpoints.add(link.from);
+    breakpoints.add(link.to);
   }
   for (let index = 0; index < node.content.text.length; index += 1) {
     if (node.content.text[index] === "\n") {
@@ -489,33 +509,66 @@ export function compatInlineChildren(
     }
   }
   const sorted = [...breakpoints].sort((a, b) => a - b);
-  const children: RichTextCompatNode[] = [];
+
+  // First pass: one inline node per segment, tagged with its start offset.
+  const segments: { from: number; node: RichTextCompatNode }[] = [];
   for (let index = 0; index < sorted.length - 1; index += 1) {
     const from = sorted[index]!;
     const to = sorted[index + 1]!;
     if (from === to) continue;
     const text = node.content.text.slice(from, to);
-    if (text === "\n") {
-      children.push({ type: "linebreak" });
+    segments.push({
+      from,
+      node:
+        text === "\n"
+          ? { type: "linebreak" }
+          : { format: formatAtRange(node, from, to), text, type: "text" },
+    });
+  }
+
+  // Second pass: merge adjacent same-format text and group link-covered runs into
+  // `link` element nodes.
+  const children: RichTextCompatNode[] = [];
+  let i = 0;
+  while (i < segments.length) {
+    const segment = segments[i]!;
+    const link = links.find(
+      (l) => segment.from >= l.from && segment.from < l.to,
+    );
+    if (!link) {
+      pushInline(children, segment.node);
+      i += 1;
       continue;
     }
-    const format = formatAtRange(node, from, to);
-    const previous = children.at(-1);
-    if (
-      previous &&
-      previous.type === "text" &&
-      previous.format === format &&
-      typeof previous.text === "string"
+    const linkChildren: RichTextCompatNode[] = [];
+    while (
+      i < segments.length &&
+      segments[i]!.from >= link.from &&
+      segments[i]!.from < link.to
     ) {
-      children[children.length - 1] = {
-        ...previous,
-        text: previous.text + text,
-      };
-      continue;
+      pushInline(linkChildren, segments[i]!.node);
+      i += 1;
     }
-    children.push({ format, text, type: "text" });
+    children.push({ children: linkChildren, type: "link", url: link.href });
   }
   return children;
+}
+
+/** Append an inline node, merging it into the previous same-format text run. */
+function pushInline(out: RichTextCompatNode[], node: RichTextCompatNode): void {
+  const previous = out.at(-1);
+  if (
+    node.type === "text" &&
+    previous &&
+    previous.type === "text" &&
+    previous.format === node.format &&
+    typeof previous.text === "string" &&
+    typeof node.text === "string"
+  ) {
+    out[out.length - 1] = { ...previous, text: previous.text + node.text };
+    return;
+  }
+  out.push(node);
 }
 
 /**
@@ -607,14 +660,16 @@ function isInlineLinkType(type: string): boolean {
 }
 
 function inlineLinkHref(node: RichTextCompatNode): string {
+  // Sanitize on import so the model never stores a dangerous href (a
+  // `javascript:` link from old data becomes inert, docs/010 §10.5).
   const direct = typeof node.url === "string" ? node.url : undefined;
-  if (direct) return direct;
+  if (direct) return safeHref(direct);
   const href = (node as { href?: unknown }).href;
-  if (typeof href === "string") return href;
+  if (typeof href === "string") return safeHref(href);
   const fields = (node as { fields?: unknown }).fields;
   if (fields && typeof fields === "object") {
     const url = (fields as { url?: unknown }).url;
-    if (typeof url === "string") return url;
+    if (typeof url === "string") return safeHref(url);
   }
   return "";
 }

@@ -317,6 +317,11 @@ export class EditorStore {
     return this.#order;
   }
 
+  /** The body root node id (top-level container). */
+  get bodyId(): NodeId {
+    return ROOT_NODE_ID;
+  }
+
   getNode(id: NodeId): EditorNode | undefined {
     return this.#nodes.get(id);
   }
@@ -522,7 +527,7 @@ export class EditorStore {
   }
 
   /** Answer a read-only query for toolbar active/enabled state (queries never mutate). */
-  query(query: EditorQuery): boolean | TextLeafType | null {
+  query(query: EditorQuery): boolean | TextLeafType | string | null {
     return runQuery(this, query);
   }
 

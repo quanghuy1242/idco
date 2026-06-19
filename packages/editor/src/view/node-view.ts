@@ -58,6 +58,13 @@ export type NodeView = {
   readonly type: string;
   renderResting(args: NodeViewRestingArgs): ReactNode;
   renderLive?(args: NodeViewLiveArgs): ReactNode;
+  /**
+   * How `renderLive` mounts (docs/010 §6.4): `"in-place"` replaces the baked
+   * view at the captured height (code-block, no layout shift), `"popover"`
+   * (default) keeps the baked view and floats the live surface in a React Aria
+   * popover anchored to the block (image config, etc.).
+   */
+  readonly liveMode?: "in-place" | "popover";
   readonly insert?: NodeViewInsert;
 };
 
@@ -75,6 +82,17 @@ export function registerNodeView(view: NodeView): void {
 /** The view for a node type, or undefined → the generic baked placeholder. */
 export function getNodeView(type: string): NodeView | undefined {
   return NODE_VIEWS.get(type);
+}
+
+/** Every registered node that offers an insert affordance (docs/016 §6.2, AC9). */
+export function listInsertableNodes(): readonly (NodeView & {
+  insert: NonNullable<NodeView["insert"]>;
+})[] {
+  const out: (NodeView & { insert: NonNullable<NodeView["insert"]> })[] = [];
+  for (const view of NODE_VIEWS.values()) {
+    if (view.insert) out.push(view as never);
+  }
+  return out;
 }
 
 /** Both halves of a node, for the one-call registration in docs/016 §7. */

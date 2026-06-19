@@ -62,8 +62,45 @@ export const ENGINE_SURFACE_SUPPRESS_CSS =
   "[data-engine-view-root]{caret-color:transparent;}" +
   "[data-engine-view-root] [data-engine-text-id]{caret-color:transparent;}" +
   "[data-engine-view-root] [data-engine-text-id]::selection{background:transparent;color:inherit;}" +
+  // Marks render as nested elements (strong/em/a/…) inside the text block; their
+  // own ::selection must be suppressed too, or the native highlight shows over
+  // the engine overlay on a formatted run (the "double selection", Phase 8 AC3).
+  "[data-engine-view-root] [data-engine-text-id] *::selection{background:transparent;color:inherit;}" +
   "[data-engine-view-root]::selection{background:transparent;color:inherit;}" +
   "[data-engine-view-root] [data-engine-object-editor],[data-engine-view-root] [data-engine-object-editor] *{caret-color:auto;}";
+
+/**
+ * Visible typography for the editing surface (docs/010 Phase 8 AC2/AC3).
+ *
+ * The editor renders every text leaf as a `<div role="textbox">` (the caret/
+ * EditContext host), so the block type is carried on `data-engine-block-type`
+ * rather than a semantic element — which means a `prose` typography layer (which
+ * targets `<h2>`/`<blockquote>`/…) cannot style the editing surface. This CSS is
+ * the engine's own block + mark styling so a heading looks like a heading and a
+ * link is underlined *in the editor*, themed with DaisyUI tokens
+ * (`--color-primary`/`--color-base-content`) so it follows the active theme even
+ * when the host has not installed the typography plugin. The resting/reader
+ * render uses real semantic elements + `prose` (resting-document.tsx); this is
+ * the editor-surface counterpart, not a competing theme.
+ */
+export const ENGINE_TYPOGRAPHY_CSS =
+  // Block types.
+  '[data-engine-view-root] [data-engine-block-type="heading"]{font-weight:700;line-height:1.25;margin:0;}' +
+  '[data-engine-view-root] [data-engine-heading="h1"]{font-size:1.875em;}' +
+  '[data-engine-view-root] [data-engine-heading="h2"]{font-size:1.5em;}' +
+  '[data-engine-view-root] [data-engine-heading="h3"]{font-size:1.25em;}' +
+  '[data-engine-view-root] [data-engine-heading="h4"]{font-size:1.1em;}' +
+  '[data-engine-view-root] [data-engine-block-type="quote"]{border-left:3px solid color-mix(in srgb, currentColor 30%, transparent);padding-left:12px;font-style:italic;opacity:0.85;}' +
+  '[data-engine-view-root] [data-engine-block-type="listitem"]{padding-left:1.5em;}' +
+  '[data-engine-view-root] [data-engine-block-type="listitem"]::before{content:"•";position:absolute;left:0.5em;opacity:0.6;}' +
+  // Inline marks. Semantic elements (strong/em/u/s/sub/sup) already render via UA
+  // defaults; these style the ones the UA does not (link without href, code,
+  // highlight, comment, glossary) and theme the link with the DaisyUI token.
+  "[data-engine-view-root] [data-engine-mark='link']{text-decoration:underline;text-underline-offset:2px;color:var(--color-primary, #2563eb);cursor:pointer;}" +
+  "[data-engine-view-root] [data-engine-mark='code']{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:color-mix(in srgb, currentColor 8%, transparent);padding:0.05em 0.3em;border-radius:3px;}" +
+  "[data-engine-view-root] [data-engine-mark='highlight']{background:color-mix(in srgb, var(--color-warning, gold) 45%, transparent);color:inherit;border-radius:2px;}" +
+  "[data-engine-view-root] [data-engine-mark='comment']{background:color-mix(in srgb, var(--color-info, #38bdf8) 22%, transparent);border-radius:2px;}" +
+  "[data-engine-view-root] [data-engine-mark='glossary']{border-bottom:1px dotted currentColor;}";
 
 export const objectBlockStyle: CSSProperties = {
   border: "1px solid color-mix(in srgb, CanvasText 16%, transparent)",
