@@ -10,7 +10,7 @@
  */
 import { useRef, useState, type RefObject } from "react";
 import {
-  orderedTextLeaves,
+  pointAtOffset,
   type EditorStore,
   type EngineScheduler,
   type NodeId,
@@ -50,54 +50,70 @@ export function selectionRects(
   if (!root || store.selection?.type !== "text") return [];
   const selection = store.selection;
   const rootRect = root.getBoundingClientRect();
-  /*
-   * Index endpoints through the same document-order text-leaf walk the
-   * clipboard serializer uses (docs/011 §8.5/§13.9), not the top-level body
-   * order. That keeps nested leaves (a list item's text) paintable and skips
-   * object/structural blocks, which carry no text range to paint. Only mounted
-   * leaves produce rects, so offscreen middles are never painted (§8.5).
-   */
-  const leaves = orderedTextLeaves(store);
-  const indexOf = new Map(leaves.map((leaf, index) => [leaf.id, index]));
-  const anchorIndex = indexOf.get(selection.anchor.node);
-  const focusIndex = indexOf.get(selection.focus.node);
-  if (anchorIndex === undefined || focusIndex === undefined) return [];
-  const forward =
-    anchorIndex < focusIndex ||
-    (anchorIndex === focusIndex &&
-      selection.anchor.offset <= selection.focus.offset);
-  const start = forward ? selection.anchor : selection.focus;
-  const end = forward ? selection.focus : selection.anchor;
-  const startIndex = Math.min(anchorIndex, focusIndex);
-  const endIndex = Math.max(anchorIndex, focusIndex);
+  const { anchor, focus } = selection;
   const collapsed =
-    selection.anchor.node === selection.focus.node &&
-    selection.anchor.offset === selection.focus.offset;
+    anchor.node === focus.node && anchor.offset === focus.offset;
   const rects: OverlayRect[] = [];
   if (collapsed) {
-    const leaf = leaves[focusIndex]!;
-    const element = blockRefs.get(leaf.id);
-    if (element) {
+    /*
+     * A collapsed caret needs only its own leaf — never a document walk. The old
+     * path built a `Map` of *every* text leaf in the document to find one index,
+     * so every keystroke/arrow paid O(total leaves). The focus leaf is mounted
+     * iff it has a blockRef; an offscreen caret paints nothing (§8.5).
+     */
+    const leaf = store.getNode(focus.node);
+    const element = blockRefs.get(focus.node);
+    if (leaf?.kind === "text" && element) {
       rects.push(
         ...caretRectsFromRange(
           element,
           rootRect,
-          leaf.id,
-          selection.focus.offset,
-          leaf.node.content.text.length,
+          focus.node,
+          focus.offset,
+          leaf.content.text.length,
         ),
       );
     }
   } else {
-    for (let index = startIndex; index <= endIndex; index += 1) {
-      const leaf = leaves[index]!;
-      const element = blockRefs.get(leaf.id);
-      if (!element) continue;
-      const length = leaf.node.content.text.length;
-      const from = leaf.id === start.node ? start.offset : 0;
-      const to = leaf.id === end.node ? end.offset : length;
+    /*
+     * Range: order the two endpoints with the model's O(depth) comparator, then
+     * paint only the *mounted* text leaves that fall inside [start, end]. We walk
+     * the mounted `blockRefs` (bounded by the viewport window + overscan), never
+     * the whole document — so a selection across a virtualized gap stays cheap to
+     * repaint per drag frame and the offscreen middle is held by the model, not
+     * painted (docs/011 §8.5). This is what kept drag selection from lagging on a
+     * book-scale document, where the old per-frame full walk blew the frame budget.
+     */
+    let forward = true;
+    try {
+      forward = store.comparePoints(anchor, focus) <= 0;
+    } catch {
+      forward = true;
+    }
+    const start = forward ? anchor : focus;
+    const end = forward ? focus : anchor;
+    for (const [id, element] of blockRefs) {
+      const leaf = store.getNode(id);
+      if (!leaf || leaf.kind !== "text") continue;
+      const length = leaf.content.text.length;
+      // Endpoint leaves are always in range; an interior leaf is kept only if it
+      // sorts at/after `start` and at/before `end` in model order.
+      if (id !== start.node && id !== end.node) {
+        const at = pointAtOffset(id, leaf.content, 0);
+        let inRange = false;
+        try {
+          inRange =
+            store.comparePoints(at, start) >= 0 &&
+            store.comparePoints(at, end) <= 0;
+        } catch {
+          inRange = false;
+        }
+        if (!inRange) continue;
+      }
+      const from = id === start.node ? start.offset : 0;
+      const to = id === end.node ? end.offset : length;
       rects.push(
-        ...rangeRectsFromText(element, rootRect, leaf.id, from, to, length),
+        ...rangeRectsFromText(element, rootRect, id, from, to, length),
       );
     }
   }

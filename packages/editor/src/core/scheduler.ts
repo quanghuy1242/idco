@@ -161,6 +161,15 @@ export type EngineScheduler = {
   readonly reset: () => void;
   readonly snapshot: () => EnginePerformanceSnapshot;
   readonly flushAll: () => void;
+  /**
+   * Drain one non-sync lane synchronously, now. The drag path uses this to paint
+   * the selection overlay in the *same* animation frame as the extend: the extend
+   * runs inside a rAF and `dispatch` would otherwise schedule the overlay's frame
+   * task onto the *next* rAF (a `requestAnimationFrame` issued from within a rAF
+   * fires a frame later), leaving the painted selection one frame behind the
+   * pointer. Flushing the frame lane here collapses that gap.
+   */
+  readonly flushLane: (lane: Exclude<EngineSchedulerLane, "sync">) => void;
 };
 
 export type EngineSchedulerOptions = {
@@ -302,6 +311,7 @@ export function createEngineScheduler(
   return {
     createTask,
     flushAll: () => flushAll(state),
+    flushLane: (lane) => flushLane(state, lane),
     reset: () => state.taskMetrics.clear(),
     snapshot: () => snapshot(state),
   };

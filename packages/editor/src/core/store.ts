@@ -36,6 +36,7 @@ import {
   replaceTextContent,
   resolveBoundaryOffset,
   resolvePointOffset,
+  selectionsEqual,
   sliceTextContent,
   type DocumentSettings,
   type EditorDocumentSnapshot,
@@ -701,8 +702,10 @@ export class EditorStore {
       draft.selectionAfter ??
       mapSelection(this, selectionBefore, draft.steps, selectionForward);
     this.#selection = mappedSelection;
-    const selectionChanged =
-      JSON.stringify(selectionBefore) !== JSON.stringify(mappedSelection);
+    // Field compare, not `JSON.stringify` !== `JSON.stringify`: the old form
+    // serialized both selections on every keystroke and every drag-extend frame.
+    // `selectionsEqual` allocates nothing and exits on the first differing field.
+    const selectionChanged = !selectionsEqual(selectionBefore, mappedSelection);
     const committed: CommittedTransaction = {
       inverse: inverses.toReversed(),
       origin: draft.origin,

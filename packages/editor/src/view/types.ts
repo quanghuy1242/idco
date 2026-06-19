@@ -29,6 +29,20 @@ export type TextFormatLike = {
   readonly underlineThickness?: string;
 };
 
+/**
+ * The `textupdate` event shape shared by native EditContext and the vendored
+ * polyfill. `updateRangeStart`/`updateRangeEnd` are offsets into the *pre-update*
+ * text being replaced and `text` is the inserted slice — the exact edit span, so
+ * the view never has to re-diff the buffer to recover it (docs/011 §9.4).
+ */
+export type TextUpdateEventLike = Event & {
+  readonly updateRangeStart: number;
+  readonly updateRangeEnd: number;
+  readonly text: string;
+  readonly selectionStart: number;
+  readonly selectionEnd: number;
+};
+
 export type TextFormatUpdateEventLike = Event & {
   getTextFormats(): readonly TextFormatLike[];
 };

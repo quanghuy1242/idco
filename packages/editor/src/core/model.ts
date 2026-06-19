@@ -105,6 +105,54 @@ export type GapSelection = {
 
 export type EditorSelection = TextSelection | NodeSelection | GapSelection;
 
+/**
+ * Structural equality for two text points.
+ *
+ * Compares only the fields that make a point distinct — node, character/edge
+ * anchor, offset, and association side — without serializing. Lives in `model`
+ * (next to the selection types, no store dependency) so `dispatch` can compare
+ * selections without a `JSON.stringify` round-trip on the keystroke/drag path.
+ */
+export function pointsEqual(a: TextPoint, b: TextPoint): boolean {
+  if (a.node !== b.node || a.offset !== b.offset || a.assoc !== b.assoc) {
+    return false;
+  }
+  const aa = a.anchor;
+  const ba = b.anchor;
+  if (aa.kind !== ba.kind) return false;
+  return aa.kind === "char"
+    ? aa.id === (ba as Extract<TextAnchor, { kind: "char" }>).id
+    : aa.edge === (ba as Extract<TextAnchor, { kind: "edge" }>).edge;
+}
+
+/**
+ * Whether two selections are equal. Used by `dispatch` to set the `selection`
+ * dirty flag (docs/011 §8.x) — it replaces a `JSON.stringify` !== `JSON.stringify`
+ * compare that allocated two strings on every keystroke and every drag-extend
+ * frame. This version allocates nothing and short-circuits on the first
+ * differing field (the common "caret moved one character" case exits on
+ * `offset`).
+ */
+export function selectionsEqual(
+  a: EditorSelection | null,
+  b: EditorSelection | null,
+): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (a.type !== b.type) return false;
+  if (a.type === "text") {
+    const other = b as TextSelection;
+    return (
+      pointsEqual(a.anchor, other.anchor) && pointsEqual(a.focus, other.focus)
+    );
+  }
+  if (a.type === "node") {
+    return a.node === (b as NodeSelection).node;
+  }
+  const other = b as GapSelection;
+  return a.node === other.node && a.side === other.side;
+}
+
 export type TextMarkKind =
   | "bold"
   | "italic"

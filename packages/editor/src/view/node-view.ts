@@ -53,6 +53,17 @@ export type NodeViewInsert = {
  * `renderResting` is required for a visible node. `renderLive` is optional —
  * when a definition omits it, the engine mounts the default config panel. The
  * `insert` slot is named for Phase 8 and unused today.
+ *
+ * TODO(virtualization seam, 011 §2.6 / docs/018 §2.11): an object that is
+ * internally large (a 10,000-row grid, a 5,000-line code block) windows its own
+ * internals, so its mounted DOM is only the viewport slice and a measured
+ * `offsetHeight` is wrong for the engine's block-window math. When the first such
+ * node is built (faithful table grid, §2.6), add the optional slots that let a
+ * node *implement its half of the windowing contract*: declare a full/estimated
+ * height (used instead of `offsetHeight` when self-windowing) and opt into nested
+ * scroll when taller than the viewport. This fills an optional SPI slot; it does
+ * not reshape the contract. Until a node needs it, the default (measure
+ * `offsetHeight`) is correct.
  */
 export type NodeView = {
   readonly type: string;

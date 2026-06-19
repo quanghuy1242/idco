@@ -57,6 +57,7 @@ import type {
   MaybePolyfilledEditContextConstructor,
   TextBlockController,
   TextFormatUpdateEventLike,
+  TextUpdateEventLike,
 } from "./types";
 
 export function EngineTextBlock(props: {
@@ -102,53 +103,67 @@ export function EngineTextBlock(props: {
     }
   }, [node.id, store]);
 
-  const onTextUpdate = useCallback(() => {
-    const controller = controllerRef.current;
-    if (!controller) return;
-    // Typing is a horizontal change; drop any remembered vertical goal column.
-    goalColumnRef.current = null;
-    const editContext = controller.editContext;
-    // The typing fast path patches the single rendered text node and authorizes
-    // the commit to skip re-rendering this leaf. A leaf with marks renders as
-    // nested mark elements (many text nodes), so a `textContent` patch would wipe
-    // the formatting — those leaves re-render from the model instead (AC3). The
-    // unformatted common case keeps the fast path.
-    const current = store.getNode(node.id);
-    const hasMarks = current?.kind === "text" && leafHasMarks(current);
-    const onBeforeDispatch = hasMarks
-      ? undefined
-      : () => {
-          patchHostText(hostRef.current, editContext.text);
-          store.markActiveLeafDomSynced();
-        };
-    applyEditContextText(
-      store,
-      node.id,
-      editContext.text,
-      editContext.selectionStart,
-      editContext.selectionEnd,
-      onBeforeDispatch,
-    );
-    // After the text lands, fire any markdown shortcut at the caret (AC8). The
-    // detector is cheap and returns null for ordinary typing; block prefixes
-    // compile to a real conversion, inline-code is the Phase 9 no-op. This is a
-    // second transaction after the text insert (the conversion is separately
-    // undoable); merging the two is the Phase 9 undo-coalescing work (docs/018).
-    const updated = store.getNode(node.id);
-    const selection = store.selection;
-    if (
-      updated?.kind === "text" &&
-      selection?.type === "text" &&
-      selection.focus.node === node.id
-    ) {
-      const shortcut = detectMarkdownShortcut(
-        updated.content.text,
-        selection.focus.offset,
-        updated.type,
+  const onTextUpdate = useCallback(
+    (event: Event) => {
+      const controller = controllerRef.current;
+      if (!controller) return;
+      // Typing is a horizontal change; drop any remembered vertical goal column.
+      goalColumnRef.current = null;
+      const editContext = controller.editContext;
+      // The event already reports the exact replaced span (`updateRangeStart`/`End`
+      // in pre-update coordinates). Forward it so `applyEditContextText` recovers
+      // the edit by index math instead of re-diffing the whole buffer — the input
+      // backend already scanned once to produce this event (docs/011 §9.4).
+      const update = event as TextUpdateEventLike;
+      const editRange =
+        typeof update.updateRangeStart === "number" &&
+        typeof update.updateRangeEnd === "number"
+          ? { end: update.updateRangeEnd, start: update.updateRangeStart }
+          : undefined;
+      // The typing fast path patches the single rendered text node and authorizes
+      // the commit to skip re-rendering this leaf. A leaf with marks renders as
+      // nested mark elements (many text nodes), so a `textContent` patch would wipe
+      // the formatting — those leaves re-render from the model instead (AC3). The
+      // unformatted common case keeps the fast path.
+      const current = store.getNode(node.id);
+      const hasMarks = current?.kind === "text" && leafHasMarks(current);
+      const onBeforeDispatch = hasMarks
+        ? undefined
+        : () => {
+            patchHostText(hostRef.current, editContext.text);
+            store.markActiveLeafDomSynced();
+          };
+      applyEditContextText(
+        store,
+        node.id,
+        editContext.text,
+        editContext.selectionStart,
+        editContext.selectionEnd,
+        onBeforeDispatch,
+        editRange,
       );
-      if (shortcut) store.command({ shortcut, type: "apply-markdown" });
-    }
-  }, [node.id, store]);
+      // After the text lands, fire any markdown shortcut at the caret (AC8). The
+      // detector is cheap and returns null for ordinary typing; block prefixes
+      // compile to a real conversion, inline-code is the Phase 9 no-op. This is a
+      // second transaction after the text insert (the conversion is separately
+      // undoable); merging the two is the Phase 9 undo-coalescing work (docs/018).
+      const updated = store.getNode(node.id);
+      const selection = store.selection;
+      if (
+        updated?.kind === "text" &&
+        selection?.type === "text" &&
+        selection.focus.node === node.id
+      ) {
+        const shortcut = detectMarkdownShortcut(
+          updated.content.text,
+          selection.focus.offset,
+          updated.type,
+        );
+        if (shortcut) store.command({ shortcut, type: "apply-markdown" });
+      }
+    },
+    [goalColumnRef, node.id, store],
+  );
 
   // IME preedit: a fully owned view gets no browser-drawn composition underline,
   // so the engine paints it (docs/010 §7.4, Phase 7 AC5). `textformatupdate`

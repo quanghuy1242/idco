@@ -549,7 +549,12 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       selectionAfter: { anchor, focus, type: "text" },
       steps: [],
     });
-  }, [store]);
+    // Paint the new selection in *this* frame. `extendDragToPointer` already runs
+    // inside a rAF, so the overlay's frame task `dispatch` just queued would fire
+    // on the next rAF — one frame behind the pointer. Draining the frame lane now
+    // closes that gap so the painted selection tracks the drag (docs/010 §7.4).
+    scheduler.flushLane("frame");
+  }, [scheduler, store]);
 
   // Run a drag-extend at most once per animation frame, against the latest
   // pointer (`lastPointerRef`), so a burst of `mousemove`s collapses to one
@@ -756,20 +761,31 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // Rebuild the document index off-thread on mount and after any structural
   // change. The round-trip is async by construction, so the index is null for
   // the first frame and the main thread is never blocked computing it (AC6).
+  //
+  // Debounced: every structural edit (each Enter/split, paste, block move)
+  // changes `order` and would otherwise fire `store.toSnapshot()` — an O(N) clone
+  // of the whole node map — on the main thread, per keystroke. A burst (holding
+  // Enter, pasting) collapses to one snapshot + one worker round-trip after the
+  // edits settle. The snapshot is taken *inside* the debounced callback so the
+  // clone itself is coalesced, not just the worker call.
   useEffect(() => {
     const service = bakeServiceRef.current;
     if (!service) return;
     let cancelled = false;
-    void (async () => {
-      const index = await service.buildIndex(store.toSnapshot());
-      if (cancelled) return;
-      // The index lives in a ref the diagnostics read live; updating it must not
-      // re-render mounted blocks (that would pollute per-block render counts).
-      documentIndexRef.current = index;
-      workerRoundTripsRef.current += 1;
-    })();
+    const handle = setTimeout(() => {
+      void (async () => {
+        const index = await service.buildIndex(store.toSnapshot());
+        if (cancelled) return;
+        // The index lives in a ref the diagnostics read live; updating it must
+        // not re-render mounted blocks (that would pollute per-block render
+        // counts).
+        documentIndexRef.current = index;
+        workerRoundTripsRef.current += 1;
+      })();
+    }, INDEX_REBUILD_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(handle);
     };
   }, [store, order]);
 
@@ -974,6 +990,10 @@ const DEFAULT_VIEWPORT_HEIGHT = 480;
 const DEFAULT_OVERSCAN = 4;
 const DEFAULT_BLOCK_ESTIMATE = 40;
 const AUTOSCROLL_STEP_PX = 12;
+// Coalesce the off-thread document-index rebuild across a burst of structural
+// edits. Short enough that the TOC/search index feels live after a pause, long
+// enough that holding Enter or pasting does not fire an O(N) snapshot per edit.
+const INDEX_REBUILD_DEBOUNCE_MS = 200;
 // Lead the caret keeps from the viewport edge when keyboard movement scrolls it
 // into view (~one line). Small enough that each line-move scrolls about one
 // line, not a whole block. Trivially promotable to a prop if a knob is wanted.
@@ -1038,8 +1058,29 @@ function EngineBlock(props: {
       />
     );
   }
-  // Structural nodes (a `list`) still render a placeholder; nested structural
-  // rendering inside the editing surface is the Phase 5.5/8 follow-on.
+  // Structural nodes render a `[type]` placeholder. This branch is the documented
+  // current behavior of structural blocks (docs/018 §2.10), not unfinished Phase 8
+  // work — Phase 8 ("blog-first feature parity") is complete and never owned it.
+  //
+  // What a structural block is *today*: the model has three node kinds — `text`
+  // leaf, `object`, `structural`. `structural` is used by exactly two things in
+  // practice: (1) ROOT, which holds the top-level body order and is never rendered
+  // through this branch; (2) a `list` container over `listitem` children. And the
+  // `list` container is effectively *vestigial* for editing: the toolbar List
+  // button toggles a flat top-level `listitem` text leaf (parent = ROOT), indent
+  // uses the `attrs.indent` flat fallback, and the import flattens lists to flat
+  // `listitem` leaves — so `currentListItem` (core/commands.ts) never gates into the
+  // structural-nesting path, and **no user-creatable or imported document ever
+  // contains a structural `list` node**. The only way one reaches this branch is a
+  // hand-built snapshot (e.g. `stories/engine-owned-model.stories.tsx`
+  // `phase55-editing`). Lists are flat-by-design (depth via `attrs.indent`); that
+  // flat model — not a recursive renderer — is the nested-list answer.
+  //
+  // So this placeholder guards a representation the engine does not produce. The
+  // genuinely-future use of `structural` is multi-block containers (a quote/callout
+  // holding block children), which is the only case that may ever need a recursive
+  // render + windowing (the §2.10 / virtualization seam). Until then `[type]` is the
+  // honest stub.
   return (
     <div
       data-engine-block-id={node.id}

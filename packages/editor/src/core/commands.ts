@@ -919,6 +919,18 @@ function compileIndentAttr(
   return tr.setSelection(store.selection as EditorSelection);
 }
 
+// Nest a list item under its previous sibling, building structural `list`
+// containers as needed.
+//
+// UNREACHABLE BY DESIGN (today): this only runs when `currentListItem` returns
+// non-null, which requires the item's parent to already be a structural `list`
+// node — and nothing user-facing creates that first structural list. The toolbar
+// makes flat top-level `listitem` leaves (parent = ROOT), plain indent uses the
+// `attrs.indent` fallback (`compileIndentAttr`), and the import flattens lists. So
+// from any user-creatable or imported document there is no path into here; it can
+// only fire atop a hand-built structural list (a story fixture). Kept (not deleted)
+// because it is the correct nesting algebra the day structural containers become a
+// real producer — but it is dormant. Lists are flat-by-design (docs/018 §2.10).
 function compileIndentItem(
   store: EditorStore,
   item: ListItemContext,

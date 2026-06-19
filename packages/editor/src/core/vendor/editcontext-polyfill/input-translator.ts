@@ -321,13 +321,58 @@ export function createInputTranslator(
   // textarea is the real input sink, so its value is authoritative on `input`
   // (which fires after the mutation). Returns whether the model changed.
   //
-  // Cost: O(n) per input event (n = EditContext buffer length) — two linear
-  // scans, no edit-distance matrix. The buffer mirrors the active block/leaf, so
-  // n stays block-sized and this is negligible. It does NOT short-circuit near
-  // the caret, so it is genuinely O(n) per keystroke; only pathological at
-  // MB-scale single buffers. If EditContext is ever bound to a whole (large)
-  // document, bound both scans to a window around the selection
-  // (textarea.selectionStart/End) to make this O(edit-size).
+  // This is the ONE diff in the input pipeline that cannot be eliminated. On the
+  // `beforeinput` path (desktop/Firefox) the browser hands us the inserted data
+  // and we apply it directly with no diff; the engine then reuses the span we
+  // publish on the resulting `textupdate` event (it never re-diffs). But on the
+  // `input`-reconciliation path (Android Chrome's redundant twin, WebKit boundary
+  // cases) the browser already mutated the textarea and told us *nothing* about
+  // the span — for IME / autocorrect / swipe-typing `inputType` carries no usable
+  // (start, end, inserted). So here we MUST discover the change by comparing
+  // strings; there is no precomputed answer to reuse. We are the layer that
+  // originates the span, which is why this scan stays and the engine-side one was
+  // deleted.
+  //
+  // Cost: O(n) per input event (n = EditContext buffer length). The two scans
+  // start at the string ENDS and walk inward to the change, so the price is the
+  // two UNCHANGED halves around the edit, not the edit itself — a 1-char insert in
+  // the middle still compares ~n chars. The buffer mirrors one text leaf (a single
+  // paragraph/heading/list-item — code blocks are heavy objects, not this path),
+  // so n is normally a few hundred chars and the scan is ~1µs: negligible against
+  // a 6ms frame, and the `oldText === newText` line above bails the common
+  // "beforeinput already applied it" case in ~4ns before any scan.
+  //
+  // PROPER SOLUTION (deliberately not implemented — see "why not" below). We
+  // already know WHERE the edit is: `textarea.selectionStart` is the caret right
+  // after it landed, and an `input` event is always a contiguous splice at that
+  // caret. So instead of scanning from the ends inward, anchor at the caret and
+  // scan OUTWARD, capped at a window W (e.g. 512):
+  //
+  //   const caret = Math.min(textarea.selectionStart, newLen);
+  //   const delta = newLen - oldLen;        // caret-delta is the same boundary
+  //                                          // in OLD coordinates
+  //   // walk the left/right splice edges out from the caret, <= W steps each,
+  //   // then build replaceStart/replaceEnd/inserted from the caret ± those walks
+  //
+  // That makes a keystroke in a huge leaf O(W) instead of O(n). The catch is that
+  // you CANNOT cheaply verify the regions outside the window are unchanged —
+  // comparing the two long prefixes for equality is itself O(n) and defeats the
+  // point — so a windowed diff *assumes* locality (valid: input events are local
+  // edits) and needs (1) an O(1) arithmetic check (oldLen - removed +
+  // inserted.length === newLen) and (2) a fallback to this full scan when the
+  // window does not reconcile (a big paste). It also has real boundary cases the
+  // dumb full scan handles for free: surrogate pairs / grapheme clusters
+  // straddling the window edge, an IME *replacing* a span (delete+insert at once,
+  // so the caret is not simply start + inserted.length), and backward selections.
+  //
+  // WHY NOT NOW: it only helps the pathological corner of a 50KB+ SINGLE leaf
+  // (one wall-of-text paragraph, no breaks) edited mid-buffer, AND only on the
+  // Android/WebKit input path, AND the `===` bail already covers the common case.
+  // Nobody authors a 50KB paragraph and edits its middle. So the windowing is
+  // insurance against an input that effectively never occurs, at the cost of ~20
+  // intricate lines plus surrogate/IME-replace edge handling and fuzz tests — a
+  // poor trade. If EditContext is ever bound to a whole large document (not one
+  // leaf), revisit and implement the windowed path above.
   function reconcileModelToTextarea(editContext: EditContextPolyfill): boolean {
     const oldText = editContext.text;
     const newText = textarea.value;

@@ -251,13 +251,28 @@ export function wordRangeAt(text: string, offset: number): [number, number] {
   return result;
 }
 
+/** The exact edit span a `textupdate` event carries (pre-update coordinates). */
+export type EditContextRange = {
+  /** First offset of the replaced range, in the pre-update text. */
+  readonly start: number;
+  /** End (exclusive) of the replaced range, in the pre-update text. */
+  readonly end: number;
+};
+
 /**
- * Apply one EditContext text snapshot to the model (docs/011 §9.4): diff the
- * snapshot against the leaf's current text, build the minimal `replace-text`
- * step preserving surrounding character ids, and dispatch with the snapshot's
- * selection. This is the engine's half of the IME/typing contract — the bug
- * surface the Microsoft-Telex regression lived in — so it is a pure,
- * framework-free function the view calls and the IME fuzz suite drives directly.
+ * Apply one EditContext text snapshot to the model (docs/011 §9.4): build the
+ * minimal `replace-text` step preserving surrounding character ids, and dispatch
+ * with the snapshot's selection. This is the engine's half of the IME/typing
+ * contract — the bug surface the Microsoft-Telex regression lived in — so it is a
+ * pure, framework-free function the view calls and the IME fuzz suite drives
+ * directly.
+ *
+ * `editRange` is the span the `textupdate` event already reported (the polyfill
+ * and native EditContext both supply `updateRangeStart`/`updateRangeEnd`). When
+ * present we recover `(at, removed, inserted)` by index math against the new
+ * snapshot in O(edit-size), skipping the redundant O(n) prefix/suffix scan the
+ * input backend already paid to produce the event. Headless callers (the IME
+ * fuzz suite) omit it and fall back to `diffText`.
  *
  * `onBeforeDispatch` lets the view patch the rendered text node and authorize
  * the active-leaf re-render skip immediately before the commit; headless callers
@@ -270,9 +285,10 @@ export function applyEditContextText(
   selectionStartRaw: number,
   selectionEndRaw: number,
   onBeforeDispatch?: () => void,
+  editRange?: EditContextRange,
 ): boolean {
   const current = store.requireTextNode(nodeId);
-  const diff = diffText(current.content.text, text);
+  const diff = editRangeToDiff(current.content.text, text, editRange);
   const selectionStart = clampOffset(selectionStartRaw, text.length);
   const selectionEnd = clampOffset(selectionEndRaw, text.length);
   const selection = store.selection;
@@ -320,6 +336,44 @@ export function applyEditContextText(
     steps,
   });
   return true;
+}
+
+/**
+ * Recover the `(at, removed, inserted)` edit from the `textupdate` range when the
+ * backend reported one, else fall back to a full diff.
+ *
+ * The event's `updateRangeStart`/`End` are offsets into `before` (pre-update),
+ * and `after` is the post-update buffer, so the inserted run is simply what now
+ * occupies the replaced span: its length is `after.length - (before.length -
+ * removedLength)`. That is O(1) index math plus two O(edit-size) slices, with no
+ * buffer scan — the redundant scan the input backend already paid to build the
+ * event is exactly what this skips.
+ *
+ * The range is the EditContext contract and is treated as authoritative (native
+ * consumers apply `updateRange` the same way); the leaf's layout-effect keeps
+ * `editContext.text` and the node text in sync, so `before` matches the buffer
+ * the range was measured against. The only guard is O(1) arithmetic sanity — if
+ * the lengths cannot reconcile (a malformed/desynced range) we fall back to a
+ * full `diffText` so a bad range degrades to "slower" and never "wrong".
+ */
+function editRangeToDiff(
+  before: string,
+  after: string,
+  range: EditContextRange | undefined,
+): TextDiff {
+  if (!range) return diffText(before, after);
+  const start = Math.max(0, Math.min(range.start, before.length));
+  const end = Math.max(start, Math.min(range.end, before.length));
+  const removedLength = end - start;
+  const insertedLength = after.length - (before.length - removedLength);
+  if (insertedLength < 0 || start + insertedLength > after.length) {
+    return diffText(before, after);
+  }
+  return {
+    at: start,
+    inserted: after.slice(start, start + insertedLength),
+    removed: before.slice(start, end),
+  };
 }
 
 export function diffText(before: string, after: string): TextDiff {
