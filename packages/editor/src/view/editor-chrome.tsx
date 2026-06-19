@@ -3,21 +3,23 @@
  * link editor (docs/010 Phase 8 AC2/AC9).
  *
  * Built with `@idco/ui` (React Aria behavior + DaisyUI styling + lucide icons),
- * per docs/010 §7.1 and note.md §3 — no hand-rolled menus or buttons, and icon
- * controls rather than text glyphs, matching the legacy Lexical toolbar's shape.
+ * per docs/010 §7.1 — no hand-rolled menus, icon controls for the format/insert
+ * actions, and a labeled block-type dropdown (icon + current style name + chevron)
+ * matching the legacy Lexical toolbar's shape.
  * Every control operates on the engine's *model* selection through
  * `store.command`/`store.query`, never the DOM: a toggle reads `is-mark-active`
  * and dispatches `toggle-mark`; the block-type menu dispatches `set-block-type`;
  * the insert menu dispatches `insert-object` for each registered node's `insert`
  * affordance (docs/016 §6.2).
  *
- * Focus integration (note.md §3): the engine owns focus via the EditContext host
+ * Focus integration (docs/017 §3.5/§3.6): the engine owns focus via the EditContext host
  * and the model selection survives focus loss (011 §8.6), so toolbar presses do
  * not blur the editing surface (a capture-phase `mousedown` preventDefault on the
  * bar), and after a command we return focus to the block the selection now names
  * via `focusEditor`.
  */
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { Button as AriaButton } from "react-aria-components";
 import {
   Button,
   Input,
@@ -49,12 +51,49 @@ const BLOCK_TYPES: readonly {
   readonly icon: string;
   readonly blockType: TextLeafType;
   readonly tag?: string;
+  /** Class that previews the style in the dropdown item (legacy parity). */
+  readonly preview: string;
 }[] = [
-  { blockType: "paragraph", icon: "Pilcrow", label: "Paragraph" },
-  { blockType: "heading", icon: "Heading1", label: "Heading 1", tag: "h1" },
-  { blockType: "heading", icon: "Heading2", label: "Heading 2", tag: "h2" },
-  { blockType: "heading", icon: "Heading3", label: "Heading 3", tag: "h3" },
-  { blockType: "quote", icon: "Quote", label: "Quote" },
+  {
+    blockType: "paragraph",
+    icon: "Pilcrow",
+    label: "Paragraph",
+    preview: "text-sm",
+  },
+  {
+    blockType: "heading",
+    icon: "Heading1",
+    label: "Heading 1",
+    preview: "text-2xl font-bold",
+    tag: "h1",
+  },
+  {
+    blockType: "heading",
+    icon: "Heading2",
+    label: "Heading 2",
+    preview: "text-xl font-bold",
+    tag: "h2",
+  },
+  {
+    blockType: "heading",
+    icon: "Heading3",
+    label: "Heading 3",
+    preview: "text-lg font-semibold",
+    tag: "h3",
+  },
+  {
+    blockType: "heading",
+    icon: "Heading4",
+    label: "Heading 4",
+    preview: "text-base font-semibold",
+    tag: "h4",
+  },
+  {
+    blockType: "quote",
+    icon: "Quote",
+    label: "Quote",
+    preview: "text-sm italic text-base-content/70",
+  },
 ];
 
 /** A stable id for a block-type menu item (independent of array order). */
@@ -96,15 +135,17 @@ function useToolbarVersion(store: EditorStore): number {
 
 /** A thin divider between toolbar groups. */
 function Sep() {
-  return <span aria-hidden="true" className="mx-1 h-5 w-px bg-base-300" />;
+  return <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-base-300" />;
 }
 
 export function EditorToolbar(props: {
   readonly store: EditorStore;
   readonly focusEditor: () => void;
+  /** Open the find card (wired to the same Ctrl/Cmd+F controller). */
+  readonly onFind?: () => void;
   readonly className?: string;
 }) {
-  const { store, focusEditor } = props;
+  const { store, focusEditor, onFind } = props;
   // Re-read query state whenever selection or content changes.
   useToolbarVersion(store);
   const [linkValue, setLinkValue] = useState("");
@@ -119,7 +160,7 @@ export function EditorToolbar(props: {
 
   // Seed the link input from the active link when the popover opens; return focus
   // to the editing surface when it closes (React Aria would otherwise restore
-  // focus to the trigger button, note.md §3).
+  // focus to the trigger button, docs/017 §3.5).
   const onLinkOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -141,6 +182,31 @@ export function EditorToolbar(props: {
   const inserts = listInsertableNodes();
   const linkActive =
     typeof store.query({ type: "active-link-href" }) === "string";
+  // The list control is a toggle: pressing it on a non-list block makes it a
+  // list item, and pressing it again on a list item returns it to a paragraph
+  // (a one-way `set-block-type` to listitem could turn lists on but never off).
+  const blockType = store.query({ type: "current-block-type" });
+  const listActive = blockType === "listitem";
+  // The block-type control shows the *current* style by name (a labeled dropdown
+  // like the legacy editor), not a generic icon. Heading level rides on the `tag`
+  // attr, so match on both type and tag to tell Heading 1/2/3 apart.
+  const focusNode =
+    store.selection?.type === "text"
+      ? store.getNode(store.selection.focus.node)
+      : null;
+  const currentTag =
+    focusNode?.kind === "text" && typeof focusNode.attrs?.tag === "string"
+      ? focusNode.attrs.tag
+      : undefined;
+  const currentBlock =
+    BLOCK_TYPES.find(
+      (choice) =>
+        choice.blockType === blockType &&
+        (choice.tag ?? undefined) === currentTag,
+    ) ??
+    (listActive
+      ? { icon: "List", label: "List item" }
+      : { icon: "Pilcrow", label: "Paragraph" });
 
   return (
     <div
@@ -154,17 +220,21 @@ export function EditorToolbar(props: {
     >
       <Button
         ariaLabel="Undo"
+        disabled={!store.canUndo}
         iconName="Undo2"
         onClick={() => run(() => store.undo())}
         size="sm"
+        square
         tooltip="Undo"
         variant="ghost"
       />
       <Button
         ariaLabel="Redo"
+        disabled={!store.canRedo}
         iconName="Redo2"
         onClick={() => run(() => store.redo())}
         size="sm"
+        square
         tooltip="Redo"
         variant="ghost"
       />
@@ -172,15 +242,23 @@ export function EditorToolbar(props: {
       <Sep />
 
       <span data-engine-block-type-menu="">
-        <MenuTrigger>
-          <Button
-            ariaLabel="Block type"
-            iconName="Pilcrow"
-            size="sm"
-            tooltip="Block type"
-            variant="ghost"
-          />
+        <MenuTrigger placement="bottom start">
+          {/* Labeled block-type dropdown (icon + current style name + chevron),
+              matching the legacy toolbar — not an icon-only button. */}
+          <AriaButton
+            aria-label="Text style"
+            className="btn btn-sm btn-ghost w-40 justify-start gap-2"
+            data-engine-block-type-trigger=""
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            <NavIcon name={currentBlock.icon} />
+            <span className="flex-1 truncate text-left">
+              {currentBlock.label}
+            </span>
+            <NavIcon name="ChevronDown" />
+          </AriaButton>
           <Menu
+            className="w-56"
             onAction={(key) => {
               // Keyed by a stable `blockType:tag` id, not array index, so
               // reordering BLOCK_TYPES never changes what an item does.
@@ -202,8 +280,14 @@ export function EditorToolbar(props: {
                 key={blockTypeKey(choice)}
                 textValue={choice.label}
               >
-                <NavIcon name={choice.icon} />
-                {choice.label}
+                {/* Each item previews its own style (Heading 1 large + bold, …),
+                    the legacy block-style menu's look. */}
+                <span className="flex items-center gap-3">
+                  <NavIcon name={choice.icon} />
+                  <span className={`leading-tight ${choice.preview}`}>
+                    {choice.label}
+                  </span>
+                </span>
               </MenuItem>
             ))}
           </Menu>
@@ -232,6 +316,7 @@ export function EditorToolbar(props: {
                 )
               }
               size="sm"
+              square
               tooltip={button.label}
               variant={active ? "primary" : "ghost"}
             />
@@ -246,18 +331,23 @@ export function EditorToolbar(props: {
         iconName="List"
         onClick={() =>
           run(() =>
-            store.command({ blockType: "listitem", type: "set-block-type" }),
+            store.command({
+              blockType: listActive ? "paragraph" : "listitem",
+              type: "set-block-type",
+            }),
           )
         }
         size="sm"
+        square
         tooltip="List"
-        variant="ghost"
+        variant={listActive ? "primary" : "ghost"}
       />
       <Button
         ariaLabel="Outdent"
         iconName="IndentDecrease"
         onClick={() => run(() => store.command({ type: "outdent" }))}
         size="sm"
+        square
         tooltip="Outdent"
         variant="ghost"
       />
@@ -266,6 +356,7 @@ export function EditorToolbar(props: {
         iconName="IndentIncrease"
         onClick={() => run(() => store.command({ type: "indent" }))}
         size="sm"
+        square
         tooltip="Indent"
         variant="ghost"
       />
@@ -281,6 +372,7 @@ export function EditorToolbar(props: {
               ariaLabel={linkActive ? "Edit link" : "Link"}
               iconName={linkActive ? "Unlink" : "Link"}
               size="sm"
+              square
               tooltip="Link"
               variant={linkActive ? "primary" : "ghost"}
             />
@@ -343,6 +435,7 @@ export function EditorToolbar(props: {
                 ariaLabel="Insert block"
                 iconName="Plus"
                 size="sm"
+                square
                 tooltip="Insert"
                 variant="ghost"
               />
@@ -373,6 +466,21 @@ export function EditorToolbar(props: {
               </Menu>
             </MenuTrigger>
           </span>
+        </>
+      ) : null}
+
+      {onFind ? (
+        <>
+          <Sep />
+          <Button
+            ariaLabel="Find in document"
+            iconName="Search"
+            onClick={onFind}
+            size="sm"
+            square
+            tooltip="Find (Ctrl/Cmd+F)"
+            variant="ghost"
+          />
         </>
       ) : null}
     </div>

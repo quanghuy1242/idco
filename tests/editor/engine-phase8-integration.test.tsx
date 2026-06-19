@@ -80,6 +80,36 @@ describe("resting/themed render", () => {
     ).not.toBeNull();
     expect(container.textContent).toContain("Body");
   });
+
+  it("bakes an unbaked (imported) object for display instead of printing its type name", () => {
+    // Imported objects carry no baked snapshot (compat keeps the round-trip
+    // deep-equal, docs/010 §14). The resting render must bake on the fly through
+    // the shared renderer — the same as the editor at rest — not fall back to the
+    // bare type word ("media"). Regression for the editor↔reader drift.
+    const allocator = createIdAllocator("idco_client_unbaked");
+    const media = makeObjectNode({
+      data: { alt: "", caption: "", src: "/diagram.png" },
+      id: allocator.createNodeId(),
+      status: "ready",
+      type: "media",
+    });
+    const store = createEditorStore({
+      allocator,
+      snapshot: {
+        body: { blocks: { [media.id]: media }, order: [media.id] },
+        settings: {},
+        version: 1,
+      },
+    });
+    const { container } = render(
+      <RestingDocument snapshot={store.toSnapshot()} />,
+    );
+    // The media view rendered (its baked figure), and the diagram src is shown.
+    expect(
+      container.querySelector("[data-engine-object-baked='media']"),
+    ).not.toBeNull();
+    expect(container.textContent).toContain("/diagram.png");
+  });
 });
 
 function AutosaveHarness(props: {

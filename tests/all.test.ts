@@ -54,6 +54,7 @@ await import("./editor/engine-virtual-range.test");
 await import("./editor/engine-height-cache.test");
 await import("./editor/engine-model.test");
 await import("./editor/engine-commands.test");
+await import("./editor/engine-style-invariants.test");
 await import("./editor/engine-objects.test");
 await import("./editor/engine-node-spi.test");
 await import("./editor/engine-compat-links.test");

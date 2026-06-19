@@ -278,6 +278,6 @@ Behavior is identical (the green suite stays the gate); only the *shape* changes
 ## 12. Open Decisions
 
 - **Single `registerNode` vs two explicit registries.** This document proposes `registerNode` as the ergonomic front for two registries. If the host needs to register core-only (worker/SSR) without a view, it uses the core registry directly. Confirm the ergonomic default.
-- **Where `NodeView` config panels source their chrome.** They should use `@idco/ui` (React Aria + DaisyUI) from day one (note.md §3 / 010 §7.1); the divider/image examples assume that.
+- **Where `NodeView` config panels source their chrome.** They should use `@idco/ui` (React Aria + DaisyUI) from day one (010 §7.1); the divider/image examples assume that.
 - **Whether `plainText`/`anchors` ship in Phase 8 or with find-in-page specifically.** Named now; 010 §10.5 ties them to the find-in-page UI. Decide the trigger.
 - **`table` faithfulness vs blob.** 011 §2.4 wants a faithful `row → cell → block` grid inside `data`; today it imports as an opaque blob with no `renderResting`. Faithful table editing is deferrable (books, not blog) but its `NodeView.renderLive` is the largest future node. Confirm it stays deferred for blog-first.

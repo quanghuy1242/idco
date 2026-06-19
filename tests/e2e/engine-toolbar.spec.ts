@@ -69,12 +69,34 @@ test("the bold toolbar button toggles a bold mark on the model selection", async
     .toBe(true);
 });
 
+test("right-clicking a text selection opens a context menu that toggles bold", async ({
+  page,
+}) => {
+  await open(page);
+  await selectFirstBlock(page, 0, 5);
+  // Right-click the first block; the engine context menu opens at the cursor.
+  await page
+    .locator("[data-engine-text-id]")
+    .first()
+    .click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Bold" }).click();
+  await expect
+    .poll(async () => {
+      const doc = JSON.parse(await compatJson(page));
+      const para = doc.root.children[0];
+      return (para.children as { format?: number }[]).some(
+        (c) => ((c.format ?? 0) & 1) === 1,
+      );
+    })
+    .toBe(true);
+});
+
 test("the block-type menu converts the block to a heading", async ({
   page,
 }) => {
   await open(page);
   await selectFirstBlock(page, 0, 0);
-  await page.getByRole("button", { name: "Block type" }).click();
+  await page.getByRole("button", { name: "Text style" }).click();
   await page.getByRole("menuitem", { name: "Heading 2" }).click();
   await expect
     .poll(async () => {
@@ -82,6 +104,33 @@ test("the block-type menu converts the block to a heading", async ({
       return doc.root.children[0].type;
     })
     .toBe("heading");
+});
+
+test("the find popover opens, searches the model, and stays open while navigating", async ({
+  page,
+}) => {
+  await open(page);
+  await page.getByRole("button", { name: "Find in document" }).click();
+  const input = page.getByRole("textbox", { name: "Find" });
+  await input.waitFor({ state: "visible" });
+  await input.fill("bold");
+  // The search selected a match on the model (find reads the model, not the DOM).
+  await expect
+    .poll(async () =>
+      page.evaluate((key) => {
+        const api = (
+          window as unknown as Record<
+            string,
+            { diagnostics: () => { selection: { type: string } | null } }
+          >
+        )[key];
+        return api.diagnostics().selection?.type ?? null;
+      }, API),
+    )
+    .toBe("text");
+  // Navigating via the in-popover button keeps the popover open (non-modal).
+  await page.getByRole("button", { name: "Next match" }).click();
+  await expect(input).toBeVisible();
 });
 
 test("the link popover sets a link on the selection", async ({ page }) => {
@@ -104,7 +153,7 @@ test("a real mouse caret then the block-type menu converts to a heading", async 
   // Click into the block with the mouse (the real user flow), not the API, so
   // the model selection comes from a pointer caret and the toolbar still applies.
   await page.locator("[data-engine-text-id]").first().click();
-  await page.getByRole("button", { name: "Block type" }).click();
+  await page.getByRole("button", { name: "Text style" }).click();
   await page.getByRole("menuitem", { name: "Heading 2" }).click();
   await expect
     .poll(async () => {

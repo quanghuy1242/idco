@@ -17,13 +17,13 @@ import {
 } from "react";
 import { AnchoredPopover, Button, Input } from "@quanghuy1242/idco-ui";
 import {
-  bakeObjectData,
   type EditorStore,
   type JsonValue,
   type NodeId,
   type ObjectNode,
 } from "../core";
 import { getNodeView, registerNodeView } from "./node-view";
+import { renderRestingObject } from "./resting-document";
 import { useUpload } from "./upload-context";
 import {
   codeBakedStyle,
@@ -58,6 +58,19 @@ export function EngineObjectBlock(props: {
   // editor opens at exactly this height so the block box does not shift (AC3).
   const restHeightRef = useRef(0);
   const containerRef = useRef<HTMLElement | null>(null);
+  // A *stable* ref callback. An inline `ref={(el) => …}` gets a new identity each
+  // render, so React calls it with null then the element on every re-render —
+  // which nulls the popover's `triggerRef` exactly when the block re-renders
+  // resting→live, making React Aria lose and re-acquire the anchor (the
+  // double-flicker before the popover settles, docs/010 §6.4). A stable callback
+  // only fires on mount/unmount, so the anchor stays put.
+  const bindContainer = useCallback(
+    (element: HTMLElement | null) => {
+      containerRef.current = element;
+      registerBlock(node.id, element);
+    },
+    [node.id, registerBlock],
+  );
   const view = getNodeView(node.type);
   // "in-place" live surfaces (code) replace the baked view at the captured
   // height; everything else keeps the baked view and edits in an anchored React
@@ -66,6 +79,29 @@ export function EngineObjectBlock(props: {
   const inPlaceLive =
     live && view?.renderLive !== undefined && view.liveMode === "in-place";
   const popoverLive = live && !inPlaceLive;
+  // An object that does not edit in place uses the anchored popover. The popover
+  // is rendered whenever the object *can* use one and toggled via `isOpen` (not
+  // conditionally unmounted), so React Aria can play the exit animation on close
+  // and then unmount it — a `{popoverLive ? … : null}` would yank it out before
+  // the `data-[exiting]` animation runs (the missing transition-out). When closed
+  // React Aria renders nothing, so the live content mounts only while open.
+  const usesPopover = !(
+    view?.renderLive !== undefined && view.liveMode === "in-place"
+  );
+  const popoverContent = view?.renderLive ? (
+    view.renderLive({
+      initialHeight: restHeightRef.current,
+      node,
+      registerObjectEditor,
+      store,
+    })
+  ) : (
+    <ObjectConfigPanel
+      node={node}
+      registerObjectEditor={registerObjectEditor}
+      store={store}
+    />
+  );
   return (
     <div
       data-engine-block-id={node.id}
@@ -85,10 +121,7 @@ export function EngineObjectBlock(props: {
               store.activateObject(node.id);
             }
       }
-      ref={(element) => {
-        containerRef.current = element;
-        registerBlock(node.id, element);
-      }}
+      ref={bindContainer}
       style={objectBlockStyle}
     >
       {inPlaceLive ? (
@@ -101,29 +134,16 @@ export function EngineObjectBlock(props: {
       ) : (
         <BakedObjectView node={node} store={store} />
       )}
-      {popoverLive ? (
+      {usesPopover ? (
         <AnchoredPopover
           ariaLabel={`Edit ${node.type}`}
-          isOpen
+          isOpen={popoverLive}
           onOpenChange={(open) => {
             if (!open) store.deactivateObject(node.id);
           }}
           triggerRef={containerRef}
         >
-          {view?.renderLive ? (
-            view.renderLive({
-              initialHeight: restHeightRef.current,
-              node,
-              registerObjectEditor,
-              store,
-            })
-          ) : (
-            <ObjectConfigPanel
-              node={node}
-              registerObjectEditor={registerObjectEditor}
-              store={store}
-            />
-          )}
+          {popoverContent}
         </AnchoredPopover>
       ) : null}
     </div>
@@ -131,38 +151,19 @@ export function EngineObjectBlock(props: {
 }
 
 /**
- * The static, publish-ready render of an object's baked snapshot. Dispatches to
- * the registered `NodeView.renderResting`; an unbaked node shows its status and a
- * node with no registered view falls back to a generic placeholder (docs/016 §10).
- *
- * When the node carries no baked snapshot (e.g. freshly imported — compat does
- * not bake, to keep the round-trip deep-equal, docs/010 §14), it is baked here
- * *for display only* through the registry; the result is never written back to
- * the model, so the projection stays clean while the object still renders.
+ * The static, publish-ready render of an object's baked snapshot. Delegates to
+ * the shared `renderRestingObject` (resting-document.tsx) so the editor's at-rest
+ * view and the reader's `RestingDocument` render heavy objects identically and
+ * cannot drift (docs/010 §6.2). That shared renderer bakes an unbaked node for
+ * display only (imported objects carry no bake, docs/010 §14) and dispatches to
+ * the registered `NodeView.renderResting`.
  */
 function BakedObjectView(props: {
   readonly node: ObjectNode;
   readonly store: EditorStore;
 }) {
   const { node, store } = props;
-  const baked =
-    node.baked ?? bakeObjectData(store.registry, node.type, node.data).baked;
-  if (!baked) {
-    return (
-      <div data-engine-object-baked="none" style={objectStatusStyle}>
-        {node.status === "invalid"
-          ? `⚠ ${node.type}: cannot bake (check its data)`
-          : `${node.type}: not baked yet`}
-      </div>
-    );
-  }
-  const view = getNodeView(node.type);
-  if (view) return <>{view.renderResting({ baked, node })}</>;
-  return (
-    <div data-engine-object-baked={baked.kind} style={objectStatusStyle}>
-      {node.type} (baked: {baked.kind})
-    </div>
-  );
+  return <>{renderRestingObject(node, store.registry)}</>;
 }
 
 /** In-place code editing surface; commits re-bake the block through the store. */

@@ -11,7 +11,7 @@
  *
  * Document theming is DaisyUI typography: the surface carries the `prose` class
  * so headings, lists, links, and marks are themed by the framework, not inline
- * styles (note.md §1). The engine's functional CSS (caret/selection suppression,
+ * styles (docs/010 §7.1). The engine's functional CSS (caret/selection suppression,
  * `pre-wrap`) stays in `styles.ts` and is unaffected.
  */
 import {
@@ -25,8 +25,14 @@ import {
   type Ref,
 } from "react";
 import type { OwnedEditorHandle } from "../core";
+import {
+  EngineContextMenu,
+  useContextMenu,
+  type ContextMenuController,
+} from "./context-menu";
 import { EditorToolbar } from "./editor-chrome";
 import { FindBar, useFindController, type FindController } from "./find-bar";
+import { LinkPopover, useLinkInteraction } from "./link-popover";
 import {
   OwnedModelEditorView,
   type OwnedModelEditorViewHandle,
@@ -103,6 +109,19 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     viewRef.current?.scrollToBlock(id),
   );
 
+  const linkInteraction = useLinkInteraction(store);
+  const contextMenu: ContextMenuController = useContextMenu(store);
+
+  // A click on an inert link mark opens the link editor over it (legacy
+  // floating-link-editor parity); other clicks fall through to the editing
+  // surface untouched.
+  const onClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      linkInteraction.openAt(event.target as HTMLElement);
+    },
+    [linkInteraction],
+  );
+
   // Intercept Ctrl/Cmd+F at the surface so virtualization does not break find
   // (native find sees only mounted blocks). AC1 / §10.5 find-in-page.
   const onKeyDown = useCallback(
@@ -148,12 +167,17 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   // an `autosave` config is supplied.
   useAutosave(handle, autosave ?? { enabled: false, onSave: async () => {} });
 
+  const openFind = find.open;
   const toolbar = useMemo(
     () =>
       hideToolbar ? null : (
-        <EditorToolbar focusEditor={focusEditor} store={store} />
+        <EditorToolbar
+          focusEditor={focusEditor}
+          onFind={openFind}
+          store={store}
+        />
       ),
-    [focusEditor, hideToolbar, store],
+    [focusEditor, hideToolbar, openFind, store],
   );
 
   return (
@@ -166,9 +190,28 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
         onKeyDown={onKeyDown}
       >
         {toolbar}
-        <FindBar controller={find} />
-        <div className={proseClassName} data-engine-prose="">
-          <OwnedModelEditorView ref={viewRef} store={store} {...viewProps} />
+        {/* `relative` so the find card floats over the editor's top-right corner
+            instead of pushing the surface down when it opens (no layout shift). */}
+        <div
+          className="relative"
+          data-engine-surface=""
+          onClick={onClick}
+          onContextMenu={contextMenu.onContextMenu}
+        >
+          <FindBar controller={find} />
+          <div className={proseClassName} data-engine-prose="">
+            <OwnedModelEditorView ref={viewRef} store={store} {...viewProps} />
+          </div>
+          <LinkPopover
+            focusEditor={focusEditor}
+            interaction={linkInteraction}
+            store={store}
+          />
+          <EngineContextMenu
+            controller={contextMenu}
+            focusEditor={focusEditor}
+            store={store}
+          />
         </div>
       </div>
     </UploadProvider>

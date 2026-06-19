@@ -6,7 +6,7 @@
  *
  * - **Theming.** DaisyUI typography (the `prose` class on the surface) styles the
  *   semantic elements directly, so document theming is the framework's job, not a
- *   pile of inline styles (note.md §1, docs/010 §7.1). The functional, load-
+ *   pile of inline styles (docs/010 §7.1). The functional, load-
  *   bearing CSS (caret/selection suppression, `pre-wrap`, `user-select`) stays in
  *   `styles.ts`; only the *decorative* mark styling moves to typography.
  * - **Geometry-neutral.** The view's offset↔DOM geometry (`geometry.ts`) walks
@@ -89,6 +89,7 @@ function wrapMark(
         <a
           {...common}
           data-engine-mark-href={markHref(mark)}
+          data-engine-mark-id={mark.id}
           href={
             linkMode === "navigable"
               ? safeHref(markHref(mark)) || undefined

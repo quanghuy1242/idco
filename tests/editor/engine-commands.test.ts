@@ -446,6 +446,51 @@ describe("list editing: indent / outdent (Phase 5.5 AC6)", () => {
   });
 });
 
+describe("attribute indent fallback (flat blocks, no list container)", () => {
+  it("indents and outdents an ordinary paragraph via an indent attr, and inverts", () => {
+    const { store, ids } = paragraphStore(["alpha"]);
+    const before = store.toSnapshot();
+    caretAt(store, ids[0]!, 0);
+
+    expect(store.query({ type: "can-indent" })).toBe(true);
+    expect(store.query({ type: "can-outdent" })).toBe(false);
+
+    store.command({ type: "indent" });
+    expect(store.requireNode(ids[0]!).attrs?.indent).toBe(1);
+    store.command({ type: "indent" });
+    expect(store.requireNode(ids[0]!).attrs?.indent).toBe(2);
+    expect(store.query({ type: "can-outdent" })).toBe(true);
+
+    store.command({ type: "outdent" });
+    expect(store.requireNode(ids[0]!).attrs?.indent).toBe(1);
+    store.command({ type: "outdent" });
+    // Back to flush-left: the indent attr is cleared, not left at 0, so the doc
+    // round-trips deep-equal (docs/010 §14).
+    expect(store.requireNode(ids[0]!).attrs?.indent).toBeUndefined();
+    expect(store.toSnapshot()).toEqual(before);
+  });
+
+  it("outdenting a flat list item at zero indent drops it to a paragraph", () => {
+    const allocator = createIdAllocator(`${CLIENT}_flatlist`);
+    const item = makeTextNode({
+      content: allocator.createTextSlice("a flat item"),
+      id: allocator.createNodeId(),
+      type: "listitem",
+    });
+    const store = createEditorStore({
+      allocator,
+      snapshot: {
+        body: { blocks: { [item.id]: item }, order: [item.id] },
+        settings: {},
+        version: 1,
+      },
+    });
+    caretAt(store, item.id, 0);
+    store.command({ type: "outdent" });
+    expect(store.requireNode(item.id).type).toBe("paragraph");
+  });
+});
+
 describe("OwnedEditorHandle SPI (Phase 5.5 AC4)", () => {
   it("drives editing, undo/redo, dirty, and events entirely through the handle", () => {
     const { store, ids } = paragraphStore(["hello world"]);

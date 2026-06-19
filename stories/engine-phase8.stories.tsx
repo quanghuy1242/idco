@@ -92,9 +92,6 @@ export const FullEditor: Story = () => {
   const [saved, setSaved] = useState("clean");
   return (
     <div style={{ maxWidth: 900 }}>
-      <p style={{ font: "12px ui-monospace, monospace", opacity: 0.7 }}>
-        Imported from Payload-Lexical · {report} · autosave: {saved}
-      </p>
       <OwnedModelEditor
         autosave={{
           delayMs: 600,
@@ -112,6 +109,15 @@ export const FullEditor: Story = () => {
         Try: select text and use the toolbar (icons), type <code># </code> or{" "}
         <code>- </code> at a line start, press <kbd>Ctrl/Cmd+F</kbd> to find,
         click the image to edit/upload, use Insert to add a divider/image.
+      </p>
+      <p
+        style={{
+          font: "12px ui-monospace, monospace",
+          marginTop: 8,
+          opacity: 0.7,
+        }}
+      >
+        Imported from Payload-Lexical · {report} · autosave: {saved}
       </p>
     </div>
   );

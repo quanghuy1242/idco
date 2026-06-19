@@ -192,6 +192,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   const draggingRef = useRef(false);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const autoscrollFrameRef = useRef<number | null>(null);
+  // Coalesces drag-extend work to one frame: `mousemove` fires far more often
+  // than the display refreshes, and each extend does a DOM hit-test + dispatch,
+  // so processing every event makes the painted selection lag the pointer.
+  const dragMoveFrameRef = useRef<number | null>(null);
   const registryRef = useRef<RenderRegistry>({
     blockRefs: new Map(),
     dragging: false,
@@ -528,6 +532,18 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       target.content,
       clampOffset(hit.offset, target.content.text.length),
     );
+    // Skip the dispatch when the pointer is still over the same model position —
+    // a pixel move within one glyph should not churn a selection notify + repaint.
+    const current = store.selection;
+    if (
+      current?.type === "text" &&
+      current.focus.node === focus.node &&
+      current.focus.offset === focus.offset &&
+      current.anchor.node === anchor.node &&
+      current.anchor.offset === anchor.offset
+    ) {
+      return;
+    }
     store.dispatch({
       origin: "local",
       selectionAfter: { anchor, focus, type: "text" },
@@ -535,12 +551,26 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     });
   }, [store]);
 
+  // Run a drag-extend at most once per animation frame, against the latest
+  // pointer (`lastPointerRef`), so a burst of `mousemove`s collapses to one
+  // hit-test + dispatch on the frame the browser is about to paint.
+  const scheduleDragExtend = useCallback(() => {
+    if (dragMoveFrameRef.current !== null) return;
+    dragMoveFrameRef.current = requestFrame(() => {
+      dragMoveFrameRef.current = null;
+      extendDragToPointer();
+    });
+  }, [extendDragToPointer]);
+
   // Clicking the white gaps around the content (most visibly the empty area
   // below the last block) places the caret in the nearest text leaf, the way a
   // real editor maps a click in empty space to the closest text position. Block
   // clicks are handled per-block; this only fires when the click misses them.
   const onRootMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      // Left button only: a right-click must not move the caret / collapse the
+      // selection (it opens the context menu instead, mirrors the per-block rule).
+      if (event.button !== 0) return;
       const target = event.target as Element;
       if (target.closest("[data-engine-block-id]")) return;
       const root = rootRef.current;
@@ -583,7 +613,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     (clientX: number, clientY: number) => {
       if (!draggingRef.current) return;
       lastPointerRef.current = { x: clientX, y: clientY };
-      extendDragToPointer();
+      scheduleDragExtend();
       // Autoscroll while a drag is held near a viewport edge so the selection
       // can reach offscreen blocks (docs/010 Phase 5 AC4).
       const scroller = rootRef.current;
@@ -610,7 +640,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       };
       autoscrollFrameRef.current = requestFrame(step);
     },
-    [extendDragToPointer, stopAutoscroll, virtualize],
+    [extendDragToPointer, scheduleDragExtend, stopAutoscroll, virtualize],
   );
 
   const endDrag = useCallback(() => {
@@ -618,6 +648,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     registryRef.current.dragging = false;
     dragAnchorRef.current = null;
     lastPointerRef.current = null;
+    if (dragMoveFrameRef.current !== null) {
+      cancelFrame(dragMoveFrameRef.current);
+      dragMoveFrameRef.current = null;
+    }
     stopAutoscroll();
   }, [stopAutoscroll]);
 
@@ -838,6 +872,12 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     () => () => {
       if (scrollFrameRef.current !== null) cancelFrame(scrollFrameRef.current);
       scrollFrameRef.current = null;
+      if (dragMoveFrameRef.current !== null)
+        cancelFrame(dragMoveFrameRef.current);
+      dragMoveFrameRef.current = null;
+      if (autoscrollFrameRef.current !== null)
+        cancelFrame(autoscrollFrameRef.current);
+      autoscrollFrameRef.current = null;
     },
     [],
   );

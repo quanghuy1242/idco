@@ -115,6 +115,68 @@ describe("editor chrome (Phase 8)", () => {
     });
   });
 
+  it("toggles a list on and back off from the toolbar list button", async () => {
+    const { store, ids } = build(["a list line"]);
+    const ref = createRef<OwnedModelEditorHandle>();
+    render(
+      <OwnedModelEditor
+        forcePolyfill
+        ref={ref}
+        scheduler={createEngineScheduler({ publishDashboard: false })}
+        store={store}
+        virtualize={false}
+      />,
+    );
+    act(() => {
+      ref.current!.selectText(ids[0]!, 0, ids[0]!, 0);
+    });
+
+    // First press: paragraph → list item.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Bulleted list" }));
+    });
+    await waitFor(() =>
+      expect(store.requireTextNode(ids[0]!).type).toBe("listitem"),
+    );
+
+    // Second press: list item → paragraph (the toggle-off that was missing).
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Bulleted list" }));
+    });
+    await waitFor(() =>
+      expect(store.requireTextNode(ids[0]!).type).toBe("paragraph"),
+    );
+  });
+
+  it("right-clicking a selection opens a context menu that toggles a mark", async () => {
+    const { store, ids } = build(["context words"]);
+    const ref = createRef<OwnedModelEditorHandle>();
+    const { container } = render(
+      <OwnedModelEditor
+        forcePolyfill
+        ref={ref}
+        scheduler={createEngineScheduler({ publishDashboard: false })}
+        store={store}
+        virtualize={false}
+      />,
+    );
+    act(() => {
+      ref.current!.selectText(ids[0]!, 0, ids[0]!, 7);
+    });
+    const surface = container.querySelector("[data-engine-surface]")!;
+    await act(async () => {
+      fireEvent.contextMenu(surface);
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Bold" }));
+    });
+    await waitFor(() =>
+      expect(
+        store.requireTextNode(ids[0]!).marks.some((m) => m.kind === "bold"),
+      ).toBe(true),
+    );
+  });
+
   it("opens find and selects a model match", async () => {
     const { store, ids } = build(["alpha bravo", "charlie bravo"]);
     const ref = createRef<OwnedModelEditorHandle>();

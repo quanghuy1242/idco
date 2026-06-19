@@ -10,8 +10,8 @@
  *
  * The bar UI is `@idco/ui` (React Aria + DaisyUI) plus a DaisyUI-classed input.
  */
-import { useCallback, useMemo, useState } from "react";
-import { Button, Input } from "@quanghuy1242/idco-ui";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { AnchoredPopover, Button, Input } from "@quanghuy1242/idco-ui";
 import { pointAtOffset, type EditorStore, type NodeId } from "../core";
 
 /** One find match: a text-leaf range, or a whole object block. */
@@ -148,69 +148,97 @@ export function useFindController(
 
 export function FindBar(props: { readonly controller: FindController }) {
   const { controller } = props;
-  if (!controller.isOpen) return null;
+  // A zero-size anchor pinned to the editor's top-right; the real @idco/ui
+  // popover floats against it, so opening find never shifts the surface layout.
+  // The parent (`data-engine-surface`) is `position: relative`.
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
   const total = controller.matches.length;
   return (
-    <div
-      aria-label="Find in document"
-      className="flex items-center gap-2 border-b border-base-300 bg-base-100 p-1"
-      data-engine-find=""
-      onKeyDown={(event) => {
-        // Keydown bubbles from the @idco/ui Input, which renders the field via
-        // React Aria and does not expose its own key handler.
-        if (event.key === "Enter") {
-          event.preventDefault();
-          if (event.shiftKey) controller.previous();
-          else controller.next();
-        } else if (event.key === "Escape") {
-          controller.close();
-        }
-      }}
-      role="search"
-    >
-      <Input
-        ariaLabel="Find"
-        autoFocus
-        onChange={(value) => controller.setQuery(value)}
-        placeholder="Find in document…"
-        size="sm"
-        value={controller.query}
-      />
+    <>
       <span
-        aria-live="polite"
-        className="text-sm opacity-70"
-        data-engine-find-count=""
+        aria-hidden="true"
+        className="pointer-events-none absolute right-2 top-2 size-0"
+        ref={anchorRef}
+      />
+      <AnchoredPopover
+        ariaLabel="Find in document"
+        isOpen={controller.isOpen}
+        onOpenChange={(open) => {
+          if (!open) controller.close();
+        }}
+        placement="bottom end"
+        // Find is non-modal: it must survive clicks into the document (reading
+        // matches), so only a true outside-the-editor interaction dismisses it.
+        shouldCloseOnInteractOutside={(element) =>
+          !element.closest("[data-engine-editor]")
+        }
+        triggerRef={anchorRef}
       >
-        {total === 0
-          ? controller.query
-            ? "No results"
-            : ""
-          : `${controller.current + 1} / ${total}`}
-      </span>
-      <Button
-        ariaLabel="Previous match"
-        iconName="ChevronLeft"
-        onClick={() => controller.previous()}
-        size="sm"
-        tooltip="Previous match"
-        variant="ghost"
-      />
-      <Button
-        ariaLabel="Next match"
-        iconName="ChevronRight"
-        onClick={() => controller.next()}
-        size="sm"
-        tooltip="Next match"
-        variant="ghost"
-      />
-      <Button
-        ariaLabel="Close find"
-        iconName="X"
-        onClick={() => controller.close()}
-        size="sm"
-        tooltip="Close"
-        variant="ghost"
-      />
-    </div>
+        <div
+          className="flex items-center gap-1"
+          data-engine-find=""
+          onKeyDown={(event) => {
+            // Keydown bubbles from the @idco/ui Input, which renders the field
+            // via React Aria and does not expose its own key handler. Escape is
+            // handled by the popover itself.
+            if (event.key === "Enter") {
+              event.preventDefault();
+              if (event.shiftKey) controller.previous();
+              else controller.next();
+            }
+          }}
+          role="search"
+        >
+          <div className="w-52">
+            <Input
+              ariaLabel="Find"
+              autoFocus
+              onChange={(value) => controller.setQuery(value)}
+              placeholder="Find in document…"
+              size="sm"
+              value={controller.query}
+            />
+          </div>
+          <span
+            aria-live="polite"
+            className="text-sm opacity-70"
+            data-engine-find-count=""
+          >
+            {total === 0
+              ? controller.query
+                ? "No results"
+                : ""
+              : `${controller.current + 1} / ${total}`}
+          </span>
+          <Button
+            ariaLabel="Previous match"
+            iconName="ChevronLeft"
+            onClick={() => controller.previous()}
+            size="sm"
+            square
+            tooltip="Previous match"
+            variant="ghost"
+          />
+          <Button
+            ariaLabel="Next match"
+            iconName="ChevronRight"
+            onClick={() => controller.next()}
+            size="sm"
+            square
+            tooltip="Next match"
+            variant="ghost"
+          />
+          <Button
+            ariaLabel="Close find"
+            iconName="X"
+            onClick={() => controller.close()}
+            size="sm"
+            square
+            tooltip="Close"
+            variant="ghost"
+          />
+        </div>
+      </AnchoredPopover>
+    </>
   );
 }

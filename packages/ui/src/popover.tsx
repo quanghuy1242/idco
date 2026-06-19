@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogTrigger,
   Popover as AriaPopover,
+  type PopoverProps,
 } from "react-aria-components";
 
 type Placement =
@@ -69,6 +70,13 @@ export function AnchoredPopover(props: {
   readonly children: ReactNode;
   readonly placement?: Placement;
   readonly ariaLabel?: string;
+  /**
+   * Whether an outside interaction dismisses the popover. Default React Aria
+   * behavior closes on any outside press; pass a predicate (e.g. keep open while
+   * interacting within a host region) for non-modal surfaces like an in-editor
+   * find bar that must survive clicks into the document.
+   */
+  readonly shouldCloseOnInteractOutside?: PopoverProps["shouldCloseOnInteractOutside"];
 }) {
   const {
     triggerRef,
@@ -76,6 +84,7 @@ export function AnchoredPopover(props: {
     onOpenChange,
     children,
     placement = "bottom",
+    shouldCloseOnInteractOutside,
   } = props;
   return (
     <AriaPopover
@@ -84,6 +93,7 @@ export function AnchoredPopover(props: {
       offset={4}
       onOpenChange={onOpenChange}
       placement={placement}
+      shouldCloseOnInteractOutside={shouldCloseOnInteractOutside}
       triggerRef={triggerRef}
     >
       <Dialog aria-label={props.ariaLabel} className="outline-none">

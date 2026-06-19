@@ -26,6 +26,7 @@ import {
 import { useSelectionFrameVersion } from "./store-hooks";
 import {
   CARET_BLINK_KEYFRAMES,
+  ENGINE_OBJECT_CHROME_CSS,
   ENGINE_SURFACE_SUPPRESS_CSS,
   ENGINE_TYPOGRAPHY_CSS,
   visuallyHiddenStyle,
@@ -280,7 +281,8 @@ export function SelectionOverlay(props: {
       <style>
         {CARET_BLINK_KEYFRAMES +
           ENGINE_SURFACE_SUPPRESS_CSS +
-          ENGINE_TYPOGRAPHY_CSS}
+          ENGINE_TYPOGRAPHY_CSS +
+          ENGINE_OBJECT_CHROME_CSS}
       </style>
       {rects.map((rect, index) => {
         const isCaret = rect.kind === "caret";

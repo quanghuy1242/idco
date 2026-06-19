@@ -483,9 +483,61 @@ export function textRangeClientRects(
   const rects = Array.from(range.getClientRects()).filter(
     (rect) => rect.width > 0 || rect.height > 0,
   );
-  if (rects.length > 0) return rects;
+  if (rects.length > 0) return mergeRectsByLine(rects);
   const rect = range.getBoundingClientRect();
   return rect.width > 0 || rect.height > 0 ? [rect] : [];
+}
+
+/**
+ * Collapse a range's client rects to one rect per visual line.
+ *
+ * `Range.getClientRects()` over a run that crosses nested inline mark elements
+ * (`<strong>`/`<em>`/`<a>` from mark-render) returns a rect for each contained
+ * *element box* AND for its inner text — overlapping boxes over the same glyphs.
+ * Painted as semi-transparent overlay rects, the overlaps stack into a darker
+ * band exactly over the formatted runs (the "double selection"). Unioning rects
+ * that share a line removes the overlap and paints the clean one-rect-per-line
+ * highlight a native selection draws.
+ */
+function mergeRectsByLine(rects: readonly DOMRect[]): DOMRect[] {
+  if (rects.length <= 1) return [...rects];
+  const sorted = [...rects].sort((a, b) => a.top - b.top || a.left - b.left);
+  const lines: { top: number; bottom: number; left: number; right: number }[] =
+    [];
+  for (const rect of sorted) {
+    // Same line when the vertical overlap is more than half the shorter rect's
+    // height — robust to sub-pixel top differences between element and text boxes.
+    const line = lines.find((current) => {
+      const overlap =
+        Math.min(current.bottom, rect.bottom) - Math.max(current.top, rect.top);
+      const shorter = Math.min(
+        current.bottom - current.top,
+        rect.bottom - rect.top,
+      );
+      return overlap > shorter * 0.5;
+    });
+    if (line) {
+      line.top = Math.min(line.top, rect.top);
+      line.bottom = Math.max(line.bottom, rect.bottom);
+      line.left = Math.min(line.left, rect.left);
+      line.right = Math.max(line.right, rect.right);
+    } else {
+      lines.push({
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+      });
+    }
+  }
+  return lines.map((line) =>
+    makeRect(
+      line.left,
+      line.top,
+      line.right - line.left,
+      line.bottom - line.top,
+    ),
+  );
 }
 
 /**

@@ -59,7 +59,7 @@ class SelectionFrameStore {
   readonly #listeners = new Set<() => void>();
   readonly #store: EditorStore;
   readonly #task: EngineSchedulerTask<SelectionFramePayload>;
-  #storeUnsubscribe: (() => void) | null = null;
+  readonly #storeUnsubscribers: (() => void)[] = [];
   #version = 0;
 
   constructor(store: EditorStore, scheduler: EngineScheduler) {
@@ -82,16 +82,34 @@ class SelectionFrameStore {
 
   readonly subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
-    if (!this.#storeUnsubscribe) {
-      this.#storeUnsubscribe = this.#store.subscribeSelection((dirty) => {
-        this.#task.schedule({ dirty });
-      });
+    if (this.#storeUnsubscribers.length === 0) {
+      const schedule = (dirty: StoreDirty) => this.#task.schedule({ dirty });
+      this.#storeUnsubscribers.push(this.#store.subscribeSelection(schedule));
+      // Also repaint after any committed transaction, not only when the model
+      // selection changed. A mark toggle (or link/block-type change) keeps the
+      // selection identical (`tr.setSelection(store.selection)`), so `dispatch`
+      // reports `selectionChanged === false` and the selection lane would never
+      // fire — leaving the painted rects pinned to the pre-toggle geometry while
+      // the leaf re-renders from bare text to mark spans (the ~1s stale-selection
+      // bug). The task coalesces to one frame, so this is at most one extra
+      // geometry pass per commit, after React has reconciled and laid out.
+      this.#storeUnsubscribers.push(
+        this.#store.subscribeCommit(() =>
+          this.#task.schedule({
+            dirty: {
+              nodes: new Set(),
+              selection: false,
+              settings: false,
+              structure: false,
+            },
+          }),
+        ),
+      );
     }
     return () => {
       this.#listeners.delete(listener);
       if (this.#listeners.size === 0) {
-        this.#storeUnsubscribe?.();
-        this.#storeUnsubscribe = null;
+        for (const off of this.#storeUnsubscribers.splice(0)) off();
         this.#task.cancel();
       }
     };

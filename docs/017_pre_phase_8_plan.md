@@ -9,11 +9,10 @@
 > - `packages/editor/src/view/react-view.tsx` — the ~3.3k-line view to decompose.
 > - `packages/editor/src/core/{registry,store,compat}.ts` — the SPI seam and two latent-bug fixes.
 > - `docs/010` — the Phase 2 ledger correction and the Phase 8 AC reframe land here.
-> - `note.md` (repo root) — the working notes this document formalizes and supersedes.
 >
 > Relationship to the other docs:
 >
-> - **Formalizes `note.md`.** `note.md` is the raw cleanup notes; this is the sequenced, gated plan. Treat this document as authoritative; keep `note.md` as scratch.
+> - **Absorbed `note.md`.** The pre-Phase-8 scratch file at the repo root has been folded in and deleted; its durable rules live in §3.6 (load-bearing CSS, the longhand-style invariant, test-runtime tips). This document is authoritative.
 > - **Realizes docs/016.** The node SPI is sketched in 016; this document is when the internals are lifted onto it (behavior-preserving).
 > - **Precedes docs/010 Phase 8.** Phase 8 builds on the decomposed view and the SPI seam this pass produces.
 
@@ -28,13 +27,14 @@
   - [3.3 Two latent-bug fixes](#33-two-latent-bug-fixes)
   - [3.4 Compat decision + Payload dialect coverage matrix](#34-compat-decision--payload-dialect-coverage-matrix)
   - [3.5 CSS to daisyui and chrome to @idco/ui](#35-css-to-daisyui-and-chrome-to-idcoui)
+  - [3.6 Durable editor-view rules (folded from note.md)](#36-durable-editor-view-rules-folded-from-notemd)
 - [4. Blog-First Priority](#4-blog-first-priority)
 - [5. Explicitly Not In This Pass](#5-explicitly-not-in-this-pass)
 - [6. Definition Of Done](#6-definition-of-done)
 
 ## 1. Why A Pre-Phase-8 Pass
 
-The pre-Phase-8 investigation (summarized in `note.md` and the findings below) established three things:
+The pre-Phase-8 investigation (the findings below) established three things:
 
 1. **The view is a ~3.3k-line monolith** (`react-view.tsx`). Starting Phase 8's feature work inside it spreads fragility instead of reducing it.
 2. **The node lifecycle has no render contract.** Object resting render and live-edit are hardcoded `switch`/`inPlaceCode` branches in the view; only the data half is registry-driven (docs/016 §2). Phase 8 features (marks, image, divider, embed, table) would pile onto those switches and then be rewritten.
@@ -59,11 +59,11 @@ Every item is behavior-preserving except the two bug fixes (§3.3), which add te
 
 ### 3.1 Decompose react-view.tsx
 
-Pure move, zero behavior change, one module at a time (note.md §4). The decompose order matters because the SPI gates only the last two extractions:
+Pure move, zero behavior change, one module at a time. The decompose order matters because the SPI gates only the last two extractions:
 
 **No SPI dependency — proceed immediately, in this order:**
 
-1. `styles.ts` — style constants + suppress CSS. **First**, because it is the seam for the daisyui migration (§3.5). Preserve the load-bearing CSS verbatim (note.md §2): `caret-color: transparent` + `::selection` suppression (`ENGINE_SURFACE_SUPPRESS_CSS`) with the `[data-engine-object-editor] { caret-color: auto }` override; `user-select: none` on text blocks; `position: relative`/`absolute` layering; `white-space: pre-wrap`; measured-height/virtualization geometry.
+1. `styles.ts` — style constants + suppress CSS. **First**, because it is the seam for the daisyui migration (§3.5). Preserve the load-bearing CSS verbatim (§3.6): `caret-color: transparent` + `::selection` suppression (`ENGINE_SURFACE_SUPPRESS_CSS`) with the `[data-engine-object-editor] { caret-color: auto }` override; `user-select: none` on text blocks; `position: relative`/`absolute` layering; `white-space: pre-wrap`; measured-height/virtualization geometry.
 2. `geometry.ts` — pure DOM geometry (`robustCaretRect`, `caretClientRect`, `textRangeClientRects`, `characterClientRects`, `pointToModelPosition`, `caretPositionAtPoint`, `makeRect`/`toDomRect`). No React; easiest.
 3. `navigation.ts` — `selectionForNavigation`, `verticalNavigation`, grapheme/word/`lineRangeAt`, `applyEditContextText`, `diffText`.
 4. `selection-overlay.tsx` — `SelectionOverlay`, `SelectionAnnouncer`, `selectionRects`, `feedImeBounds`.
@@ -76,7 +76,7 @@ Pure move, zero behavior change, one module at a time (note.md §4). The decompo
 
 8. `react-view.tsx` — reduced to the `OwnedModelEditorView` shell + wiring.
 
-**Coupling points to make explicit** (note.md §4): the shared mutable `registryRef` (blocks + overlay both read/write it), the prop-threaded `goalColumnRef`, and the per-block EditContext controller lifecycle. Turn these into one small typed context/object passed explicitly rather than threaded prop-by-prop.
+**Coupling points to make explicit:** the shared mutable `registryRef` (blocks + overlay both read/write it), the prop-threaded `goalColumnRef`, and the per-block EditContext controller lifecycle. Turn these into one small typed context/object passed explicitly rather than threaded prop-by-prop.
 
 ### 3.2 Lift node behavior behind the SPI seam
 
@@ -131,7 +131,31 @@ Format bitmasks in the corpus (1/2/16/64 and combos) are all representable; no l
 - The editor renders through inline-`style` placeholders and carries **no tailwind/daisyui pipeline of its own**; daisyui classes only resolve in a consuming app's build, so a className swap is unverifiable in the editor's own test/story harness.
 - Phase 8 rebuilds the object chrome together with the toolbar, slash/insert menu, and format flyout — all `@idco/ui` from day one (010 §7.1) — and the engine e2e selectors evolve with that chrome. Doing the swap there, once, avoids a throwaway migration here that fights the test contract.
 
-The focus-restore integration (note.md §3: on `@idco/ui` overlay close, call `getEditorHandle().focus()` rather than let React Aria restore to a stale element; model selection survives focus loss by 011 §8.6) is recorded here and lands with that Phase 8 chrome, since there is no React Aria overlay in the engine until then.
+The focus-restore integration (on `@idco/ui` overlay close, call `getEditorHandle().focus()` rather than let React Aria restore to a stale element; model selection survives focus loss by 011 §8.6) is recorded here and lands with that Phase 8 chrome, since there is no React Aria overlay in the engine until then. (Landed in Phase 8: `view/editor-chrome.tsx` does exactly this on the link/menu popovers.)
+
+### 3.6 Durable editor-view rules (folded from note.md)
+
+These are the standing rules that outlived the pre-Phase-8 scratch file (`note.md`, now deleted). They are enforced in code; this is the prose home references point to.
+
+**Load-bearing CSS — preserve through any restyle.** These ~5 properties are functional, not decorative (each is documented at its definition in `view/styles.ts`):
+
+- `caret-color: transparent` + the `::selection` suppression on the editing surface (`ENGINE_SURFACE_SUPPRESS_CSS`); the engine paints its own caret/selection. Keep the `[data-engine-object-editor] { caret-color: auto }` override so the live code editor keeps its native caret.
+- `user-select: none` on text blocks (native selection must not fight the overlay).
+- `position: relative` (content) / `position: absolute` (overlay rects) layering.
+- `white-space: pre-wrap` on text blocks (soft breaks + caret geometry depend on it).
+- the measured-height / virtualization geometry (block heights, spacers).
+
+Everything else (colors, spacing, borders, fonts) is free to move to daisyui.
+
+**Dynamically-restyled elements use box-model longhands, never shorthands.** Any element whose inline `style` *shape* changes between renders (today: the text block via `blockStyleFor` — paragraph / list item / quote / indented each return a different shape) must use longhands (`paddingTop`/`paddingLeft`/…), never the shorthand (`padding`/`margin`/`border`/`font`). React's inline-style reconciliation clears a now-absent longhand by writing `""` *after* it writes a shorthand, so switching from `paddingTop` to the `padding` shorthand zeroes that side — e.g. toggling a list item back to a paragraph collapsed its top padding to 0 (docs/010 §14 hardening). Enforced, not convention:
+
+- **Type:** `LonghandBlockStyle` (`view/styles.ts`) is `Omit<CSSProperties, "padding" | "margin" | "border" | "font" | "inset" | "gap">`; `blockStyle` and `blockStyleFor` are typed with it, so a shorthand is a compile error.
+- **Table, not control flow:** per-text-type overrides live in the declarative `BLOCK_TYPE_STYLE` map keyed by the closed `TextLeafType` union — a styled type is one entry, never an edit to `blockStyleFor`'s logic. Heavy/custom blocks are *object* nodes and style themselves through the `NodeView` SPI (docs/016), so they never touch this file.
+- **Test:** `tests/editor/engine-style-invariants.test.ts` asserts no shorthand leaks (even via an `as`-cast) and that every variant defines all four padding longhands.
+
+Static, write-once styles (`objectBlockStyle`, the divider `<hr>`) are never diffed against a sibling variant, so they keep plain `CSSProperties` and may use shorthands.
+
+**Test runtime (Playwright is slow).** `.perf` specs are chromium-only (cross-browser perf budgets only flake under load). Further levers when wanted: only IME/caret/selection specs truly need all three browsers (objects/a11y/structural editing could be chromium-only with a small tagged cross-browser subset); raise worker parallelism for everything except the timing-sensitive autoscroll/drag specs (those need real-time rAF — keep serial); prefer polling over a fixed autoscroll `waitForTimeout`; run the full three-browser matrix in CI/on-demand, iterate locally on chromium.
 
 ## 4. Blog-First Priority
 

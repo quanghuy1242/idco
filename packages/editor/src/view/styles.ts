@@ -7,8 +7,8 @@
  * the seam for the daisyui migration (docs/017 §3.5): the colors, spacing, and
  * borders here are placeholders free to move to design tokens.
  *
- * Load-bearing CSS — DO NOT lose these when restyling (note.md §2 / docs/017
- * §3.1). They are functional, not decorative:
+ * Load-bearing CSS — DO NOT lose these when restyling (docs/017 §3.6). They are
+ * functional, not decorative:
  *
  * - `caret-color: transparent` + the `::selection` suppression in
  *   `ENGINE_SURFACE_SUPPRESS_CSS` (the engine paints its own caret/selection),
@@ -20,6 +20,7 @@
  * - `whiteSpace: pre-wrap` on text blocks (soft breaks + caret geometry).
  */
 import type { CSSProperties } from "react";
+import type { TextLeafType } from "../core";
 
 export const baseViewStyle: CSSProperties = {
   border: "1px solid color-mix(in srgb, CanvasText 18%, transparent)",
@@ -91,8 +92,14 @@ export const ENGINE_TYPOGRAPHY_CSS =
   '[data-engine-view-root] [data-engine-heading="h3"]{font-size:1.25em;}' +
   '[data-engine-view-root] [data-engine-heading="h4"]{font-size:1.1em;}' +
   '[data-engine-view-root] [data-engine-block-type="quote"]{border-left:3px solid color-mix(in srgb, currentColor 30%, transparent);padding-left:12px;font-style:italic;opacity:0.85;}' +
-  '[data-engine-view-root] [data-engine-block-type="listitem"]{padding-left:1.5em;}' +
-  '[data-engine-view-root] [data-engine-block-type="listitem"]::before{content:"•";position:absolute;left:0.5em;opacity:0.6;}' +
+  // The list padding-left + bullet offset are applied inline per block
+  // (`blockStyleFor`) because the functional `blockStyle` sets an inline padding
+  // shorthand that would otherwise win the cascade; only the bullet glyph itself
+  // lives here. It sits inside the reserved left padding so it never overlaps the
+  // text (the overlap bug, docs/010 §14).
+  // `top` matches the list item's (tighter) top padding so the bullet aligns
+  // with the first line of text (see LIST_ITEM_PADDING_Y in blockStyleFor).
+  '[data-engine-view-root] [data-engine-block-type="listitem"]::before{content:"•";position:absolute;left:0.55em;top:2px;line-height:inherit;opacity:0.6;}' +
   // Inline marks. Semantic elements (strong/em/u/s/sub/sup) already render via UA
   // defaults; these style the ones the UA does not (link without href, code,
   // highlight, comment, glossary) and theme the link with the DaisyUI token.
@@ -102,11 +109,61 @@ export const ENGINE_TYPOGRAPHY_CSS =
   "[data-engine-view-root] [data-engine-mark='comment']{background:color-mix(in srgb, var(--color-info, #38bdf8) 22%, transparent);border-radius:2px;}" +
   "[data-engine-view-root] [data-engine-mark='glossary']{border-bottom:1px dotted currentColor;}";
 
+/**
+ * Self-sufficient baseline typography for the *resting* (reader) render.
+ *
+ * The resting render uses real semantic elements (`<h1>`/`<ul>`/`<blockquote>`/…)
+ * and is meant to be themed by the host's `prose`/typography (docs/010 §7.1). But
+ * a host that imports a CSS reset (Tailwind preflight) without a typography plugin
+ * gets *stripped* defaults and no replacement — unstyled headings, bulletless
+ * lists, collapsed spacing. The editor surface never has this problem because it
+ * ships `ENGINE_TYPOGRAPHY_CSS`; the resting render needs the same self-sufficiency
+ * (docs/010 §14 hardening — the resting render looked broken without `prose`).
+ *
+ * Every rule is wrapped in `:where(…)`, giving it **zero specificity**: it beats
+ * the UA/preflight defaults (author stylesheet, later in source order) but loses
+ * to *any* real `prose` rule (`.prose` = (0,1,0)), so a host's typography still
+ * governs when present. Values track `ENGINE_TYPOGRAPHY_CSS` so the editing
+ * surface and the resting render look the same. This is the interim until the
+ * reader package (docs/015) owns the L1 render and its styling (docs/018 §2.5).
+ */
+export const ENGINE_RESTING_TYPOGRAPHY_CSS =
+  ":where([data-engine-resting-document]){line-height:1.55;}" +
+  ":where([data-engine-resting-document] h1){font-size:1.875em;font-weight:700;line-height:1.25;margin:0.6em 0 0.3em;}" +
+  ":where([data-engine-resting-document] h2){font-size:1.5em;font-weight:700;line-height:1.25;margin:0.6em 0 0.3em;}" +
+  ":where([data-engine-resting-document] h3){font-size:1.25em;font-weight:700;line-height:1.3;margin:0.6em 0 0.3em;}" +
+  ":where([data-engine-resting-document] h4){font-size:1.1em;font-weight:700;line-height:1.3;margin:0.6em 0 0.3em;}" +
+  ":where([data-engine-resting-document] p){margin:0.5em 0;}" +
+  ":where([data-engine-resting-document] ul){list-style:disc;padding-left:1.6em;margin:0.5em 0;}" +
+  ":where([data-engine-resting-document] ol){list-style:decimal;padding-left:1.6em;margin:0.5em 0;}" +
+  ":where([data-engine-resting-document] li){margin:0.15em 0;}" +
+  ":where([data-engine-resting-document] blockquote){border-left:3px solid color-mix(in srgb, currentColor 30%, transparent);padding-left:12px;font-style:italic;opacity:0.85;margin:0.5em 0;}" +
+  ":where([data-engine-resting-document] a){color:var(--color-primary, #2563eb);text-decoration:underline;text-underline-offset:2px;}" +
+  ":where([data-engine-resting-document] code){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:color-mix(in srgb, currentColor 8%, transparent);padding:0.05em 0.3em;border-radius:3px;}" +
+  ":where([data-engine-resting-document] mark){background:color-mix(in srgb, var(--color-warning, gold) 45%, transparent);color:inherit;border-radius:2px;}" +
+  ":where([data-engine-resting-document] hr){border:0;border-top:1px solid color-mix(in srgb, currentColor 24%, transparent);margin:1em 0;}";
+
+/**
+ * Hover/active affordance for heavy-object blocks. Painted with `box-shadow` (a
+ * focus-style ring) rather than a border so it never changes the box's geometry
+ * — activation must not shift layout (docs/010 §6.4 AC3). At rest an object
+ * renders bare; the ring appears only on hover or while live-editing, so the
+ * user still sees what is interactive without a permanent editor frame.
+ */
+export const ENGINE_OBJECT_CHROME_CSS =
+  "[data-engine-view-root] [data-engine-object-type]{transition:box-shadow .12s ease;}" +
+  "[data-engine-view-root] [data-engine-object-type]:hover{box-shadow:0 0 0 1px color-mix(in srgb, var(--color-primary, #2563eb) 35%, transparent);}" +
+  "[data-engine-view-root] [data-engine-object-state='live']{box-shadow:0 0 0 2px var(--color-primary, #2563eb);}";
+
 export const objectBlockStyle: CSSProperties = {
-  border: "1px solid color-mix(in srgb, CanvasText 16%, transparent)",
+  // No resting border/padding: a baked object renders as its own content (the
+  // reader's render, resting-document.tsx), not boxed in editor chrome — a
+  // bordered box around an <hr> or an embed reads as broken (docs/010 §14). The
+  // only affordance is a hover/active ring painted via box-shadow (see
+  // ENGINE_OBJECT_CHROME_CSS), which does not change layout, so activation never
+  // shifts the box (AC3).
   borderRadius: 6,
   margin: "4px 0",
-  padding: 8,
   position: "relative",
 };
 
@@ -154,22 +211,10 @@ export const mediaThumbStyle: CSSProperties = {
   padding: 8,
 };
 
-export const objectConfigStyle: CSSProperties = {
-  background: "Canvas",
-  border: "1px solid color-mix(in srgb, CanvasText 28%, transparent)",
-  borderRadius: 6,
-  boxShadow: "0 6px 24px color-mix(in srgb, CanvasText 22%, transparent)",
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-  left: 8,
-  padding: 10,
-  position: "absolute",
-  top: "calc(100% + 4px)",
-  width: "min(320px, 90%)",
-  zIndex: 5,
-};
-
+// The config popover's own box/buttons/inputs are now @idco/ui (AnchoredPopover +
+// Input + Button) with Tailwind layout classes, so the old hand-rolled
+// `objectConfig*` box/input/done inline styles were retired (docs/010 §7.1). Only
+// the field-row layout style remains, shared by the config and media panels.
 export const objectConfigFieldStyle: CSSProperties = {
   alignItems: "center",
   display: "flex",
@@ -177,31 +222,50 @@ export const objectConfigFieldStyle: CSSProperties = {
   gap: 8,
 };
 
-export const objectConfigInputStyle: CSSProperties = {
-  border: "1px solid color-mix(in srgb, CanvasText 30%, transparent)",
-  borderRadius: 4,
-  color: "CanvasText",
-  flex: 1,
-  padding: "4px 6px",
-};
+/**
+ * A style for an element that is **restyled across renders** — never a CSS
+ * box-model *shorthand*, only longhands.
+ *
+ * Why this type exists (the standardized guard, docs/010 §14 hardening): React's
+ * inline-style reconciliation clears a now-absent *longhand* (e.g. `paddingTop`)
+ * by setting it to `""` — and it does so *after* writing a *shorthand*
+ * (`padding`). So if render A sets `paddingTop` and render B switches to the
+ * `padding` shorthand, React writes the shorthand and then blanks `paddingTop`,
+ * zeroing that side (the list-item→paragraph padding collapse). Banning the
+ * shorthands at the type level makes the whole class of bug unrepresentable for
+ * any dynamically-restyled element. Static, never-restyled styles
+ * (`objectBlockStyle`, the divider `<hr>`) keep `CSSProperties` and may use
+ * shorthands freely — they are written once and never diffed against a sibling
+ * variant.
+ */
+export type LonghandBlockStyle = Omit<
+  CSSProperties,
+  "padding" | "margin" | "border" | "font" | "inset" | "gap"
+>;
 
-export const objectConfigDoneStyle: CSSProperties = {
-  alignSelf: "flex-end",
-  border: "1px solid color-mix(in srgb, CanvasText 30%, transparent)",
-  borderRadius: 4,
-  cursor: "pointer",
-  padding: "4px 10px",
-};
-
-export const blockStyle: CSSProperties = {
+export const blockStyle: LonghandBlockStyle = {
   borderRadius: 6,
   // The model owns caret painting. Chromium native EditContext can still draw a
   // platform caret on the focused host, so hide that browser caret or native
   // comparison mode double-paints.
   caretColor: "transparent",
+  // An editable text surface reads as an I-beam, not the default arrow. The
+  // engine still owns the caret painting; this is only the pointer affordance.
+  // (Links re-assert `cursor: pointer` in ENGINE_TYPOGRAPHY_CSS.)
+  cursor: "text",
   minHeight: 28,
   outline: "none",
-  padding: "5px 8px",
+  // Padding is written as longhands (not the `padding` shorthand) on purpose:
+  // `blockStyleFor` overrides individual sides for list items, and a block that
+  // flips listitem↔paragraph between renders would otherwise hit React's
+  // shorthand/longhand reconciliation bug — React clears the now-absent
+  // `paddingTop` longhand to "" *after* writing the shorthand, zeroing the top
+  // padding (the toggled-off paragraph collapsing to a tight box, docs/010 §14).
+  // Same keys every render keeps the diff clean.
+  paddingBottom: 5,
+  paddingLeft: 8,
+  paddingRight: 8,
+  paddingTop: 5,
   position: "relative",
   // The engine paints selection through model-derived overlay rects, so the
   // browser's own selection must not compete during a pointer drag (§8.5).
@@ -209,3 +273,71 @@ export const blockStyle: CSSProperties = {
   WebkitUserSelect: "none",
   whiteSpace: "pre-wrap",
 };
+
+/** One visual indent level, in em (matches the legacy editor's step). */
+const INDENT_STEP_EM = 1.6;
+
+// List items sit tighter than paragraphs (a list reads as one grouped block, the
+// typographic convention) — less top/bottom padding and a smaller min height than
+// the default block, so consecutive items are closer than separate paragraphs.
+const LIST_ITEM_PADDING_Y = 2;
+const LIST_ITEM_MIN_HEIGHT = 22;
+
+/**
+ * Per-text-type style overrides, applied on top of `blockStyle`.
+ *
+ * Declarative instead of a `type === x` chain: a text leaf type that needs
+ * distinct block geometry adds one entry here, no edit to `blockStyleFor`'s
+ * control flow. The key set is `TextLeafType` (a closed model union, `model.ts`),
+ * so a new type is a compile-time reminder to consider its style; types with no
+ * entry (paragraph, heading) just use `blockStyle`. Entries are
+ * `Partial<LonghandBlockStyle>`, so they can only override longhands — never
+ * reintroduce a box-model shorthand that the longhand-only rule bans (docs/017
+ * §3.6).
+ *
+ * Heavy/custom blocks are *object* nodes and style themselves through the
+ * `NodeView` SPI (`renderResting`/`renderLive`, docs/016); they never appear here
+ * and never require editing this file.
+ */
+const BLOCK_TYPE_STYLE: Partial<
+  Record<TextLeafType, Partial<LonghandBlockStyle>>
+> = {
+  // The bullet gutter is reserved inline (stylesheet `padding-left` would lose to
+  // the inline padding); list items also sit tighter than paragraphs.
+  listitem: {
+    minHeight: LIST_ITEM_MIN_HEIGHT,
+    paddingBottom: LIST_ITEM_PADDING_Y,
+    paddingLeft: "1.6em",
+    paddingTop: LIST_ITEM_PADDING_Y,
+  },
+  // The quote bar (border-left, ENGINE_TYPOGRAPHY_CSS) needs gutter room.
+  quote: { paddingLeft: "1em" },
+};
+
+/**
+ * Per-block style: `blockStyle` plus the type's overrides and the visual indent.
+ *
+ * Type-specific geometry comes from `BLOCK_TYPE_STYLE` (declarative, extensible),
+ * and indent rides on `attrs.indent` (set by the indent/outdent commands) as a
+ * left margin so the whole block — bullet included — shifts together. Every
+ * override is a longhand (never `blockStyle`'s padding shorthand — there isn't
+ * one), so a block flipping between types diffs cleanly (docs/017 §3.6).
+ */
+export function blockStyleFor(node: {
+  readonly type: string;
+  readonly attrs?: { readonly indent?: unknown } | null;
+}): LonghandBlockStyle {
+  const indent =
+    typeof node.attrs?.indent === "number" && node.attrs.indent > 0
+      ? node.attrs.indent
+      : 0;
+  const typeStyle = BLOCK_TYPE_STYLE[node.type as TextLeafType];
+  // Fast path for the common, unstyled, unindented block (paragraph/heading):
+  // reuse the shared object so React sees a stable reference.
+  if (!typeStyle && indent === 0) return blockStyle;
+  return {
+    ...blockStyle,
+    ...typeStyle,
+    ...(indent > 0 ? { marginLeft: `${indent * INDENT_STEP_EM}em` } : {}),
+  };
+}

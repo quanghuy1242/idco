@@ -852,15 +852,71 @@ function compileSetObjectData(
 // List editing: indent / outdent (docs/010 Phase 5.5 AC6).
 // ---------------------------------------------------------------------------
 
+/** Deepest visual indent level a block can reach (mirrors the legacy editor). */
+const MAX_INDENT = 8;
+
 function compileIndent(
   store: EditorStore,
   direction: "indent" | "outdent",
 ): TransactionBuilder | null {
   const item = currentListItem(store);
-  if (!item) return null;
-  return direction === "indent"
-    ? compileIndentItem(store, item)
-    : compileOutdentItem(store, item);
+  if (item) {
+    return direction === "indent"
+      ? compileIndentItem(store, item)
+      : compileOutdentItem(store, item);
+  }
+  // No nested-list context (a flat body-level `listitem` or an ordinary
+  // paragraph/heading — the shape the Payload import produces, docs/010 §14):
+  // indent/outdent adjust a visual `indent` level on the block(s), the way the
+  // legacy Lexical editor indents any element. Outdenting a list item already at
+  // zero indent drops it back to a paragraph.
+  return compileIndentAttr(store, direction);
+}
+
+function compileIndentAttr(
+  store: EditorStore,
+  direction: "indent" | "outdent",
+): TransactionBuilder | null {
+  const range = textRange(store);
+  if (!range) return null;
+  const targets = coveredTextLeaves(store, range);
+  if (targets.length === 0) return null;
+  const tr = store.transaction();
+  let changed = false;
+  for (const node of targets) {
+    const current =
+      typeof node.attrs?.indent === "number" ? node.attrs.indent : 0;
+    let next =
+      direction === "indent" ? Math.min(current + 1, MAX_INDENT) : current - 1;
+    if (next < 0) {
+      // Already flush left: a list item drops its list formatting; other blocks
+      // simply have nothing left to outdent.
+      if (node.type === "listitem") {
+        tr.push({
+          from: "listitem",
+          node: node.id,
+          to: "paragraph",
+          type: "set-node-type",
+        });
+        changed = true;
+      }
+      next = 0;
+    }
+    if (next !== current) {
+      tr.push({
+        from: node.attrs?.indent,
+        key: "indent",
+        node: node.id,
+        // Keep `indent: 0` off the node so a flush block stays attr-clean and
+        // round-trips deep-equal (docs/010 §14).
+        to: next === 0 ? undefined : next,
+        type: "set-node-attr",
+      });
+      changed = true;
+    }
+  }
+  if (!changed) return null;
+  return tr.setSelection(store.selection as EditorSelection);
 }
 
 function compileIndentItem(
@@ -1016,14 +1072,29 @@ function isMarkActive(store: EditorStore, kind: TextMarkKind): boolean {
 
 function canIndent(store: EditorStore): boolean {
   const item = currentListItem(store);
-  return !!item && item.index > 0;
+  if (item) return item.index > 0;
+  // Attribute-indent fallback: any text block can be pushed right, up to the cap.
+  const range = textRange(store);
+  if (!range) return false;
+  return coveredTextLeaves(store, range).some(
+    (node) =>
+      (typeof node.attrs?.indent === "number" ? node.attrs.indent : 0) <
+      MAX_INDENT,
+  );
 }
 
 function canOutdent(store: EditorStore): boolean {
   const item = currentListItem(store);
-  if (!item) return false;
-  const listEntry = store.parentEntry(item.list.id);
-  return !!listEntry;
+  if (item) return !!store.parentEntry(item.list.id);
+  // Attribute-indent fallback: outdent applies when a block carries indent, or a
+  // flat list item can drop back to a paragraph.
+  const range = textRange(store);
+  if (!range) return false;
+  return coveredTextLeaves(store, range).some(
+    (node) =>
+      node.type === "listitem" ||
+      (typeof node.attrs?.indent === "number" && node.attrs.indent > 0),
+  );
 }
 
 function currentBlockType(store: EditorStore): TextLeafType | null {

@@ -49,7 +49,7 @@ import {
 import { requestFrame } from "./raf";
 import { leafHasMarks, renderLeafMarks } from "./mark-render";
 import { ariaLabelForLeaf } from "./selection-overlay";
-import { blockStyle } from "./styles";
+import { blockStyleFor } from "./styles";
 import type {
   CharacterBoundsUpdateEventLike,
   EditContextConstructor,
@@ -342,6 +342,12 @@ export function EngineTextBlock(props: {
 
   const focusAtClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      // Only the primary (left) button drives caret placement and drag. A
+      // right/middle press must leave the model selection untouched so a
+      // right-click can open the context menu over an existing selection without
+      // collapsing it (the native-editor behavior); the caret-collapsing
+      // mousedown would otherwise wipe the selection before `contextmenu` fires.
+      if (event.button !== 0) return;
       // A pointer click sets a fresh caret X; drop any remembered goal column.
       goalColumnRef.current = null;
       // Map the click to a model offset (docs/011 \u00a78.3 click-to-position), not
@@ -560,7 +566,7 @@ export function EngineTextBlock(props: {
       onMouseDown={focusAtClick}
       ref={bindRef}
       role="textbox"
-      style={blockStyle}
+      style={blockStyleFor(node)}
       tabIndex={0}
     >
       {renderLeafMarks(node)}

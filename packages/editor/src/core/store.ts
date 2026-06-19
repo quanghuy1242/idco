@@ -531,6 +531,16 @@ export class EditorStore {
     return runQuery(this, query);
   }
 
+  /** Whether there is an applied transaction to undo (toolbar enablement). */
+  get canUndo(): boolean {
+    return this.#history.done.length > 0;
+  }
+
+  /** Whether there is an undone transaction to redo (toolbar enablement). */
+  get canRedo(): boolean {
+    return this.#history.undone.length > 0;
+  }
+
   /** Apply the latest inverse transaction and restore its stored selection. */
   undo(): CommittedTransaction | null {
     const entry = this.#history.done.pop();
