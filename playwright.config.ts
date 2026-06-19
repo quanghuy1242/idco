@@ -54,6 +54,19 @@ export default defineConfig({
       testMatch: /engine-mobile\.spec\.ts/,
       use: { ...devices["iPhone 13"] },
     },
+    // A touch-enabled Chromium device for the touch-gesture specs (AC8 long-press
+    // / grip drag / selection toolbar). WebKit cannot construct synthetic
+    // `Touch`/`TouchEvent` objects ("Illegal constructor"), so the gesture tests
+    // that dispatch a real touch sequence run here; the model behaviour is
+    // identical (the engine forces the EditContext polyfill on every browser).
+    {
+      name: "mobile-chromium",
+      testMatch: /engine-mobile\.spec\.ts/,
+      use: {
+        ...devices["Pixel 5"],
+        ...(browserChannel ? { channel: browserChannel } : {}),
+      },
+    },
   ],
   reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
   testDir: "tests/e2e",

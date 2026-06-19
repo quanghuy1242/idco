@@ -27,11 +27,16 @@ import {
   type EnginePerformanceSnapshot,
   type EngineScheduler,
   type NodeId,
+  type TextMarkKind,
   type TextPoint,
 } from "../core";
 import { calculateVirtualRange } from "../core/virtual-range";
 import { caretClientRect, clampOffset, resolveTextPointAt } from "./geometry";
-import { activeSelectionNode, pointForStoreOffset } from "./navigation";
+import {
+  activeSelectionNode,
+  pointForStoreOffset,
+  wordRangeAt,
+} from "./navigation";
 import {
   feedImeBounds,
   SelectionAnnouncer,
@@ -42,6 +47,11 @@ import { sanitizeHtmlToCompat } from "./paste-html";
 import { cancelFrame, requestFrame } from "./raf";
 import { useEditorNode, useEditorOrder } from "./store-hooks";
 import { EngineTextBlock } from "./text-block";
+import {
+  TouchSelectionLayer,
+  useTouchDevice,
+  type TouchSelectionActions,
+} from "./touch-selection";
 import type { ImeBoundsSnapshot, RenderRegistry } from "./types";
 import { baseViewStyle, blockStyle } from "./styles";
 
@@ -196,6 +206,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // than the display refreshes, and each extend does a DOM hit-test + dispatch,
   // so processing every event makes the painted selection lag the pointer.
   const dragMoveFrameRef = useRef<number | null>(null);
+  // Lifts the drag hit-test above the fingertip during a touch-grip drag, so the
+  // resolved point lands on the selected line, not under the finger/grip that
+  // covers it. Zero for mouse and long-press drags (finger is on the text).
+  const touchPointerOffsetRef = useRef(0);
   const registryRef = useRef<RenderRegistry>({
     blockRefs: new Map(),
     dragging: false,
@@ -209,6 +223,11 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   const order = useEditorOrder(store);
   const [scrollTop, setScrollTop] = useState(0);
   const [measureVersion, setMeasureVersion] = useState(0);
+  // Touch-selection chrome state: whether a grip/long-press drag is live (hides
+  // the floating toolbar mid-drag) and whether this is a touch-first device (so
+  // grips never paint on desktop).
+  const [touchInteracting, setTouchInteracting] = useState(false);
+  const isTouchDevice = useTouchDevice();
   // The off-thread bake/index service (docs/010 §7.5). The view derives the
   // document index (TOC + plain-text) in the worker so the main thread is never
   // blocked by the pure-compute pass; results land in refs the diagnostics read.
@@ -523,6 +542,9 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     dragAnchorRef.current = anchor;
     draggingRef.current = true;
     registryRef.current.dragging = true;
+    // Mouse and long-press drags hit-test at the pointer; a grip drag re-sets
+    // this after begin. Reset here so a mouse drag never inherits a touch offset.
+    touchPointerOffsetRef.current = 0;
   }, []);
 
   const extendDragToPointer = useCallback(() => {
@@ -534,8 +556,14 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     const root = rootRef.current;
     if (!anchor || !pointer || !root) return;
     // Resolve to the nearest text leaf, so a drag passes through the `[list]`
-    // placeholder and the gaps instead of stalling on a non-text block.
-    const hit = resolveTextPointAt(store, root, pointer.x, pointer.y);
+    // placeholder and the gaps instead of stalling on a non-text block. The
+    // touch offset lifts the hit-test above the fingertip for grip drags.
+    const hit = resolveTextPointAt(
+      store,
+      root,
+      pointer.x,
+      pointer.y - touchPointerOffsetRef.current,
+    );
     if (!hit) return;
     const target = store.getNode(hit.node);
     if (!target || target.kind !== "text") return;
@@ -700,6 +728,207 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       view.removeEventListener("pointerup", onUp);
     };
   }, [endDrag, handleDragMove]);
+
+  // Place the caret at a touch point and focus its block (so the soft keyboard
+  // opens), the touch equivalent of a click. Used for a tap (press + release, no
+  // drag, no long-press).
+  const caretAtPointAndFocus = useCallback(
+    (clientX: number, clientY: number) => {
+      placeCaretAt(clientX, clientY);
+      const sel = store.selection;
+      if (sel?.type === "text") focusBlock(sel.focus.node);
+    },
+    [focusBlock, placeCaretAt, store],
+  );
+
+  // Select the word under a touch point and arm a drag from its start, so a
+  // long-press selects a word and keeping the finger down extends the range —
+  // the mobile gesture that stands in for double-click + drag.
+  const selectWordAtPoint = useCallback(
+    (clientX: number, clientY: number): boolean => {
+      const root = rootRef.current;
+      if (!root) return false;
+      const hit = resolveTextPointAt(store, root, clientX, clientY);
+      if (!hit) return false;
+      const node = store.getNode(hit.node);
+      if (!node || node.kind !== "text") return false;
+      const [from, to] = wordRangeAt(
+        node.content.text,
+        clampOffset(hit.offset, node.content.text.length),
+      );
+      const anchor = pointAtOffset(hit.node, node.content, from);
+      const focus = pointAtOffset(hit.node, node.content, to);
+      store.activateTextLeaf(hit.node);
+      store.dispatch({
+        origin: "local",
+        selectionAfter: { anchor, focus, type: "text" },
+        steps: [],
+      });
+      focusBlock(hit.node);
+      beginDrag(anchor);
+      return true;
+    },
+    [beginDrag, focusBlock, store],
+  );
+
+  // Arm a drag from a selection grip: dragging a grip moves THAT end of the
+  // range, so the opposite end becomes the fixed drag anchor. The touch offset
+  // lifts the hit-test above the fingertip so it tracks the line under the grip.
+  const armHandleDrag = useCallback(
+    (end: "start" | "end") => {
+      const sel = store.selection;
+      if (sel?.type !== "text") return;
+      const forward = store.comparePoints(sel.anchor, sel.focus) <= 0;
+      const startPt = forward ? sel.anchor : sel.focus;
+      const endPt = forward ? sel.focus : sel.anchor;
+      beginDrag(end === "start" ? endPt : startPt);
+      touchPointerOffsetRef.current = HANDLE_TOUCH_LIFT_PX;
+    },
+    [beginDrag, store],
+  );
+
+  const touchActions = useMemo<TouchSelectionActions>(
+    () => ({
+      copy: () => {
+        const text = collectSelectionText(store, store.selection);
+        if (text) void navigator.clipboard?.writeText(text).catch(() => {});
+      },
+      cut: () => {
+        const text = collectSelectionText(store, store.selection);
+        if (text) void navigator.clipboard?.writeText(text).catch(() => {});
+        if (store.command({ type: "delete-selection" })) syncFocusToSelection();
+      },
+      paste: () => {
+        void (async () => {
+          try {
+            const text = await navigator.clipboard?.readText();
+            if (text && store.command({ text, type: "insert-text" })) {
+              syncFocusToSelection();
+            }
+          } catch {
+            // Clipboard read unavailable or denied; nothing to paste.
+          }
+        })();
+      },
+      toggleMark: (mark: TextMarkKind) => {
+        store.command({ mark, type: "toggle-mark" });
+      },
+    }),
+    [store, syncFocusToSelection],
+  );
+
+  // Touch gesture controller (docs/010 Phase 7 AC8). Owns the scroll-vs-select
+  // decision on the touch device: a plain drag scrolls (we never preventDefault
+  // it), a long-press selects a word and then extends, a grip drag adjusts an
+  // end, and a tap places the caret. Once selecting, `preventDefault` on
+  // `touchmove` claims the gesture from the scroller; `preventDefault` on
+  // `touchend` suppresses the synthesized mouse events that would otherwise
+  // re-place the caret and collapse the selection.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    let mode: "idle" | "pressing" | "scrolling" | "selecting" | "handle" =
+      "idle";
+    let startX = 0;
+    let startY = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const clearTimer = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+    const onStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) return; // ignore pinch/multi-touch
+      const touch = event.touches[0]!;
+      const target = touch.target as Element | null;
+      if (target?.closest("[data-engine-sel-toolbar]")) return; // button click
+      startX = touch.clientX;
+      startY = touch.clientY;
+      const handle = target?.closest("[data-engine-sel-handle]");
+      if (handle) {
+        event.preventDefault();
+        mode = "handle";
+        armHandleDrag(
+          handle.getAttribute("data-engine-sel-handle") === "start"
+            ? "start"
+            : "end",
+        );
+        handleDragMove(startX, startY);
+        setTouchInteracting(true);
+        return;
+      }
+      if (!target?.closest("[data-engine-block-id]")) {
+        mode = "idle";
+        return;
+      }
+      mode = "pressing";
+      clearTimer();
+      timer = setTimeout(() => {
+        timer = null;
+        if (mode !== "pressing") return;
+        if (selectWordAtPoint(startX, startY)) {
+          mode = "selecting";
+          setTouchInteracting(true);
+        }
+      }, TOUCH_LONG_PRESS_MS);
+    };
+    const onMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      if (mode === "pressing") {
+        if (
+          Math.hypot(touch.clientX - startX, touch.clientY - startY) >
+          TOUCH_MOVE_CANCEL_PX
+        ) {
+          clearTimer();
+          mode = "scrolling"; // a pre-long-press drag is a scroll; let it scroll
+        }
+        return;
+      }
+      if (mode === "selecting" || mode === "handle") {
+        event.preventDefault(); // claim the gesture from the scroller
+        handleDragMove(touch.clientX, touch.clientY);
+      }
+    };
+    const onEnd = (event: TouchEvent) => {
+      if (mode === "pressing") {
+        clearTimer();
+        event.preventDefault(); // suppress the synthesized mouse tap
+        caretAtPointAndFocus(startX, startY);
+      } else if (mode === "selecting" || mode === "handle") {
+        event.preventDefault(); // keep the range; no synthesized mousedown
+        endDrag();
+        setTouchInteracting(false);
+      }
+      mode = "idle";
+    };
+    const onCancel = () => {
+      clearTimer();
+      if (mode === "selecting" || mode === "handle") {
+        endDrag();
+        setTouchInteracting(false);
+      }
+      mode = "idle";
+    };
+    root.addEventListener("touchstart", onStart, { passive: false });
+    root.addEventListener("touchmove", onMove, { passive: false });
+    root.addEventListener("touchend", onEnd, { passive: false });
+    root.addEventListener("touchcancel", onCancel);
+    return () => {
+      clearTimer();
+      root.removeEventListener("touchstart", onStart);
+      root.removeEventListener("touchmove", onMove);
+      root.removeEventListener("touchend", onEnd);
+      root.removeEventListener("touchcancel", onCancel);
+    };
+  }, [
+    armHandleDrag,
+    caretAtPointAndFocus,
+    endDrag,
+    handleDragMove,
+    selectWordAtPoint,
+  ]);
 
   useLayoutEffect(() => {
     if (!virtualize) return;
@@ -949,6 +1178,16 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scheduler={scheduler}
           store={store}
         />
+        {isTouchDevice && (
+          <TouchSelectionLayer
+            actions={touchActions}
+            containerRef={rootRef}
+            interacting={touchInteracting}
+            registry={registryRef.current}
+            scheduler={scheduler}
+            store={store}
+          />
+        )}
         <SelectionAnnouncer scheduler={scheduler} store={store} />
       </div>
     );
@@ -992,6 +1231,16 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scheduler={scheduler}
           store={store}
         />
+        {isTouchDevice && (
+          <TouchSelectionLayer
+            actions={touchActions}
+            containerRef={contentRef}
+            interacting={touchInteracting}
+            registry={registryRef.current}
+            scheduler={scheduler}
+            store={store}
+          />
+        )}
         <SelectionAnnouncer scheduler={scheduler} store={store} />
       </div>
     </div>
@@ -1010,6 +1259,14 @@ const INDEX_REBUILD_DEBOUNCE_MS = 200;
 // into view (~one line). Small enough that each line-move scrolls about one
 // line, not a whole block. Trivially promotable to a prop if a knob is wanted.
 const CARET_REVEAL_MARGIN_PX = 24;
+// A still-held touch this long becomes a word-select (vs a tap); a pre-threshold
+// drag becomes a scroll. Matches the platform long-press feel.
+const TOUCH_LONG_PRESS_MS = 450;
+// Movement before the long-press fires that reclassifies the gesture as a scroll.
+const TOUCH_MOVE_CANCEL_PX = 10;
+// How far above the fingertip a grip drag hit-tests, so the resolved point lands
+// on the selected line instead of under the finger/grip covering it.
+const HANDLE_TOUCH_LIFT_PX = 28;
 
 function EngineBlock(props: {
   readonly id: NodeId;

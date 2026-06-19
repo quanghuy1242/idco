@@ -39,6 +39,52 @@ async function open(page: Page): Promise<void> {
     .waitFor({ state: "visible" });
 }
 
+// Dispatch one synthetic touch event at a client point. The engine's touch
+// controller listens on the scroll root and reads `Touch.target` (set to the
+// element under the point) for hit-testing, so a real long-press / grip drag is
+// reproducible without a high-level gesture API.
+async function touch(
+  page: Page,
+  type: "touchstart" | "touchmove" | "touchend",
+  x: number,
+  y: number,
+): Promise<void> {
+  await page.evaluate(
+    (arg) => {
+      const root = document.querySelector("[data-engine-view-root]")!;
+      const target = document.elementFromPoint(arg.x, arg.y) ?? root;
+      const t = new Touch({
+        clientX: arg.x,
+        clientY: arg.y,
+        identifier: 1,
+        pageX: arg.x,
+        pageY: arg.y,
+        target,
+      });
+      const touches = arg.type === "touchend" ? [] : [t];
+      root.dispatchEvent(
+        new TouchEvent(arg.type, {
+          bubbles: true,
+          cancelable: true,
+          changedTouches: [t],
+          composed: true,
+          targetTouches: touches,
+          touches,
+        }),
+      );
+    },
+    { type, x, y },
+  );
+}
+
+// Long-press inside a block to select the word under the finger (the engine
+// long-press = ~450ms held still).
+async function longPressWord(page: Page, x: number, y: number): Promise<void> {
+  await touch(page, "touchstart", x, y);
+  await page.waitForTimeout(550);
+  await touch(page, "touchend", x, y);
+}
+
 test("AC2 a tap places the model caret in the tapped block", async ({
   page,
 }) => {
@@ -175,4 +221,103 @@ test("AC2 cross-block Backspace keeps the focused block alive so editing never l
   await expect
     .poll(async () => (await diag(page)).blockTexts[secondId] ?? "")
     .toBe(firstText + "X" + secondText);
+});
+
+test("AC8 long-press selects the word under the finger", async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "WebKit cannot construct synthetic Touch events; AC8 runs on mobile-chromium.",
+  );
+  await open(page);
+  const block = page.locator("[data-engine-text-id]").nth(1);
+  const id = (await block.getAttribute("data-engine-block-id"))!;
+  const box = (await block.boundingBox())!;
+  // Aim well inside the first word on the first line.
+  await longPressWord(page, box.x + 24, box.y + 8);
+
+  const sel = (await diag(page)).selection!;
+  expect(sel.type).toBe("text");
+  expect(sel.focus?.node).toBe(id);
+  // A word, not a collapsed caret.
+  expect(sel.anchor?.offset).not.toBe(sel.focus?.offset);
+});
+
+test("AC8 two grips render for a touch selection and dragging one extends it", async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "WebKit cannot construct synthetic Touch events; AC8 runs on mobile-chromium.",
+  );
+  await open(page);
+  const block = page.locator("[data-engine-text-id]").nth(1);
+  const box = (await block.boundingBox())!;
+  await longPressWord(page, box.x + 24, box.y + 8);
+
+  // The engine paints exactly two range grips on a touch device.
+  await expect(page.locator("[data-engine-sel-handle]")).toHaveCount(2);
+
+  const before = (await diag(page)).selection!;
+  const grip = page.locator('[data-engine-sel-handle="end"]');
+  const gb = (await grip.boundingBox())!;
+  // Drag the end grip far to the right, along the grip's own line, to extend.
+  const gx = gb.x + gb.width / 2;
+  const gy = gb.y + gb.height / 2;
+  await touch(page, "touchstart", gx, gy);
+  await touch(page, "touchmove", box.x + box.width * 0.8, gy);
+  await touch(page, "touchend", box.x + box.width * 0.8, gy);
+
+  const after = (await diag(page)).selection!;
+  expect(after.type).toBe("text");
+  expect(after.focus!.offset).toBeGreaterThan(before.focus!.offset);
+});
+
+test("AC8 the selection toolbar cuts the selected word", async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "WebKit cannot construct synthetic Touch events; AC8 runs on mobile-chromium.",
+  );
+  await open(page);
+  const block = page.locator("[data-engine-text-id]").nth(1);
+  const id = (await block.getAttribute("data-engine-block-id"))!;
+  const box = (await block.boundingBox())!;
+  const before = (await diag(page)).blockTexts[id]!;
+  await longPressWord(page, box.x + 24, box.y + 8);
+
+  // Fire the button's action directly: the floating bar repaints on the
+  // selection frame lane (like the caret overlay), so Playwright's tap-stability
+  // wait never settles; `dispatchEvent` exercises the same onClick wiring.
+  await page.locator('[data-engine-sel-action="Cut"]').dispatchEvent("click");
+
+  // The selected word is gone (clipboard write may be blocked in CI, but the
+  // model delete runs regardless).
+  await expect
+    .poll(async () => ((await diag(page)).blockTexts[id] ?? "").length)
+    .toBeLessThan(before.length);
+});
+
+test("AC8 the selection toolbar bolds the selected word", async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "WebKit cannot construct synthetic Touch events; AC8 runs on mobile-chromium.",
+  );
+  await open(page);
+  const block = page.locator("[data-engine-text-id]").nth(1);
+  const box = (await block.boundingBox())!;
+  await longPressWord(page, box.x + 24, box.y + 8);
+
+  await page.locator('[data-engine-sel-action="Bold"]').dispatchEvent("click");
+
+  // A bolded leaf re-renders with a semantic <strong> over the marked run.
+  await expect(block.locator("strong")).toHaveCount(1);
 });
