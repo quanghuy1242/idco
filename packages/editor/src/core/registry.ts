@@ -31,14 +31,29 @@ export type ObjectNormalizationResult = {
   readonly status?: ObjectNodeStatus;
 };
 
+/** An indexable anchor inside an object's opaque data (docs/016 §6.1). */
+export type NodeAnchor = {
+  readonly id: string;
+  readonly label: string;
+};
+
 /**
- * Object-block boundary contract.
+ * The framework-free half of the node SPI (docs/016 §6.1).
  *
  * Atomic objects own their opaque data. The engine can store, move, select, and
  * invert object-level swaps, but it must not guess how to parse or complete a
- * custom object's internal payload.
+ * custom object's internal payload. A `NodeDefinition` is the explicit, DOM-free,
+ * worker-safe contract for one object type: its data, its bake, its document-
+ * service adapters, and its fine-grained invert. The React half — resting/live
+ * render and insert/format affordance — is the `NodeView` paired by `type` in
+ * the view layer (docs/016 §6.2). `registerNode` (view) registers both halves.
+ *
+ * The slots below `bake` are the named-but-optional lifecycle slots (docs/016
+ * §6.3): they exist so Phase 8 fills them without reshaping this contract. When a
+ * definition omits one, document services fall back to the baked snapshot or the
+ * wholesale `SetObjectData` swap — never a silent skip (011 §2.7/§6.5).
  */
-export type BlockDefinition = {
+export type NodeDefinition = {
   readonly type: string;
   normalizeData(value: unknown): ObjectNormalizationResult;
   fromCompatNode?(node: RichTextCompatNode): ObjectNormalizationResult;
@@ -54,17 +69,37 @@ export type BlockDefinition = {
    * emitting an unbakeable node.
    */
   bake?(data: JsonValue): BakedSnapshot | null;
+  /**
+   * Object-level plain text for search/index/export (docs/016 §6.1, 011 §2.7).
+   * Optional; omitting it makes services treat the object as atomic, never
+   * pretending its internals were searched.
+   */
+  plainText?(data: JsonValue): string;
+  /** Indexable internal anchors the object owns (docs/016 §6.1, 011 §2.7). */
+  anchors?(data: JsonValue): readonly NodeAnchor[];
+  /**
+   * Fine-grained invertible object edit (docs/016 §6.1, 011 §6.5). When omitted
+   * the engine inverts object edits with the wholesale `SetObjectData` swap.
+   */
+  applyEdit?(data: JsonValue, patch: JsonValue): JsonValue;
+  invertPatch?(patch: JsonValue, dataBefore: JsonValue): JsonValue;
 };
+
+/**
+ * @deprecated Renamed to {@link NodeDefinition} (docs/016). Kept as an alias so
+ * existing callers keep compiling; remove once they migrate.
+ */
+export type BlockDefinition = NodeDefinition;
 
 /** Registry of object-block definitions used by compat import/export. */
 export class BlockRegistry {
-  readonly #definitions = new Map<string, BlockDefinition>();
+  readonly #definitions = new Map<string, NodeDefinition>();
 
-  constructor(definitions: readonly BlockDefinition[] = []) {
+  constructor(definitions: readonly NodeDefinition[] = []) {
     definitions.forEach((definition) => this.register(definition));
   }
 
-  register(definition: BlockDefinition): void {
+  register(definition: NodeDefinition): void {
     /*
      * Duplicate registrations are rejected instead of "last write wins" because
      * object parsing is part of the persistence contract. Two definitions for
@@ -76,11 +111,11 @@ export class BlockRegistry {
     this.#definitions.set(definition.type, definition);
   }
 
-  get(type: string): BlockDefinition | undefined {
+  get(type: string): NodeDefinition | undefined {
     return this.#definitions.get(type);
   }
 
-  require(type: string): BlockDefinition {
+  require(type: string): NodeDefinition {
     const definition = this.get(type);
     if (!definition) throw new Error(`Unknown object block: ${type}`);
     return definition;
@@ -107,11 +142,34 @@ export class BlockRegistry {
   }
 }
 
-/** Built-ins plus caller-provided custom object definitions. */
+/**
+ * Globally registered custom node definitions (docs/016 §7). The view's
+ * `registerNode` records a custom object's framework-free half here so that every
+ * `createDefaultBlockRegistry()` — compat import/export, the bake service — knows
+ * it without threading a registry through each call site. Keyed by type, so a
+ * re-register (HMR, a re-imported test module) replaces rather than duplicates.
+ */
+const GLOBAL_NODE_DEFINITIONS = new Map<string, NodeDefinition>();
+
+/** Register a custom node's definition globally (docs/016 §7). Idempotent by type. */
+export function registerGlobalNodeDefinition(definition: NodeDefinition): void {
+  GLOBAL_NODE_DEFINITIONS.set(definition.type, definition);
+}
+
+/** The custom node definitions registered so far (docs/016 §7). */
+export function globalNodeDefinitions(): readonly NodeDefinition[] {
+  return [...GLOBAL_NODE_DEFINITIONS.values()];
+}
+
+/** Built-ins, globally-registered custom nodes, plus caller-provided definitions. */
 export function createDefaultBlockRegistry(
-  definitions: readonly BlockDefinition[] = [],
+  definitions: readonly NodeDefinition[] = [],
 ): BlockRegistry {
-  return new BlockRegistry([...BUILT_IN_OBJECT_DEFINITIONS, ...definitions]);
+  return new BlockRegistry([
+    ...BUILT_IN_OBJECT_DEFINITIONS,
+    ...globalNodeDefinitions(),
+    ...definitions,
+  ]);
 }
 
 /**
@@ -120,7 +178,7 @@ export function createDefaultBlockRegistry(
  * They preserve data, baked snapshots, and status fields without implementing
  * real bake pipelines. Phase 6 can replace these with richer definitions.
  */
-export const BUILT_IN_OBJECT_DEFINITIONS: readonly BlockDefinition[] = [
+export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
   codeBlockDefinition(),
   simpleObjectDefinition(
     "media",
@@ -228,9 +286,28 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly BlockDefinition[] = [
     }),
     (data) => ({ kind: "table", payload: data }),
   ),
+  dividerDefinition(),
 ];
 
-function codeBlockDefinition(): BlockDefinition {
+/**
+ * `divider` (horizontal rule) — the simplest object node, and the worked example
+ * proving the node SPI end to end (docs/016 §8). It carries no data, always
+ * bakes, and contributes no search text. The corpus stores it as `horizontalrule`
+ * (docs/017 §3.4); that dialect alias is the Phase 8 import adapter's job, not
+ * this definition's.
+ */
+function dividerDefinition(): NodeDefinition {
+  return {
+    bake: () => ({ kind: "divider", payload: {} }),
+    fromCompatNode: () => ({ data: {}, status: "ready" }),
+    normalizeData: () => ({ data: {}, status: "ready" }),
+    plainText: () => "",
+    toCompatNode: () => ({}),
+    type: "divider",
+  };
+}
+
+function codeBlockDefinition(): NodeDefinition {
   /*
    * `code-block` is the one Phase 3 object whose internal DSA matters now. Compat
    * JSON still uses a plain `text` field, but the owned model stores a
@@ -306,7 +383,7 @@ function simpleObjectDefinition(
   type: string,
   fromCompatNode: (node: RichTextCompatNode) => ObjectNormalizationResult,
   bake?: (data: JsonValue) => BakedSnapshot | null,
-): BlockDefinition {
+): NodeDefinition {
   /*
    * Built-in object definitions preserve known fields as JSON-safe data and keep
    * the `baked`/`status` slots alive. The optional `bake` produces the object's

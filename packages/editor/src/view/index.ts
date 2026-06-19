@@ -8,12 +8,24 @@
  */
 export {
   OwnedModelEditorView,
+  type OwnedModelEditorViewDiagnostics,
+  type OwnedModelEditorViewHandle,
+  type OwnedModelEditorViewProps,
+} from "./react-view";
+export {
   applyEditContextText,
   lineRangeAt,
   nextGraphemeBoundary,
   prevGraphemeBoundary,
   wordRangeAt,
-  type OwnedModelEditorViewDiagnostics,
-  type OwnedModelEditorViewHandle,
-  type OwnedModelEditorViewProps,
-} from "./react-view";
+} from "./navigation";
+export {
+  getNodeView,
+  registerNode,
+  registerNodeView,
+  type NodeView,
+  type NodeViewInsert,
+  type NodeViewLiveArgs,
+  type NodeViewRestingArgs,
+  type RegisterNodeArgs,
+} from "./node-view";

@@ -54,6 +54,8 @@ export {
 } from "./model";
 export type {
   BlockDefinition,
+  NodeAnchor,
+  NodeDefinition,
   ObjectNormalizationResult,
   UnknownObjectPolicy,
 } from "./registry";
@@ -61,6 +63,8 @@ export {
   BUILT_IN_OBJECT_DEFINITIONS,
   BlockRegistry,
   createDefaultBlockRegistry,
+  globalNodeDefinitions,
+  registerGlobalNodeDefinition,
 } from "./registry";
 export type {
   BakeObjectResult,

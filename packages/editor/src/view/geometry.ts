@@ -1,0 +1,410 @@
+/**
+ * Pure DOM geometry for the owned-model editor view (docs/017 §3.1).
+ *
+ * The browser owns text layout and hit-testing; this module is the thin,
+ * framework-free wrapper that turns model offsets into pixel rects and pointer
+ * coordinates into model positions (docs/010 §6.3). It touches the DOM and the
+ * store (read-only, by parameter) but never React. The selection overlay and the
+ * navigation module build on these primitives.
+ */
+import type { EditorStore, NodeId } from "../core";
+
+export function isTextNode(node: Node): boolean {
+  return node.nodeType === node.TEXT_NODE;
+}
+
+export function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+export function clampOffset(offset: number, length: number): number {
+  return Math.min(Math.max(0, Math.floor(offset)), length);
+}
+
+export function firstTextNode(element: HTMLElement): Text | null {
+  const textNodeType = element.ownerDocument.defaultView?.Node.TEXT_NODE ?? 3;
+  return element.firstChild?.nodeType === textNodeType
+    ? (element.firstChild as Text)
+    : null;
+}
+
+/** Bounding rect of a block's rendered text (its first text node), or null. */
+export function textBoundingRect(host: HTMLElement): DOMRect | null {
+  const textNode = firstTextNode(host);
+  if (!textNode) return null;
+  const range = host.ownerDocument.createRange();
+  range.selectNodeContents(textNode);
+  const rect = range.getBoundingClientRect();
+  return rect.width > 0 || rect.height > 0 ? rect : null;
+}
+
+/** Feature-detect the two browser point-to-caret APIs. */
+export function caretPositionAtPoint(
+  doc: Document,
+  clientX: number,
+  clientY: number,
+): { readonly node: Node; readonly offset: number } | null {
+  const withPosition = doc as Document & {
+    caretPositionFromPoint?: (
+      x: number,
+      y: number,
+    ) => { offsetNode: Node; offset: number } | null;
+  };
+  if (typeof withPosition.caretPositionFromPoint === "function") {
+    const position = withPosition.caretPositionFromPoint(clientX, clientY);
+    return position
+      ? { node: position.offsetNode, offset: position.offset }
+      : null;
+  }
+  if (typeof doc.caretRangeFromPoint === "function") {
+    const range = doc.caretRangeFromPoint(clientX, clientY);
+    return range
+      ? { node: range.startContainer, offset: range.startOffset }
+      : null;
+  }
+  return null;
+}
+
+/** Map a client point to the block id and offset it falls on. */
+export function pointToModelPosition(
+  doc: Document,
+  clientX: number,
+  clientY: number,
+): { readonly id: NodeId; readonly offset: number } | null {
+  const caret = caretPositionAtPoint(doc, clientX, clientY);
+  if (!caret) return null;
+  const element =
+    caret.node.nodeType === caret.node.TEXT_NODE
+      ? caret.node.parentElement
+      : (caret.node as Element);
+  const block = element?.closest("[data-engine-block-id]");
+  const id = block?.getAttribute("data-engine-block-id");
+  return id ? { id: id as NodeId, offset: caret.offset } : null;
+}
+
+/**
+ * Resolve any pointer position to a model text point, mapping to the nearest
+ * text leaf when the pointer lands on a non-text block (the `[list]` placeholder)
+ * or misses the content (the white gaps). This is what lets a drag or a gap
+ * click pass through a placeholder instead of hitting a wall, and what places
+ * the caret in the nearest paragraph when clicking the empty area below the text.
+ */
+export function resolveTextPointAt(
+  store: EditorStore,
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+): { node: NodeId; offset: number } | null {
+  const direct = pointToModelPosition(root.ownerDocument, clientX, clientY);
+  if (direct) {
+    const node = store.getNode(direct.id);
+    if (node && node.kind === "text")
+      return { node: direct.id, offset: direct.offset };
+  }
+  // Pick the mounted text block whose vertical span is nearest the pointer.
+  let best: {
+    id: NodeId;
+    el: HTMLElement;
+    below: boolean;
+    dist: number;
+  } | null = null;
+  for (const el of root.querySelectorAll<HTMLElement>(
+    "[data-engine-block-id]",
+  )) {
+    const id = el.getAttribute("data-engine-block-id") as NodeId;
+    const node = store.getNode(id);
+    if (!node || node.kind !== "text") continue;
+    const rect = el.getBoundingClientRect();
+    const dist =
+      clientY < rect.top
+        ? rect.top - clientY
+        : clientY > rect.bottom
+          ? clientY - rect.bottom
+          : 0;
+    if (!best || dist < best.dist) {
+      best = { below: clientY > rect.bottom, dist, el, id };
+    }
+  }
+  if (!best) return null;
+  const offset = offsetFromClientPoint(best.el, clientX, clientY);
+  if (offset !== null) return { node: best.id, offset };
+  const node = store.requireTextNode(best.id);
+  return { node: best.id, offset: best.below ? node.content.text.length : 0 };
+}
+
+/**
+ * Map a client point to a model offset within one block's text node.
+ *
+ * A click in the block's padding or at its left/right/top/bottom edge makes
+ * `caretPositionFromPoint` miss the text node (it returns the block element with
+ * a child index, or a neighbour), which previously dropped the caret at the end
+ * of the block. We clamp the point into the text's bounding box and retry, so an
+ * edge click lands on the nearest character — the reliable behaviour a user
+ * expects when clicking just outside the glyphs.
+ */
+export function offsetFromClientPoint(
+  host: HTMLElement,
+  clientX: number,
+  clientY: number,
+): number | null {
+  const direct = caretPositionAtPoint(host.ownerDocument, clientX, clientY);
+  if (direct && host.contains(direct.node) && isTextNode(direct.node)) {
+    return direct.offset;
+  }
+  const textRect = textBoundingRect(host);
+  if (textRect) {
+    const cx = clampNumber(clientX, textRect.left + 1, textRect.right - 1);
+    const cy = clampNumber(clientY, textRect.top + 1, textRect.bottom - 1);
+    const clamped = caretPositionAtPoint(host.ownerDocument, cx, cy);
+    if (clamped && host.contains(clamped.node)) return clamped.offset;
+  }
+  return direct && host.contains(direct.node) ? direct.offset : null;
+}
+
+/** Pixel rect of the collapsed caret at an offset inside one block. */
+export function caretClientRect(
+  host: HTMLElement,
+  offset: number,
+): DOMRect | null {
+  return robustCaretRect(host, offset) ?? host.getBoundingClientRect();
+}
+
+/**
+ * A single-line-height caret rect for a collapsed position, robust across soft
+ * line breaks. A collapsed `Range` returns no client rects at a `\n` boundary
+ * (and at the end of a block ending in `\n`), so we measure a neighbouring
+ * character and place a zero-width caret at its edge — never the block's full
+ * bounding box, which made the caret as tall as the block and grow per line.
+ */
+export function robustCaretRect(
+  host: HTMLElement,
+  offset: number,
+): DOMRect | null {
+  const textNode = firstTextNode(host);
+  if (!textNode) return null;
+  const text = textNode.textContent ?? "";
+  const length = text.length;
+  const at = clampOffset(offset, length);
+  const doc = host.ownerDocument;
+
+  if (at > 0 && text[at - 1] === "\n") {
+    const r = softBreakCaretRect(host, doc, textNode, text, at);
+    if (r) return r;
+  }
+
+  const collapsed = boundingRectOf(doc, textNode, at, at);
+  if (collapsed && collapsed.height > 0) return collapsed;
+
+  // Caret sitting just after a visible character: its right edge.
+  if (at > 0 && text[at - 1] !== "\n") {
+    const r = edgeRectOf(doc, textNode, at - 1, at, "last");
+    if (r) return makeRect(r.right, r.top, 0, r.height);
+  }
+  // Caret sitting just before a visible character: its left edge.
+  if (at < length && text[at] !== "\n") {
+    const r = edgeRectOf(doc, textNode, at, at + 1, "first");
+    if (r) return makeRect(r.left, r.top, 0, r.height);
+  }
+  // Line boundary or empty line: measure the adjoining box and take its start.
+  if (at < length) {
+    const r = edgeRectOf(doc, textNode, at, Math.min(length, at + 1), "first");
+    if (r) return makeRect(r.left, r.top, 0, r.height);
+  }
+  if (at > 0) {
+    const r = edgeRectOf(doc, textNode, at - 1, at, "last");
+    if (r) return makeRect(r.left, r.top, 0, r.height);
+  }
+  return null;
+}
+
+/**
+ * Browser `Range` geometry reports a selected `\n` on the previous visual line.
+ * That is correct for highlighting the break character, but wrong for the
+ * collapsed caret after Shift+Enter: the caret belongs at the start of the next
+ * line even when there is no following glyph to measure. We synthesize that
+ * missing empty-line rect from the previous measurable line plus the computed
+ * line-height, preserving the glyph-height from the previous rect when possible.
+ */
+export function softBreakCaretRect(
+  host: HTMLElement,
+  doc: Document,
+  textNode: Text,
+  text: string,
+  offset: number,
+): DOMRect | null {
+  const lineHeight = computedLineHeight(host);
+  const contentLeft = contentBoxLeft(host);
+  const contentTop = contentBoxTop(host);
+  let previousRect: DOMRect | null = null;
+  let previousIndex = -1;
+
+  for (let i = offset - 2; i >= 0; i -= 1) {
+    if (text[i] === "\n") continue;
+    previousRect = edgeRectOf(doc, textNode, i, i + 1, "last");
+    if (previousRect) {
+      previousIndex = i;
+      break;
+    }
+  }
+
+  const breakCount = softBreakCount(text, previousIndex + 1, offset);
+  if (breakCount === 0) return null;
+  const baseTop = previousRect?.top ?? contentTop;
+  const height = previousRect?.height ?? lineHeight;
+  return makeRect(contentLeft, baseTop + lineHeight * breakCount, 0, height);
+}
+
+export function boundingRectOf(
+  doc: Document,
+  textNode: Text,
+  from: number,
+  to: number,
+): DOMRect | null {
+  const range = doc.createRange();
+  range.setStart(textNode, from);
+  range.setEnd(textNode, to);
+  if (typeof range.getBoundingClientRect !== "function") return null;
+  return range.getBoundingClientRect();
+}
+
+export function edgeRectOf(
+  doc: Document,
+  textNode: Text,
+  from: number,
+  to: number,
+  pick: "first" | "last",
+): DOMRect | null {
+  const range = doc.createRange();
+  range.setStart(textNode, from);
+  range.setEnd(textNode, to);
+  if (typeof range.getClientRects !== "function") return null;
+  const rects = Array.from(range.getClientRects()).filter((r) => r.height > 0);
+  if (rects.length === 0) return null;
+  return pick === "first" ? rects[0]! : rects[rects.length - 1]!;
+}
+
+export function computedLineHeight(element: HTMLElement): number {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  const lineHeight = cssPx(style?.lineHeight);
+  if (lineHeight !== null) return lineHeight;
+  const fontSize = cssPx(style?.fontSize);
+  return fontSize !== null ? fontSize * 1.2 : 18;
+}
+
+export function contentBoxLeft(element: HTMLElement): number {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  return (
+    element.getBoundingClientRect().left + (cssPx(style?.paddingLeft) ?? 0)
+  );
+}
+
+export function contentBoxTop(element: HTMLElement): number {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  return element.getBoundingClientRect().top + (cssPx(style?.paddingTop) ?? 0);
+}
+
+export function cssPx(value: string | undefined): number | null {
+  const parsed = Number.parseFloat(value ?? "");
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function softBreakCount(text: string, from: number, to: number): number {
+  let count = 0;
+  for (let i = Math.max(0, from); i < Math.min(text.length, to); i += 1) {
+    if (text[i] === "\n") count += 1;
+  }
+  return count;
+}
+
+export function makeRect(
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): DOMRect {
+  return {
+    bottom: top + height,
+    height,
+    left,
+    right: left + width,
+    toJSON: () => ({}),
+    top,
+    width,
+    x: left,
+    y: top,
+  } as DOMRect;
+}
+
+/** A real `DOMRect` (required by native EditContext bounds), or the input in SSR. */
+export function toDomRect(rect: {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}): DOMRect {
+  if (typeof DOMRect === "function") {
+    return new DOMRect(rect.left, rect.top, rect.width, rect.height);
+  }
+  return rect as DOMRect;
+}
+
+export function textRangeClientRects(
+  element: HTMLElement,
+  from: number,
+  to: number,
+): readonly DOMRect[] {
+  /*
+   * The production path is real DOM Range geometry. That lets the browser own line
+   * wrapping, font metrics, bidi fragments, and subpixel layout while the engine
+   * owns which model offsets are selected. jsdom has no layout engine, so callers
+   * fall back to deterministic block-relative rectangles only when Range produces
+   * no measurable rects.
+   */
+  const textNode = firstTextNode(element);
+  if (!textNode) return [];
+  const length = textNode.textContent?.length ?? 0;
+  const start = clampOffset(from, length);
+  const end = clampOffset(to, length);
+  const range = element.ownerDocument.createRange();
+  range.setStart(textNode, start);
+  range.setEnd(textNode, Math.max(start, end));
+  if (
+    typeof range.getClientRects !== "function" ||
+    typeof range.getBoundingClientRect !== "function"
+  ) {
+    return [];
+  }
+  const rects = Array.from(range.getClientRects()).filter(
+    (rect) => rect.width > 0 || rect.height > 0,
+  );
+  if (rects.length > 0) return rects;
+  const rect = range.getBoundingClientRect();
+  return rect.width > 0 || rect.height > 0 ? [rect] : [];
+}
+
+/**
+ * One viewport-space rect per character in `[from, to)`, for IME character
+ * bounds (docs/010 §7.4, Phase 7 AC4/AC5). Native `updateCharacterBounds`
+ * expects one box per code unit so the candidate window aligns to the glyphs.
+ */
+export function characterClientRects(
+  element: HTMLElement,
+  from: number,
+  to: number,
+): DOMRect[] {
+  const textNode = firstTextNode(element);
+  if (!textNode) return [];
+  const length = textNode.textContent?.length ?? 0;
+  const start = clampOffset(from, length);
+  const end = clampOffset(to, length);
+  const doc = element.ownerDocument;
+  const rects: DOMRect[] = [];
+  for (let index = start; index < end; index += 1) {
+    const range = doc.createRange();
+    range.setStart(textNode, index);
+    range.setEnd(textNode, index + 1);
+    if (typeof range.getBoundingClientRect !== "function") break;
+    rects.push(range.getBoundingClientRect());
+  }
+  return rects;
+}

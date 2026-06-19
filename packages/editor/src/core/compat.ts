@@ -536,22 +536,32 @@ function marksFromInlineChildren(
    *
    * The offset counter walks the legacy inline children in the same flattened
    * order used to create `content`. Each bit in a legacy text node becomes a
-   * runtime mark from the current offset to the end of that child. The
-   * boundaries are then anchored through `boundaryAtOffset`, which stores both
-   * the resolved offset and the durable character-id anchor.
+   * runtime mark from the current offset to the end of that child. Inline
+   * element children (`link`, `epub-internal-link`) are not flattened to bare
+   * text: their inner format marks are recovered recursively, and a `link` mark
+   * is created over the element's span so the href survives import (011 §2.3;
+   * the pre-Phase-8 recovery fix, docs/017 §3.3). The boundaries are anchored
+   * through `boundaryAtOffset`, which stores the resolved offset and the durable
+   * character-id anchor.
    */
-  let offset = 0;
+  return collectInlineMarks(children, content, node, 0).marks;
+}
+
+function collectInlineMarks(
+  children: readonly RichTextCompatNode[] | undefined,
+  content: TextContent,
+  node: NodeId,
+  baseOffset: number,
+): { readonly marks: readonly TextMark[]; readonly end: number } {
+  let offset = baseOffset;
   const marks: TextMark[] = [];
   for (const child of children ?? []) {
     if (child.type === "text") {
       const value = typeof child.text === "string" ? child.text : "";
       for (const kind of formatKinds(child.format)) {
-        marks.push({
-          from: boundaryAtOffset(content, offset, "before"),
-          id: `${node}:${kind}:${offset}:${offset + value.length}`,
-          kind,
-          to: boundaryAtOffset(content, offset + value.length, "after"),
-        });
+        marks.push(
+          rangeMark(node, kind, content, offset, offset + value.length),
+        );
       }
       offset += value.length;
       continue;
@@ -560,10 +570,53 @@ function marksFromInlineChildren(
       offset += 1;
       continue;
     }
-    const nested = textFromInlineChildren(child.children);
-    offset += nested.length;
+    // Inline element with children: recover its inner marks first, then mark the
+    // whole span as a link when the element is one.
+    const start = offset;
+    const inner = collectInlineMarks(child.children, content, node, offset);
+    marks.push(...inner.marks);
+    offset = inner.end;
+    if (isInlineLinkType(child.type) && offset > start) {
+      const href = inlineLinkHref(child);
+      marks.push({
+        ...rangeMark(node, "link", content, start, offset),
+        ...(href ? { attrs: { href } } : {}),
+      });
+    }
   }
-  return marks;
+  return { end: offset, marks };
+}
+
+function rangeMark(
+  node: NodeId,
+  kind: TextMark["kind"],
+  content: TextContent,
+  from: number,
+  to: number,
+): TextMark {
+  return {
+    from: boundaryAtOffset(content, from, "before"),
+    id: `${node}:${kind}:${from}:${to}`,
+    kind,
+    to: boundaryAtOffset(content, to, "after"),
+  };
+}
+
+function isInlineLinkType(type: string): boolean {
+  return type === "link" || type === "epub-internal-link";
+}
+
+function inlineLinkHref(node: RichTextCompatNode): string {
+  const direct = typeof node.url === "string" ? node.url : undefined;
+  if (direct) return direct;
+  const href = (node as { href?: unknown }).href;
+  if (typeof href === "string") return href;
+  const fields = (node as { fields?: unknown }).fields;
+  if (fields && typeof fields === "object") {
+    const url = (fields as { url?: unknown }).url;
+    if (typeof url === "string") return url;
+  }
+  return "";
 }
 
 function textFromInlineChildren(

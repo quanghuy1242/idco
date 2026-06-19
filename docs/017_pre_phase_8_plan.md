@@ -95,7 +95,7 @@ Ship `divider` (016 §8) as the proof a brand-new node is one file + one `regist
 
 Both are correctness bugs independent of new features; fixing them now keeps Phase 8 clean. Each adds a test rather than changing an existing assertion.
 
-- **Undo pollution (010 §10.5).** `core/store.ts#commit` records history whenever `recordHistory` is set, regardless of `steps.length`. A content-free (selection-only) transaction must be non-historic, or undo steps back through caret moves before reaching the last edit. Harmless today only because undo/redo is not yet bound to those paths; binding formatting/structural undo in Phase 8 exposes it. **Confirm first** whether the existing engine-editing assertion "caret moves are not undoable" already covers this before treating it as open.
+- **Undo pollution (010 §10.5) — ALREADY CLOSED (confirmed 2026-06-19).** `core/store.ts#commit` already sets `recordHistory = draft.steps.length > 0` ([store.ts:507](../packages/editor/src/core/store.ts)), so a content-free (selection-only) transaction is non-historic and does not clear the redo stack, and a no-op (no steps, no selection change) returns null. The engine-editing assertion "caret moves are not undoable" covers it. No fix needed; left here as the verified record.
 - **Inline-link mark recovery (compat).** `compat.ts#marksFromInlineChildren` only recovers marks from `text`/`linebreak` children; an inline element (`link`, `epub-internal-link`) advances the offset but emits no `link` mark, so links flatten to plain text on import. The model has a `link` mark kind; the import path must produce it (011 §2.3). ~1435 link-like nodes are affected in the corpus.
 
 ### 3.4 Compat decision + Payload dialect coverage matrix
@@ -123,10 +123,15 @@ Format bitmasks in the corpus (1/2/16/64 and combos) are all representable; no l
 
 ### 3.5 CSS to daisyui and chrome to @idco/ui
 
-Alongside §3.1 (styles.ts is the seam) and §3.2 (object chrome):
+**Done:** the durable seam. All style constants and the load-bearing CSS are isolated in `view/styles.ts` (§3.1), and the object chrome (`ObjectConfigPanel`, `CodeLiveSurface`) is isolated in `view/object-block.tsx` (§3.2). That is the seam the daisyui/`@idco/ui` swap plugs into.
 
-- Swap inline `style={}` constants to daisyui + design tokens, preserving the load-bearing CSS in §3.1 verbatim.
-- Migrate `ObjectConfigPanel` and any hand-rolled chrome to `@idco/ui` (React Aria + DaisyUI), with the focus-restore target pointed at the editor input host (note.md §3): on overlay close, call `getEditorHandle().focus()` instead of letting React Aria restore to a stale element. Model selection survives focus loss by design (011 §8.6), so the popover→edit round-trip is clean.
+**Deferred into Phase 8 (decided during execution, 2026-06-19):** the actual `ObjectConfigPanel`/`CodeLiveSurface` → `@idco/ui` component swap, and the inline-style → daisyui className swap. Reason, found while attempting it behavior-preservingly:
+
+- The engine e2e suite is the unchanging behavior bar (§2) and hard-depends on engine data attributes — `data-engine-config-field="src"`, `data-engine-object-editor`, `data-engine-object-baked`. `@idco/ui` components (`Button`, `form` fields) have **closed prop APIs with no `data-*` passthrough**, so swapping them either drops those attributes (breaking the green bar with assertion changes — forbidden by §2) or requires changing `@idco/ui` itself (cross-package scope creep affecting other consumers) or rewriting the e2e selectors (changing the behavior bar).
+- The editor renders through inline-`style` placeholders and carries **no tailwind/daisyui pipeline of its own**; daisyui classes only resolve in a consuming app's build, so a className swap is unverifiable in the editor's own test/story harness.
+- Phase 8 rebuilds the object chrome together with the toolbar, slash/insert menu, and format flyout — all `@idco/ui` from day one (010 §7.1) — and the engine e2e selectors evolve with that chrome. Doing the swap there, once, avoids a throwaway migration here that fights the test contract.
+
+The focus-restore integration (note.md §3: on `@idco/ui` overlay close, call `getEditorHandle().focus()` rather than let React Aria restore to a stale element; model selection survives focus loss by 011 §8.6) is recorded here and lands with that Phase 8 chrome, since there is no React Aria overlay in the engine until then.
 
 ## 4. Blog-First Priority
 
@@ -151,5 +156,5 @@ These are Phase 8, not pre-Phase-8:
 - The docs/016 SPI seam is landed: object resting/live render goes through the `NodeView` registry; `EngineObjectBlock` carries no node-type knowledge; `divider` ships as a registered node with a fixture test.
 - The two §3.3 bugs are fixed with added tests (or §3.3 undo confirmed already-covered).
 - §3.4 matrix and decision recorded; `compat`'s role documented as unchanged.
-- Chrome migrated to `@idco/ui`; load-bearing CSS preserved.
+- §3.5 seam delivered: styles isolated in `styles.ts`, chrome isolated in `object-block.tsx`, load-bearing CSS preserved. The `@idco/ui`/daisyui component swap is deferred into Phase 8 with the recorded reason (the `@idco/ui` closed-prop API vs the engine's data-attribute e2e contract).
 - The gate (§2) is green with no assertion changes (beyond the additive tests in §3.2/§3.3).

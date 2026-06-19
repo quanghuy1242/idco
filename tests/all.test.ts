@@ -55,6 +55,8 @@ await import("./editor/engine-height-cache.test");
 await import("./editor/engine-model.test");
 await import("./editor/engine-commands.test");
 await import("./editor/engine-objects.test");
+await import("./editor/engine-node-spi.test");
+await import("./editor/engine-compat-links.test");
 await import("./editor/engine-ime-fuzz.test");
 await import("./editor/engine-view.test");
 await import("./editor/engine-selection.test");
