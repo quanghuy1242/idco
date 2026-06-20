@@ -74,6 +74,8 @@ export function EngineTextBlock(props: {
   readonly beginDrag: (anchor: TextPoint) => void;
   readonly goalColumnRef: RefObject<number | null>;
   readonly pageCaret: (direction: -1 | 1, extend: boolean) => boolean;
+  /** Hand focus to the surface root when the caret leaves text for a gap/node. */
+  readonly focusRoot: () => void;
   /** Render-time list-run metadata for a `listitem` leaf (docs/018 §2.10). */
   readonly listMeta?: ListItemMeta;
 }) {
@@ -88,6 +90,7 @@ export function EngineTextBlock(props: {
     beginDrag,
     goalColumnRef,
     pageCaret,
+    focusRoot,
     listMeta,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -424,17 +427,31 @@ export function EngineTextBlock(props: {
   const moveSelection = useCallback(
     (next: EditorSelection) => {
       store.dispatch({ origin: "local", selectionAfter: next, steps: [] });
-      // Keep DOM focus on the block the caret now lives in, or the next
-      // keystroke (typing or another arrow) lands on the stale block. This is
-      // the focus-follows-caret rule a model-owned selection needs.
-      const focusNode = next.type === "text" ? next.focus.node : node.id;
-      if (focusNode !== node.id) requestFocus(focusNode);
-      else syncSelectionIntoEditContext();
-      // Follow the caret: scroll the focus into view on every keyboard move,
-      // including same-block moves down a tall block, so it never slides off.
-      revealBlock(focusNode);
+      if (next.type === "text") {
+        // Keep DOM focus on the block the caret now lives in, or the next
+        // keystroke (typing or another arrow) lands on the stale block. This is
+        // the focus-follows-caret rule a model-owned selection needs.
+        const focusNode = next.focus.node;
+        if (focusNode !== node.id) requestFocus(focusNode);
+        else syncSelectionIntoEditContext();
+        revealBlock(focusNode);
+        return;
+      }
+      // A gap (or node) selection has no EditContext host: hand focus to the
+      // surface root so the document key handler — not this leaf's EditContext —
+      // drives the gap (docs/019 §4.9). Reveal this block so the new gap marker,
+      // painted beside it, stays in view.
+      focusRoot();
+      revealBlock(node.id);
     },
-    [node.id, requestFocus, revealBlock, store, syncSelectionIntoEditContext],
+    [
+      focusRoot,
+      node.id,
+      requestFocus,
+      revealBlock,
+      store,
+      syncSelectionIntoEditContext,
+    ],
   );
 
   // After a command/undo/redo moves the caret to a *different* block, focus and
@@ -457,6 +474,13 @@ export function EngineTextBlock(props: {
   const focusSelectionSoon = useCallback(() => {
     const apply = (): boolean => {
       const sel = store.selection;
+      // A command may leave the caret at a gap (e.g. removing an empty block at
+      // the doc top): hand focus to the surface root so the gap key handler
+      // drives it, exactly like an arrow into a gap (docs/019 §4.9).
+      if (sel && sel.type !== "text") {
+        focusRoot();
+        return true;
+      }
       const focusNode = sel?.type === "text" ? sel.focus.node : null;
       if (!focusNode) return false;
       if (focusNode === node.id) {
@@ -469,7 +493,14 @@ export function EngineTextBlock(props: {
       return true;
     };
     if (!apply()) requestFrame(apply);
-  }, [node.id, requestFocus, revealBlock, store, syncSelectionIntoEditContext]);
+  }, [
+    focusRoot,
+    node.id,
+    requestFocus,
+    revealBlock,
+    store,
+    syncSelectionIntoEditContext,
+  ]);
 
   const runEditCommand = useCallback(
     (command: EditorCommand) => {

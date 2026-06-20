@@ -20,6 +20,7 @@ import {
   type ObjectNode,
   type OwnedModelEditorViewHandle,
   type TextLeafNode,
+  type UploadImage,
 } from "../packages/editor/src";
 
 export default {
@@ -197,6 +198,124 @@ export const Phase7RaggedLines: Story = () => {
     <OwnedModelStoryFrame store={store} viewRef={viewRef} virtualize={false} />
   );
 };
+
+/**
+ * docs/019 Phase 2/3 — positional editing. A divider (an atom) is the FIRST and
+ * LAST block, with a paragraph between two dividers: the configuration where the
+ * caret could not previously rest above the first object, between two stacked
+ * objects, or below the last one. Drives the gap cursor (paint, click, arrow,
+ * materialize) and the mid-text split insert. The full editor is used so the
+ * Insert (+) menu is available for the split path.
+ */
+export const Phase019GapCursor: Story = () => {
+  const store = useMemo(() => createGapCursorStore(), []);
+  // Expose the store so the e2e can drive a positional insert (split) directly,
+  // the same `insert-object` command the toolbar dispatches.
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>)["__IDCO_GAP_STORE__"] =
+      store;
+    return () => {
+      delete (window as unknown as Record<string, unknown>)[
+        "__IDCO_GAP_STORE__"
+      ];
+    };
+  }, [store]);
+  return (
+    <OwnedModelEditor
+      diagnosticsKey={ENGINE_VIEW_API_KEY}
+      forcePolyfill
+      store={store}
+      uploadImage={fakeGapUpload}
+      virtualize={false}
+    />
+  );
+};
+
+// A fake host upload binding so the image block's "Upload" affordance is present
+// to dogfood (the engine never owns transport — docs/016 §9). Without a binding
+// the Upload button is intentionally hidden, not broken.
+const fakeGapUpload: UploadImage = async (file) => {
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  return { alt: file.name, src: `/uploads/${file.name}` };
+};
+
+/** docs/019 repro: atoms (media/embed) then a callout (text) as the last block. */
+export const Phase019CalloutTail: Story = () => {
+  const store = useMemo(() => {
+    const allocator = createIdAllocator("idco_client_phase019_callout");
+    const registry = createDefaultBlockRegistry();
+    const p = makeTextNode({
+      content: allocator.createTextSlice("A leading paragraph."),
+      id: allocator.createNodeId(),
+      type: "paragraph",
+    });
+    const media = objectNode(allocator, registry, "media", {
+      alt: "",
+      caption: "",
+      src: "",
+    });
+    const embed = objectNode(allocator, registry, "embed", { url: "" });
+    const callout = makeTextNode({
+      attrs: { tone: "info" },
+      content: allocator.createTextSlice("A callout at the very bottom."),
+      id: allocator.createNodeId(),
+      type: "callout",
+    });
+    const blocks: EditorNode[] = [p, media, embed, callout];
+    return createEditorStore({
+      allocator,
+      registry,
+      snapshot: {
+        body: {
+          blocks: Object.fromEntries(blocks.map((n) => [n.id, n])) as Record<
+            NodeId,
+            EditorNode
+          >,
+          order: blocks.map((n) => n.id),
+        },
+        settings: {},
+        version: 1,
+      },
+    });
+  }, []);
+  return (
+    <OwnedModelEditor
+      diagnosticsKey={ENGINE_VIEW_API_KEY}
+      forcePolyfill
+      store={store}
+      virtualize={false}
+    />
+  );
+};
+
+function createGapCursorStore() {
+  const allocator = createIdAllocator("idco_client_phase019_gap");
+  const registry = createDefaultBlockRegistry();
+  const paragraph = (text: string) =>
+    makeTextNode({
+      content: allocator.createTextSlice(text),
+      id: allocator.createNodeId(),
+      type: "paragraph",
+    });
+  const topDivider = objectNode(allocator, registry, "divider", {});
+  const middle = paragraph(
+    "A paragraph between two dividers; helloworld marks a mid-split point.",
+  );
+  const bottomDivider = objectNode(allocator, registry, "divider", {});
+  const blocks: EditorNode[] = [topDivider, middle, bottomDivider];
+  const snapshot: EditorDocumentSnapshot = {
+    body: {
+      blocks: Object.fromEntries(blocks.map((n) => [n.id, n])) as Record<
+        NodeId,
+        EditorNode
+      >,
+      order: blocks.map((n) => n.id),
+    },
+    settings: { story: "phase019-gap-cursor" },
+    version: 1,
+  };
+  return createEditorStore({ allocator, snapshot, registry });
+}
 
 function OwnedModelStoryFrame(props: {
   readonly store: ReturnType<typeof createEditorStore>;

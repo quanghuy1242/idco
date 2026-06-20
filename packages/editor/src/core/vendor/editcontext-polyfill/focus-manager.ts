@@ -17,7 +17,13 @@ interface FocusBinding {
   element: HTMLElement;
   hiddenTextarea: HiddenTextarea;
   inputTranslator: InputTranslator;
-  onTextareaBlur: () => void;
+  onTextareaBlur: (event: FocusEvent) => void;
+}
+
+/** Whether the host's document still holds focus (false on a window/tab switch). */
+function ownerDocumentHasFocus(element: HTMLElement): boolean {
+  const doc = element.ownerDocument;
+  return typeof doc.hasFocus === "function" ? doc.hasFocus() : true;
 }
 
 let activeBinding: FocusBinding | null = null;
@@ -34,6 +40,13 @@ let removalObserver: MutationObserver | null = null;
 let originalActiveElementDescriptor: PropertyDescriptor | undefined;
 
 function handleGlobalKeydown(event: KeyboardEvent): void {
+  // Ctrl/Cmd/Alt+Tab is a browser/OS window switch, not an in-page focus tab —
+  // treating it as one (setting `tabbing`) leaves a stale flag and, combined
+  // with the window-blur, dropped the binding so the editor returned unfocused.
+  if (event.ctrlKey || event.metaKey || event.altKey) {
+    tabbing = false;
+    return;
+  }
   if (event.key === "Tab" && activeBinding) {
     // Chrome deactivates the current EditContext on Tab and activates the
     // new target's EditContext (if any). Set the tabbing flag so handleFocusIn
@@ -233,8 +246,19 @@ export function activateElement(element: HTMLElement): void {
   // When the textarea loses focus (e.g. clicking empty space on the page),
   // deactivate the EditContext. This handles cases where focusin doesn't fire
   // on the new target (non-focusable elements like body).
-  const onTextareaBlur = () => {
-    if (!refocusing) deactivate();
+  //
+  // BUT a blur caused by the whole window/tab losing focus (Ctrl+Tab, Cmd+Tab,
+  // switching apps) must NOT deactivate: native EditContext keeps the host
+  // focused across that and the browser restores it on return. Such a blur has
+  // no `relatedTarget` and leaves `document.hasFocus()` false; an in-page focus
+  // move keeps the document focused. Without this guard the polyfill returned to
+  // an unfocused editor where the native path stayed live.
+  const onTextareaBlur = (event: FocusEvent) => {
+    if (refocusing) return;
+    const movedWithinPage =
+      Boolean(event.relatedTarget) || ownerDocumentHasFocus(element);
+    if (!movedWithinPage) return;
+    deactivate();
   };
   hiddenTextarea.element.addEventListener("blur", onTextareaBlur);
 

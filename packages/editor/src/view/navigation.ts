@@ -9,12 +9,14 @@
  * `applyEditContextText` directly.
  */
 import {
+  childrenOf,
   pendingFormatMarkSteps,
   pointAtOffset,
   replaceTextContent,
   sliceTextContent,
   type EditorSelection,
   type EditorStore,
+  type GapSelection,
   type NodeId,
   type Step,
   type TextLeafNode,
@@ -66,55 +68,239 @@ export function selectionForNavigation(
   extend: boolean,
 ): EditorSelection | null {
   const current = store.requireTextNode(selection.focus.node);
-  const order = store.order;
-  const currentIndex = order.indexOf(current.id);
-  let targetNode = current;
-  let offset = selection.focus.offset;
-  // Non-text blocks (a structural `list` placeholder) are stepped over, not
-  // treated as a wall: navigation lands on the nearest text leaf so arrows and
-  // shift+arrow cross the list to the next/previous paragraph.
-  if (key === "ArrowRight") {
-    if (offset < current.content.text.length) {
-      // Move by a whole grapheme cluster, never a half surrogate/cluster (AC1).
-      offset = nextGraphemeBoundary(current.content.text, offset);
-    } else {
-      const next = adjacentTextLeaf(store, currentIndex, 1);
-      if (!next) return null;
-      targetNode = next;
-      offset = 0;
-    }
-  } else if (key === "ArrowLeft") {
-    if (offset > 0) {
-      offset = prevGraphemeBoundary(current.content.text, offset);
-    } else {
-      const prev = adjacentTextLeaf(store, currentIndex, -1);
-      if (!prev) return null;
-      targetNode = prev;
-      offset = prev.content.text.length;
-    }
-  } else if (key === "ArrowDown") {
-    const next = adjacentTextLeaf(store, currentIndex, 1);
-    if (!next) return null;
-    targetNode = next;
-    offset = Math.min(offset, targetNode.content.text.length);
-  } else if (key === "ArrowUp") {
-    const prev = adjacentTextLeaf(store, currentIndex, -1);
-    if (!prev) return null;
-    targetNode = prev;
-    offset = Math.min(offset, targetNode.content.text.length);
-  } else if (key === "Home") {
-    offset = 0;
-  } else if (key === "End") {
-    offset = current.content.text.length;
-  } else {
-    return null;
-  }
-  const focus = pointAtOffset(targetNode.id, targetNode.content, offset);
-  return {
-    anchor: extend ? selection.anchor : focus,
-    focus,
-    type: "text",
+  const text = current.content.text;
+  const offset = selection.focus.offset;
+  const scope = store.parentEntry(current.id)?.parent ?? store.bodyId;
+  const siblings = childrenOf(store, scope);
+  const index = siblings.indexOf(current.id);
+  // A same-leaf move stays a text selection (extend keeps the anchor); a move
+  // that leaves the leaf may land a real caret in a sibling, a gap beside an
+  // atom, or descend into a container (docs/019 §4.10).
+  const sameLeaf = (next: number): EditorSelection => {
+    const focus = pointAtOffset(current.id, current.content, next);
+    return { anchor: extend ? selection.anchor : focus, focus, type: "text" };
   };
+  if (key === "ArrowRight") {
+    // Move by a whole grapheme cluster, never a half surrogate/cluster (AC1).
+    if (offset < text.length)
+      return sameLeaf(nextGraphemeBoundary(text, offset));
+    return index < 0 ? null : positionAfterBlock(store, scope, index);
+  }
+  if (key === "ArrowLeft") {
+    if (offset > 0) return sameLeaf(prevGraphemeBoundary(text, offset));
+    return index < 0 ? null : positionBeforeBlock(store, scope, index);
+  }
+  if (key === "ArrowDown") {
+    return index < 0
+      ? null
+      : verticalCross(store, scope, index, offset, 1, extend, selection);
+  }
+  if (key === "ArrowUp") {
+    return index < 0
+      ? null
+      : verticalCross(store, scope, index, offset, -1, extend, selection);
+  }
+  if (key === "Home") return sameLeaf(0);
+  if (key === "End") return sameLeaf(text.length);
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Scope-aware position stepping (docs/019 §4.10). These read the store and are
+// pure (no DOM); they produce a text caret in a sibling leaf, a gap beside an
+// atom, a descend into a container, or a scope-edge gap that a further arrow
+// escapes from (`selectionForGapNavigation`).
+// ---------------------------------------------------------------------------
+
+function caretAt(
+  store: EditorStore,
+  id: NodeId,
+  offset: number,
+): EditorSelection | null {
+  const node = store.getNode(id);
+  if (!node || node.kind !== "text") return null;
+  const point = pointAtOffset(
+    id,
+    node.content,
+    clampOffset(offset, node.content.text.length),
+  );
+  return { anchor: point, focus: point, type: "text" };
+}
+
+function gap(scope: NodeId, index: number): GapSelection {
+  return { index, scope, type: "gap" };
+}
+
+/** The position at the very start of a scope (descending into containers). */
+function firstPositionIn(store: EditorStore, scope: NodeId): EditorSelection {
+  const children = childrenOf(store, scope);
+  if (children.length === 0) return gap(scope, 0);
+  const node = store.getNode(children[0]!);
+  if (node?.kind === "text")
+    return caretAt(store, children[0]!, 0) ?? gap(scope, 0);
+  if (node?.kind === "structural") return firstPositionIn(store, children[0]!);
+  return gap(scope, 0); // opens with an atom — rest before it
+}
+
+/** The position at the very end of a scope (descending into containers). */
+function lastPositionIn(store: EditorStore, scope: NodeId): EditorSelection {
+  const children = childrenOf(store, scope);
+  if (children.length === 0) return gap(scope, 0);
+  const lastId = children[children.length - 1]!;
+  const node = store.getNode(lastId);
+  if (node?.kind === "text") {
+    return (
+      caretAt(store, lastId, node.content.text.length) ??
+      gap(scope, children.length)
+    );
+  }
+  if (node?.kind === "structural") return lastPositionIn(store, lastId);
+  return gap(scope, children.length); // closes with an atom — rest after it
+}
+
+/**
+ * Whether a scope's edge gap (before the first / after the last child) is a real
+ * position the caret can rest at. It is — for an empty scope, beside an atom edge
+ * block, or for a nested scope (whose edge gap is the escape rest, §5.7). But at
+ * the *body* edge next to a TEXT block it is NOT: the start/end-of-text caret is
+ * already that position, so an edge gap there would be a phantom horizontal bar
+ * the caret could not reach by clicking (docs/019 §5.8). Returning null keeps
+ * arrows in the text, matching a click above/below the first/last block.
+ */
+function scopeEdgeGap(
+  store: EditorStore,
+  scope: NodeId,
+  index: number,
+): EditorSelection | null {
+  const children = childrenOf(store, scope);
+  const edgeId = index === 0 ? children[0] : children[children.length - 1];
+  const edge = edgeId ? store.getNode(edgeId) : undefined;
+  if (scope === store.bodyId && edge?.kind === "text") return null;
+  return gap(scope, index);
+}
+
+/** The position immediately after `children[index]` of `scope`. */
+function positionAfterBlock(
+  store: EditorStore,
+  scope: NodeId,
+  index: number,
+): EditorSelection | null {
+  const children = childrenOf(store, scope);
+  const j = index + 1;
+  if (j < children.length) {
+    const node = store.getNode(children[j]!);
+    if (node?.kind === "text")
+      return caretAt(store, children[j]!, 0) ?? gap(scope, j);
+    if (node?.kind === "structural")
+      return firstPositionIn(store, children[j]!);
+    return gap(scope, j); // before an atom
+  }
+  return scopeEdgeGap(store, scope, children.length); // after the last child
+}
+
+/** The position immediately before `children[index]` of `scope`. */
+function positionBeforeBlock(
+  store: EditorStore,
+  scope: NodeId,
+  index: number,
+): EditorSelection | null {
+  const children = childrenOf(store, scope);
+  if (index > 0) {
+    const prevId = children[index - 1]!;
+    const node = store.getNode(prevId);
+    if (node?.kind === "text") {
+      return (
+        caretAt(store, prevId, node.content.text.length) ?? gap(scope, index)
+      );
+    }
+    if (node?.kind === "structural") return lastPositionIn(store, prevId);
+    return gap(scope, index); // after an atom
+  }
+  return scopeEdgeGap(store, scope, 0); // before the first child
+}
+
+function verticalCross(
+  store: EditorStore,
+  scope: NodeId,
+  index: number,
+  offset: number,
+  direction: -1 | 1,
+  extend: boolean,
+  selection: Extract<EditorSelection, { type: "text" }>,
+): EditorSelection | null {
+  const result =
+    direction > 0
+      ? positionAfterBlock(store, scope, index)
+      : positionBeforeBlock(store, scope, index);
+  if (!result) return null;
+  // Landing in text keeps the goal-ish column (a block-jump fallback); a gap is
+  // returned as-is so a vertical arrow crosses an atom or rests at a doc edge.
+  if (result.type === "text") {
+    const node = store.getNode(result.focus.node);
+    if (node?.kind === "text") {
+      const clamped = Math.min(offset, node.content.text.length);
+      const focus = pointAtOffset(result.focus.node, node.content, clamped);
+      return { anchor: extend ? selection.anchor : focus, focus, type: "text" };
+    }
+  }
+  return result;
+}
+
+/**
+ * One step from a gap (docs/019 §4.10): cross an atom to the next gap, land a
+ * real caret in a text sibling, descend into a container, or — at a non-body
+ * scope edge — escape to the parent scope's gap beside this container (§5.7).
+ */
+export function selectionForGapNavigation(
+  store: EditorStore,
+  selection: GapSelection,
+  key: string,
+): EditorSelection | null {
+  const { scope, index } = selection;
+  if (key === "ArrowRight" || key === "ArrowDown") {
+    return stepGap(store, scope, index, 1);
+  }
+  if (key === "ArrowLeft" || key === "ArrowUp") {
+    return stepGap(store, scope, index, -1);
+  }
+  if (key === "Home") return firstPositionIn(store, scope);
+  if (key === "End") return lastPositionIn(store, scope);
+  return null;
+}
+
+function stepGap(
+  store: EditorStore,
+  scope: NodeId,
+  index: number,
+  direction: -1 | 1,
+): EditorSelection | null {
+  const children = childrenOf(store, scope);
+  if (direction > 0) {
+    if (index >= children.length) {
+      // Scope end: escape to the parent scope's slot after this container.
+      if (scope === store.bodyId) return null;
+      const entry = store.parentEntry(scope);
+      return entry
+        ? positionAfterBlock(store, entry.parent, entry.index)
+        : null;
+    }
+    const node = store.getNode(children[index]!);
+    if (node?.kind === "text") return caretAt(store, children[index]!, 0);
+    if (node?.kind === "structural")
+      return firstPositionIn(store, children[index]!);
+    return gap(scope, index + 1); // cross the atom
+  }
+  if (index <= 0) {
+    if (scope === store.bodyId) return null;
+    const entry = store.parentEntry(scope);
+    return entry ? positionBeforeBlock(store, entry.parent, entry.index) : null;
+  }
+  const prevId = children[index - 1]!;
+  const node = store.getNode(prevId);
+  if (node?.kind === "text")
+    return caretAt(store, prevId, node.content.text.length);
+  if (node?.kind === "structural") return lastPositionIn(store, prevId);
+  return gap(scope, index - 1); // cross the atom
 }
 
 /**

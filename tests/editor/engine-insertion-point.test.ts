@@ -215,6 +215,50 @@ describe("docs/019 §4.8/§7.8 — insert-blocks applies the resolved point", ()
     expect(store.order).toEqual([fresh.id]);
   });
 
+  it("a mid-block caret splits the leaf and drops the block into the seam (Phase 3)", () => {
+    const allocator = createIdAllocator("idco_client_ip_split");
+    const p = para(allocator, "hello world");
+    const store = storeOf([p], allocator);
+    setCaret(store, p, 5); // between "hello" and " world"
+    const divider = makeObjectNode({
+      data: {},
+      id: allocator.createNodeId(),
+      status: "ready",
+      type: "divider",
+    });
+    store.command({
+      data: {},
+      objectType: "divider",
+      type: "insert-object",
+    });
+    void divider;
+    // head ("hello"), the divider, then a fresh tail leaf (" world").
+    expect(store.order.length).toBe(3);
+    const head = store.requireNode(store.order[0]!);
+    const tail = store.requireNode(store.order[2]!);
+    expect(head.kind === "text" && head.content.text).toBe("hello");
+    expect(tail.kind === "text" && tail.content.text).toBe(" world");
+    expect(store.requireNode(store.order[1]!).kind).toBe("object");
+    // The split + insert is one invertible transaction.
+    store.undo();
+    expect(store.order).toEqual([p.id]);
+    expect(
+      store.requireNode(p.id).kind === "text" &&
+        (store.requireNode(p.id) as { content: { text: string } }).content.text,
+    ).toBe("hello world");
+  });
+
+  it("resolveInsertionPoint emits a split for a strict mid-leaf caret", () => {
+    const allocator = createIdAllocator("idco_client_ip_split_resolve");
+    const p = para(allocator, "abcdef");
+    const store = storeOf([p], allocator);
+    setCaret(store, p, 3);
+    const point = resolveInsertionPoint(store);
+    expect(point.kind).toBe("split");
+    expect(point.kind === "split" && point.node).toBe(p.id);
+    expect(point.kind === "split" && point.offset).toBe(3);
+  });
+
   it("a partial range is deleted, then the block lands at the collapsed caret", () => {
     const allocator = createIdAllocator("idco_client_ip_range_partial");
     const p = para(allocator, "hello world");

@@ -278,13 +278,99 @@ function compileDelete(
       const from = graphemeBefore(node.content.text, offset);
       return deleteWithin(store, node, from, offset);
     }
-    return mergeWithNeighbor(store, node, "backward");
+    // At the start, an immediately-preceding atom (a divider/image) is deleted
+    // whole — the caret rests beside it, so Backspace removes it rather than
+    // skipping past it to merge across (docs/019 §4.12.6: atoms have no interior).
+    const prevAtom = adjacentSiblingAtom(store, node.id, -1);
+    if (prevAtom) return deleteAdjacentAtom(store, node, prevAtom, offset);
+    const merged = mergeWithNeighbor(store, node, "backward");
+    if (merged) return merged;
+    // No previous text leaf to merge into (the block is first, or only atoms
+    // precede it). An empty placeholder paragraph that is not the only block is
+    // removed outright — the "delete this empty line" gesture that otherwise had
+    // no effect at the top of the document (docs/019 §4.11).
+    if (node.type === "paragraph" && length === 0) {
+      return removeEmptyBlock(store, node);
+    }
+    return null;
   }
   if (offset < length) {
     const to = graphemeAfter(node.content.text, offset);
     return deleteWithin(store, node, offset, to);
   }
+  const nextAtom = adjacentSiblingAtom(store, node.id, 1);
+  if (nextAtom) return deleteAdjacentAtom(store, node, nextAtom, offset);
   return mergeWithNeighbor(store, node, "forward");
+}
+
+/**
+ * The immediate sibling of `id` in its scope in `direction`, if it is an atom
+ * (an object: divider/image/embed/code/…). Containers and text leaves are not
+ * atoms and fall through to the merge path (docs/019 §4.2).
+ */
+function adjacentSiblingAtom(
+  store: EditorStore,
+  id: NodeId,
+  direction: -1 | 1,
+): NodeId | null {
+  const entry = store.parentEntry(id);
+  if (!entry) return null;
+  const siblings = childrenOf(store, entry.parent);
+  const sibling = siblings[entry.index + direction];
+  if (!sibling) return null;
+  return store.getNode(sibling)?.kind === "object" ? sibling : null;
+}
+
+/**
+ * Remove an atom adjacent to the caret in one transaction, leaving the caret
+ * where it was (docs/019 §4.11). The text leaf is untouched, so the OS keyboard
+ * stays bound to the same EditContext host (no focus churn).
+ */
+function deleteAdjacentAtom(
+  store: EditorStore,
+  node: TextLeafNode,
+  atomId: NodeId,
+  offset: number,
+): TransactionBuilder | null {
+  const entry = store.parentEntry(atomId);
+  const atom = store.getNode(atomId);
+  if (!entry || !atom) return null;
+  const tr = store.transaction();
+  tr.removeNode(entry.parent, entry.index, atom);
+  const point = pointAtOffset(node.id, node.content, offset);
+  return tr.setSelection({ anchor: point, focus: point, type: "text" });
+}
+
+/**
+ * Remove an empty placeholder paragraph that has no text leaf to merge into,
+ * landing the caret on its previous neighbour — the end of a preceding text
+ * leaf, or a gap beside a preceding atom / at the scope top (docs/019 §4.11).
+ * Returns null for the only block in a scope: a scope is never emptied this way.
+ */
+function removeEmptyBlock(
+  store: EditorStore,
+  node: TextLeafNode,
+): TransactionBuilder | null {
+  const entry = store.parentEntry(node.id);
+  if (!entry) return null;
+  const siblings = childrenOf(store, entry.parent);
+  if (siblings.length <= 1) return null;
+  const tr = store.transaction();
+  tr.removeNode(entry.parent, entry.index, node);
+  const prevId = entry.index > 0 ? siblings[entry.index - 1] : undefined;
+  const prev = prevId ? store.getNode(prevId) : undefined;
+  if (prev && prev.kind === "text") {
+    const point = pointAtOffset(
+      prev.id,
+      prev.content,
+      prev.content.text.length,
+    );
+    return tr.setSelection({ anchor: point, focus: point, type: "text" });
+  }
+  // No previous text leaf: rest at the gap the block vacated (before the next
+  // sibling, or the scope top), clamped to the post-removal child count.
+  const index = Math.min(entry.index, siblings.length - 1);
+  return tr.setSelection({ index, scope: entry.parent, type: "gap" });
 }
 
 function deleteWithin(
@@ -323,38 +409,14 @@ function compileSplit(store: EditorStore): TransactionBuilder | null {
   const caret = pointsEqual(range.start, range.end)
     ? { content: node.content, node: node.id, offset: range.start.offset }
     : deleteRange(tr, store, range.start, range.end);
-  const splitNode = store.requireTextNode(caret.node);
-  const at = caret.offset;
-  const entry = store.parentEntry(splitNode.id);
-  if (!entry) return null;
-  const length = caret.content.text.length;
-  const tailSlice = sliceTextContent(caret.content, at, length);
-  const newId = tr.allocator.createNodeId();
-  const newType: TextLeafType =
-    splitNode.type === "heading" ? "paragraph" : splitNode.type;
-  const tailMarks = clipMarks(splitNode.marks, caret.content, at, length, -at);
-  const newNode = makeTextNode({
-    content: tailSlice,
-    id: newId,
-    marks: reanchorMarks(tailMarks, tailSlice),
-    type: newType,
-  });
-  // Head keeps [0, at): a removal of the tail (its marks clamp via the
-  // replace-text remap). The new block carries the tail content and marks.
-  tr.replaceText({
-    at,
-    inserted: "",
-    node: splitNode.id,
-    removed: caret.content.text.slice(at),
-  });
-  tr.insertNode(entry.parent, entry.index + 1, newNode);
-  // Positions past the split point belong to the new block now (§16 redirect).
-  tr.redirect((pos) =>
-    pos.node === splitNode.id && pos.offset > at
-      ? { node: newId, offset: pos.offset - at }
-      : undefined,
+  const seam = splitLeafAt(tr, store, caret);
+  if (!seam) return null;
+  const tailSlice = sliceTextContent(
+    caret.content,
+    caret.offset,
+    caret.content.text.length,
   );
-  const focus = pointAtOffset(newId, tailSlice, 0);
+  const focus = pointAtOffset(seam.newId, tailSlice, 0);
   return tr.setSelection({ anchor: focus, focus, type: "text" });
 }
 
@@ -1131,7 +1193,13 @@ function compileInsertBlocks(
  */
 export type InsertionPoint =
   | { readonly kind: "at"; readonly scope: NodeId; readonly index: number }
-  | { readonly kind: "replace"; readonly node: NodeId };
+  | { readonly kind: "replace"; readonly node: NodeId }
+  | {
+      readonly kind: "split";
+      readonly node: NodeId;
+      readonly offset: number;
+      readonly content: TextContent;
+    };
 
 /**
  * Whether an empty block is a placeholder the next insert should consume rather
@@ -1173,7 +1241,132 @@ export function placeNodes(
     );
     return;
   }
+  if (point.kind === "split") {
+    // Break the leaf at the caret and drop the run into the seam: head keeps
+    // [0, offset), a fresh tail leaf carries the rest, and the inserted nodes go
+    // between them (docs/019 §4.8/§7.7). If the leaf vanished, append at the end.
+    const seam = splitLeafAt(tr, store, point);
+    if (!seam) {
+      nodes.forEach((node, i) =>
+        tr.insertNode(store.bodyId, store.order.length + i, node),
+      );
+      return;
+    }
+    nodes.forEach((node, i) =>
+      tr.insertNode(seam.parent, seam.index + 1 + i, node),
+    );
+    return;
+  }
   nodes.forEach((node, i) => tr.insertNode(point.scope, point.index + i, node));
+}
+
+/**
+ * Break a text leaf at a caret into a head (the original, truncated) and a fresh
+ * tail leaf holding [offset, end), with marks clipped and re-anchored exactly as
+ * `compileSplit` does (docs/019 §7.7). Returns the seam: the parent scope and the
+ * head's index, so a caller can splice content between head and tail. Pure
+ * relative to the supplied `content` snapshot — it never re-reads the leaf text
+ * from the store, so it is correct after a prior in-transaction delete (the
+ * range-then-insert path, §7.8).
+ */
+function splitLeafAt(
+  tr: TransactionBuilder,
+  store: EditorStore,
+  caret: {
+    readonly node: NodeId;
+    readonly offset: number;
+    readonly content: TextContent;
+  },
+): {
+  readonly newId: NodeId;
+  readonly parent: NodeId;
+  readonly index: number;
+} | null {
+  const splitNode = store.getNode(caret.node);
+  if (!splitNode || splitNode.kind !== "text") return null;
+  const entry = store.parentEntry(splitNode.id);
+  if (!entry) return null;
+  const at = caret.offset;
+  const content = caret.content;
+  const length = content.text.length;
+  const tailSlice = sliceTextContent(content, at, length);
+  const newId = tr.allocator.createNodeId();
+  const newType: TextLeafType =
+    splitNode.type === "heading" ? "paragraph" : splitNode.type;
+  const tailMarks = clipMarks(splitNode.marks, content, at, length, -at);
+  const newNode = makeTextNode({
+    content: tailSlice,
+    id: newId,
+    marks: reanchorMarks(tailMarks, tailSlice),
+    type: newType,
+  });
+  // Head keeps [0, at): a removal of the tail (its marks clamp via the
+  // replace-text remap). The new block carries the tail content and marks.
+  tr.replaceText({
+    at,
+    inserted: "",
+    node: splitNode.id,
+    removed: content.text.slice(at),
+  });
+  tr.insertNode(entry.parent, entry.index + 1, newNode);
+  // Positions past the split point belong to the new block now (§16 redirect).
+  tr.redirect((pos) =>
+    pos.node === splitNode.id && pos.offset > at
+      ? { node: newId, offset: pos.offset - at }
+      : undefined,
+  );
+  return { index: entry.index, newId, parent: entry.parent };
+}
+
+// ---------------------------------------------------------------------------
+// Scope helpers (docs/019 §4.2/§4.4): a position lives in a scope, and scopes
+// nest. These are the read-only primitives navigation and gap painting share —
+// pure functions of (selection, document), no DOM, no mutation.
+// ---------------------------------------------------------------------------
+
+/**
+ * The ordered children of a scope (docs/019 §4.2). The body's children are
+ * `store.order`; a structural container's are its `children`; anything else
+ * (an atom, a text leaf) has none.
+ */
+export function childrenOf(
+  store: EditorStore,
+  scope: NodeId,
+): readonly NodeId[] {
+  if (scope === store.bodyId) return store.order;
+  const node = store.getNode(scope);
+  return node && node.kind === "structural" ? node.children : [];
+}
+
+/** The innermost scope (container) enclosing a position (docs/019 §4.4). */
+export function activeScope(
+  store: EditorStore,
+  position: EditorSelection,
+): NodeId {
+  if (position.type === "gap") return position.scope;
+  const id = position.type === "node" ? position.node : position.focus.node;
+  return store.parentEntry(id)?.parent ?? store.bodyId;
+}
+
+/**
+ * Root-first chain of container ids enclosing a position: `[body, …, innermost]`
+ * (docs/019 §4.4). Walks `parentEntry().parent` upward so navigation at a scope
+ * edge can escape to the enclosing scope's gap (§4.10/§5.7).
+ */
+export function scopePath(
+  store: EditorStore,
+  position: EditorSelection,
+): NodeId[] {
+  const path: NodeId[] = [];
+  let scope: NodeId | undefined = activeScope(store, position);
+  const seen = new Set<NodeId>();
+  while (scope && !seen.has(scope)) {
+    seen.add(scope);
+    path.push(scope);
+    if (scope === store.bodyId) break;
+    scope = store.parentEntry(scope)?.parent;
+  }
+  return path.toReversed();
 }
 
 /**
@@ -1204,6 +1397,7 @@ export function resolveInsertionPoint(store: EditorStore): InsertionPoint {
     store,
     sel.focus.node,
     sel.focus.offset,
+    leaf.content,
     isDisposableEmpty(leaf),
   );
 }
@@ -1212,18 +1406,23 @@ export function resolveInsertionPoint(store: EditorStore): InsertionPoint {
  * The `InsertionPoint` for a collapsed text caret (docs/019 §4.6, the `text`
  * rows). Shared by `resolveInsertionPoint` and the range path, which both arrive
  * at a single caret. A disposable-empty paragraph is replaced; offset 0 inserts
- * before the block; end (or, until Phase 3, mid-block) inserts after it.
+ * before the block; the end inserts after it; a strict mid-leaf caret splits the
+ * leaf and drops the block into the seam (docs/019 §5.5/§7.7).
  */
 function resolveTextCaretPoint(
   store: EditorStore,
   leafId: NodeId,
   offset: number,
+  content: TextContent,
   disposableEmpty: boolean,
 ): InsertionPoint {
   if (disposableEmpty) return { kind: "replace", node: leafId };
   const entry = store.parentEntry(leafId);
   if (!entry) {
     return { index: store.order.length, kind: "at", scope: store.bodyId };
+  }
+  if (offset > 0 && offset < content.text.length) {
+    return { content, kind: "split", node: leafId, offset };
   }
   return {
     index: offset === 0 ? entry.index : entry.index + 1,
@@ -1254,6 +1453,7 @@ function insertionPointForInsert(
       store,
       caret.node,
       caret.offset,
+      caret.content,
       disposableEmpty,
     );
   }

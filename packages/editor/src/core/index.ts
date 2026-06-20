@@ -135,12 +135,15 @@ export type {
 } from "./scheduler";
 export { createEngineScheduler } from "./scheduler";
 export {
+  activeScope,
+  childrenOf,
   compileCommand,
   isDisposableEmpty,
   pendingFormatMarkSteps,
   placeNodes,
   resolveInsertionPoint,
   runQuery,
+  scopePath,
   type EditorCommand,
   type EditorCommandType,
   type EditorQuery,

@@ -8,14 +8,17 @@
  * (Phase 7 AC3). It reads the store and geometry by parameter; only the two
  * components hold React state.
  */
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
+  childrenOf,
   pointAtOffset,
   type EditorStore,
   type EngineScheduler,
+  type GapSelection,
   type NodeId,
   type TextLeafNode,
 } from "../core";
+import { gapMarkerRect } from "./gap-cursor";
 import {
   characterClientRects,
   makeRect,
@@ -23,6 +26,7 @@ import {
   textRangeClientRects,
   toDomRect,
 } from "./geometry";
+import { requestFrame } from "./raf";
 import { useSelectionFrameVersion } from "./store-hooks";
 import {
   CARET_BLINK_KEYFRAMES,
@@ -35,7 +39,7 @@ import type { EditContextLike, RenderRegistry, SerializedRect } from "./types";
 
 type OverlayRect = {
   readonly height: number;
-  readonly kind: "caret" | "range" | "preedit";
+  readonly kind: "caret" | "range" | "preedit" | "gap";
   readonly left: number;
   readonly node: NodeId;
   readonly top: number;
@@ -47,7 +51,14 @@ export function selectionRects(
   root: HTMLElement | null,
   blockRefs: ReadonlyMap<NodeId, HTMLElement>,
 ): readonly OverlayRect[] {
-  if (!root || store.selection?.type !== "text") return [];
+  if (!root) return [];
+  // A gap cursor paints a horizontal insertion marker between block-level
+  // children of its scope (docs/019 §4.9/§5.8) — never a vertical I-beam.
+  if (store.selection?.type === "gap") {
+    const rect = gapOverlayRect(store, store.selection, root, blockRefs);
+    return rect ? [rect] : [];
+  }
+  if (store.selection?.type !== "text") return [];
   const selection = store.selection;
   const rootRect = root.getBoundingClientRect();
   const { anchor, focus } = selection;
@@ -136,6 +147,66 @@ export function selectionRects(
     }
   }
   return rects;
+}
+
+/**
+ * The horizontal gap-cursor marker for a `{scope, index}` gap (docs/019 §4.9).
+ * It is anchored to the mounted rects of the children flanking the slot and
+ * spans their block width, inset to the scope's content box; at a doc/scope edge
+ * it pins to the scope top/bottom. Returns null when neither flanking child is
+ * mounted (an offscreen gap paints nothing, like an offscreen caret §8.5).
+ */
+function gapOverlayRect(
+  store: EditorStore,
+  selection: GapSelection,
+  root: HTMLElement,
+  blockRefs: ReadonlyMap<NodeId, HTMLElement>,
+): OverlayRect | null {
+  const children = childrenOf(store, selection.scope);
+  const prevId =
+    selection.index > 0 ? children[selection.index - 1] : undefined;
+  const nextId =
+    selection.index < children.length ? children[selection.index] : undefined;
+  const prevEl = prevId ? blockRefs.get(prevId) : undefined;
+  const nextEl = nextId ? blockRefs.get(nextId) : undefined;
+  // A non-empty scope whose flanking blocks are both offscreen: nothing to pin
+  // to. An empty scope (no children) still paints, pinned to the scope box.
+  if (children.length > 0 && !prevEl && !nextEl) return null;
+  const scopeEl =
+    selection.scope === store.bodyId
+      ? root
+      : (blockRefs.get(selection.scope) ?? root);
+  const rootRect = root.getBoundingClientRect();
+  const scopeRect = scopeEl.getBoundingClientRect();
+  const prevRect = prevEl?.getBoundingClientRect() ?? null;
+  const nextRect = nextEl?.getBoundingClientRect() ?? null;
+  const anchorRect = prevRect ?? nextRect;
+  const style = scopeEl.ownerDocument.defaultView?.getComputedStyle(scopeEl);
+  const padLeft = style ? parseFloat(style.paddingLeft) || 0 : 0;
+  const padRight = style ? parseFloat(style.paddingRight) || 0 : 0;
+  const padTop = style ? parseFloat(style.paddingTop) || 0 : 0;
+  const padBottom = style ? parseFloat(style.paddingBottom) || 0 : 0;
+  // Span the flanking block's width when known (so the marker lines up with the
+  // prose column), else the scope's padded content box.
+  const left = anchorRect ? anchorRect.left : scopeRect.left + padLeft;
+  const right = anchorRect ? anchorRect.right : scopeRect.right - padRight;
+  const marker = gapMarkerRect({
+    height: 2,
+    nextTop: nextRect?.top ?? null,
+    prevBottom: prevRect?.bottom ?? null,
+    scopeBottom: scopeRect.bottom - padBottom,
+    scopeLeft: left,
+    scopeRight: right,
+    scopeTop: scopeRect.top + padTop,
+  });
+  return {
+    height: marker.height,
+    kind: "gap",
+    left: marker.left - rootRect.left,
+    node: nextId ?? prevId ?? selection.scope,
+    top: marker.top - rootRect.top,
+    width: marker.width,
+  };
 }
 
 function preeditRectsFromText(
@@ -263,6 +334,43 @@ function fallbackRangeRect(
   };
 }
 
+/**
+ * Whether DOM focus is currently within the editor surface (a text leaf, or the
+ * root when a gap is selected) AND the window itself has focus. Tracks focusin/
+ * focusout on the document and window focus/blur so the caret hides on a tab/app
+ * switch too. The polyfill patches `document.activeElement` to the host element,
+ * so `root.contains(activeElement)` holds on both the native and polyfill paths.
+ */
+function useEditorFocusWithin(rootRef: RefObject<HTMLElement | null>): boolean {
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const doc = root.ownerDocument;
+    const win = doc.defaultView ?? window;
+    const compute = () => {
+      const active = doc.activeElement;
+      const within = !!active && (active === root || root.contains(active));
+      setFocused(within && doc.hasFocus());
+    };
+    // focusout fires before focus settles on the next target; read on the next
+    // frame so `activeElement` reflects where focus actually went (or `body`).
+    const onFocusOut = () => requestFrame(compute);
+    compute();
+    doc.addEventListener("focusin", compute, true);
+    doc.addEventListener("focusout", onFocusOut, true);
+    win.addEventListener("focus", compute);
+    win.addEventListener("blur", compute);
+    return () => {
+      doc.removeEventListener("focusin", compute, true);
+      doc.removeEventListener("focusout", onFocusOut, true);
+      win.removeEventListener("focus", compute);
+      win.removeEventListener("blur", compute);
+    };
+  }, [rootRef]);
+  return focused;
+}
+
 export function SelectionOverlay(props: {
   readonly store: EditorStore;
   readonly scheduler: EngineScheduler;
@@ -272,7 +380,16 @@ export function SelectionOverlay(props: {
   const { store, scheduler, rootRef, registry } = props;
   const version = useSelectionFrameVersion(store, scheduler);
   void version;
-  const rects = selectionRects(store, rootRef.current, registry.blockRefs);
+  // The caret/gap is an *insertion* affordance: it must only show while the
+  // editor actually holds focus. Painting it on a blurred surface (the previous
+  // behavior) is misleading — it implies typing lands there when it does not,
+  // and it hid focus-loss bugs. We hide the caret/gap (not the range highlight)
+  // whenever focus leaves the editor subtree or the window itself (docs/019).
+  const focused = useEditorFocusWithin(rootRef);
+  const allRects = selectionRects(store, rootRef.current, registry.blockRefs);
+  const rects = focused
+    ? allRects
+    : allRects.filter((rect) => rect.kind !== "caret" && rect.kind !== "gap");
   registry.selectionOverlayRenderCount += 1;
   registry.selectionRectCount = rects.filter(
     (rect) => rect.kind !== "preedit",
@@ -303,29 +420,34 @@ export function SelectionOverlay(props: {
       {rects.map((rect, index) => {
         const isCaret = rect.kind === "caret";
         const isPreedit = rect.kind === "preedit";
+        const isGap = rect.kind === "gap";
+        // The gap marker blinks like a caret (a transient, materialize-on-keystroke
+        // affordance) and is the horizontal insertion bar §5.8 — same ink as the
+        // caret (`CanvasText`) so it reads as one cursor system, just laid flat.
+        const blink = isCaret || isGap;
         return (
           <div
             data-engine-caret={isCaret ? "" : undefined}
+            data-engine-gap-cursor={isGap ? "" : undefined}
             data-engine-preedit={isPreedit ? "" : undefined}
             data-engine-selection-rect={isPreedit ? undefined : ""}
-            // Keying a caret by its pixel position recreates the element when it
-            // moves, restarting the blink so it shows solid right after a move,
+            // Keying a caret/gap by its pixel position recreates the element when
+            // it moves, restarting the blink so it shows solid right after a move,
             // the way a native insertion bar does (mirrors the spike).
             key={
-              isCaret
-                ? `caret-${Math.round(rect.left)}-${Math.round(rect.top)}`
+              blink
+                ? `${rect.kind}-${Math.round(rect.left)}-${Math.round(rect.top)}`
                 : `${rect.kind}-${rect.node}-${index}`
             }
             style={{
-              animation: isCaret
+              animation: blink
                 ? "idco-caret-blink 1.06s step-end infinite"
                 : undefined,
-              background: isCaret
-                ? "CanvasText"
-                : isPreedit
+              background:
+                isCaret || isGap || isPreedit
                   ? "CanvasText"
                   : "color-mix(in srgb, Highlight 36%, transparent)",
-              borderRadius: isCaret ? 1 : isPreedit ? 0 : 3,
+              borderRadius: isCaret ? 1 : isGap ? 2 : isPreedit ? 0 : 3,
               height: rect.height,
               left: rect.left,
               position: "absolute",

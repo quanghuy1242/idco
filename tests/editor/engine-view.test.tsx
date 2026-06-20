@@ -37,6 +37,16 @@ describe("owned-model React view", () => {
 
     const target = nodes[1]!;
     store.activateTextLeaf(target.id);
+    // The caret paints only while the editor holds DOM focus (docs/019: the
+    // overlay hides the caret/gap on a blurred surface), so focus the edited
+    // leaf the way a real interaction would before asserting the caret rect.
+    await act(async () => {
+      (
+        document.querySelector(
+          `[data-engine-block-id="${target.id}"]`,
+        ) as HTMLElement | null
+      )?.focus();
+    });
     const inserted = store.allocator.createTextSlice("!");
     const nextContent = replaceTextContent(target.content, 2, 0, inserted);
     await act(async () => {
