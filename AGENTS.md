@@ -10,7 +10,7 @@ Before touching shared UI code, load the `idco-ui` skill from `.agents/skills/id
 - `pnpm lint` — oxlint plus local architecture/package-boundary rules
 - `pnpm lint:fix` — auto-correct safe lint issues
 - `pnpm check:dup` — duplicate-code gate with Fallow
-- `pnpm typecheck` — `tsgo --noEmit`
+- `pnpm typecheck` — `tsc --noEmit`
 - `pnpm typecheck:tsc` — classic `tsc --noEmit` fallback
 - `pnpm test` — Vitest suite through `vitest.config.ts`
 - `pnpm build` — package builds

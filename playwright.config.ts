@@ -1,3 +1,4 @@
+import os from "node:os";
 import { defineConfig, devices } from "@playwright/test";
 
 const serverHost = process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1";
@@ -6,18 +7,51 @@ const baseURL =
   process.env.PLAYWRIGHT_BASE_URL ?? `http://${serverHost}:${serverPort}`;
 const browserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL;
 
+// Each browser worker needs ~1.8 GiB of headroom. Playwright's default
+// (half the cores) ignores RAM, so on a many-core / low-RAM host like WSL
+// (16 cores but a ~6 GiB cap) it spawns 8 workers that swap-thrash, which is
+// both slow and makes the load-sensitive `.perf` specs miss their budgets.
+// Cap workers by whichever of cores/RAM is the tighter bound. Override with
+// PLAYWRIGHT_WORKERS or the `--workers` CLI flag (which wins over this).
+const workers =
+  process.env.PLAYWRIGHT_WORKERS !== undefined
+    ? Number(process.env.PLAYWRIGHT_WORKERS)
+    : Math.max(
+        1,
+        Math.min(
+          Math.floor(os.cpus().length / 2),
+          Math.floor(os.totalmem() / 1024 ** 3 / 1.8),
+        ),
+      );
+
 export default defineConfig({
   expect: {
     timeout: 10_000,
   },
   fullyParallel: false,
   outputDir: "test-results/playwright",
+  workers,
   projects: [
     {
       name: "chromium",
       // The mobile-touch spec needs a touch-enabled device; it runs only on the
-      // mobile project below (docs/010 Phase 7 AC2).
-      testIgnore: /engine-mobile\.spec\.ts/,
+      // mobile project below (docs/010 Phase 7 AC2). The `.perf` budget specs are
+      // load-sensitive, so they run on the dedicated `chromium-perf` project
+      // (serially, via `pnpm test:e2e:perf`) instead of under parallel load here.
+      testIgnore: [/engine-mobile\.spec\.ts/, /\.perf\.spec\.ts/],
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(browserChannel ? { channel: browserChannel } : {}),
+      },
+    },
+    // The `.perf` specs are timing-budget assertions tuned on Chromium. They
+    // must run free of contention or the numbers are noise, so they live on
+    // their own project and `pnpm test:e2e:perf` runs it with `--workers=1`.
+    // This mirrors CI, where the `editor-perf` job runs the perf specs in
+    // isolation on a dedicated runner.
+    {
+      name: "chromium-perf",
+      testMatch: /\.perf\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         ...(browserChannel ? { channel: browserChannel } : {}),
