@@ -61,7 +61,13 @@ export function createHiddenTextarea(host: HTMLElement): HiddenTextarea {
   textarea.setAttribute("autocorrect", "off");
   textarea.setAttribute("autocapitalize", "off");
   textarea.setAttribute("spellcheck", "false");
-  textarea.setAttribute("aria-hidden", "true");
+  // No `aria-hidden` here: this textarea is the focus sink (we focus it on
+  // activation), and Chrome 124+ blocks `aria-hidden` on a focused element or its
+  // ancestor — "Blocked aria-hidden on an element because its descendant retained
+  // focus". The host block carries the `role=textbox`/label (text-block.tsx) and
+  // this proxy lives in its open shadow root, so AT follows focus to the synced
+  // input correctly (mirrors CodeMirror's offscreen textarea). `inert` is not an
+  // option — it would block the focus the textarea needs.
   // Prevent text wrapping — Firefox's word/line deletion boundaries depend on
   // visual line layout, so wrapping in a tiny textarea breaks them.
   textarea.setAttribute("wrap", "off");
