@@ -73,6 +73,7 @@ export function EngineTextBlock(props: {
   readonly revealBlock: (id: NodeId) => void;
   readonly beginDrag: (anchor: TextPoint) => void;
   readonly goalColumnRef: RefObject<number | null>;
+  readonly pageCaret: (direction: -1 | 1, extend: boolean) => boolean;
 }) {
   const {
     node,
@@ -84,6 +85,7 @@ export function EngineTextBlock(props: {
     revealBlock,
     beginDrag,
     goalColumnRef,
+    pageCaret,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<TextBlockController | null>(null);
@@ -142,11 +144,13 @@ export function EngineTextBlock(props: {
         onBeforeDispatch,
         editRange,
       );
-      // After the text lands, fire any markdown shortcut at the caret (AC8). The
-      // detector is cheap and returns null for ordinary typing; block prefixes
-      // compile to a real conversion, inline-code is the Phase 9 no-op. This is a
-      // second transaction after the text insert (the conversion is separately
-      // undoable); merging the two is the Phase 9 undo-coalescing work (docs/018).
+      // After the text lands, fire any markdown / typing affordance at the caret
+      // (AC8 + docs/018 §2.1). The detector is cheap and returns null for ordinary
+      // typing; block prefixes retype the block, inline code wraps a `code` mark,
+      // smart quotes substitute, brackets auto-pair. It is gated on the inserted
+      // text (`update.text`), so an IME composition (multi-char) or a deletion
+      // never auto-pairs. This is a second transaction after the insert (separately
+      // undoable; the typing run breaks at the format/structure change anyway).
       const updated = store.getNode(node.id);
       const selection = store.selection;
       if (
@@ -158,6 +162,7 @@ export function EngineTextBlock(props: {
           updated.content.text,
           selection.focus.offset,
           updated.type,
+          update.text,
         );
         if (shortcut) store.command({ shortcut, type: "apply-markdown" });
       }
@@ -508,6 +513,14 @@ export function EngineTextBlock(props: {
         } else if (key === "a") {
           event.preventDefault();
           selectAll();
+        } else if (key === "b" || key === "i" || key === "u") {
+          // Format shortcuts. Over a selection they toggle the mark; at a
+          // collapsed caret `store.command` records the pending format (docs/018
+          // §2.0), so Ctrl/Cmd+B then typing is bold — same as the toolbar button.
+          event.preventDefault();
+          const mark =
+            key === "b" ? "bold" : key === "i" ? "italic" : "underline";
+          runEditCommand({ mark, type: "toggle-mark" });
         }
         // copy/cut/paste flow through the root clipboard events, not here.
         return;
@@ -548,6 +561,19 @@ export function EngineTextBlock(props: {
         // which already mutates this leaf's text on the fast path.
         return;
       }
+      if (event.key === "PageUp" || event.key === "PageDown") {
+        // Viewport paging (docs/018 §2.4): the engine owns it so the caret never
+        // pages out of the mounted window. Seed the goal column from the live
+        // caret on the first vertical-ish press, like Arrow Up/Down.
+        if (goalColumnRef.current === null && hostRef.current) {
+          const rect = caretClientRect(hostRef.current, selection.focus.offset);
+          goalColumnRef.current = rect ? rect.left : null;
+        }
+        if (pageCaret(event.key === "PageUp" ? -1 : 1, event.shiftKey)) {
+          event.preventDefault();
+        }
+        return;
+      }
       event.stopPropagation();
       const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
       // Goal column (docs/010 Phase 7 AC7): consecutive ArrowUp/ArrowDown track a
@@ -582,7 +608,7 @@ export function EngineTextBlock(props: {
       event.preventDefault();
       moveSelection(next);
     },
-    [goalColumnRef, moveSelection, node.id, store],
+    [goalColumnRef, moveSelection, node.id, pageCaret, store],
   );
 
   return (
@@ -597,6 +623,7 @@ export function EngineTextBlock(props: {
           : undefined
       }
       data-engine-text-id={node.id}
+      id={node.id}
       onFocus={focusAtEnd}
       onKeyDown={handleKeyDown}
       onMouseDown={focusAtClick}

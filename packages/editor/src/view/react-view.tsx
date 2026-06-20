@@ -399,6 +399,18 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scroller.scrollTop += delta;
           setScrollTop(scroller.scrollTop);
         }
+        // Horizontal reveal of a long unwrapped line (docs/018 §2.4): if the
+        // caret sits past the scroller's horizontal viewport, nudge scrollLeft so
+        // it stays visible. No-op when the content fits (the common wrapped case).
+        if (focusOffset !== null) {
+          const left = targetRect.left - viewRect.left;
+          const right = targetRect.right - viewRect.left;
+          let dx = 0;
+          if (left < margin) dx = left - margin;
+          else if (right > scroller.clientWidth - margin)
+            dx = right - (scroller.clientWidth - margin);
+          if (Math.abs(dx) > 0.5) scroller.scrollLeft += dx;
+        }
         return;
       }
       // Focus jumped past the mounted window: estimate the target offset so it
@@ -418,6 +430,64 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       setScrollTop(next);
     },
     [store, virtualize],
+  );
+
+  // PageUp/PageDown caret paging (docs/018 §2.4). The caret jumps to the line at
+  // the far edge of the viewport (same goal column), then `revealBlock` scrolls
+  // it back to a margin — so a second press pages again. No model mutation: this
+  // is scroll + a selection-only dispatch. Returns whether it moved the caret.
+  const pageCaret = useCallback(
+    (direction: -1 | 1, extend: boolean): boolean => {
+      const scroller = rootRef.current;
+      const sel = store.selection;
+      if (!scroller || sel?.type !== "text") return false;
+      const viewRect = scroller.getBoundingClientRect();
+      const focusEl = registryRef.current.blockRefs.get(sel.focus.node);
+      const caretRect = focusEl
+        ? caretClientRect(focusEl, sel.focus.offset)
+        : null;
+      const x = goalColumnRef.current ?? caretRect?.left ?? viewRect.left + 8;
+      const margin = CARET_REVEAL_MARGIN_PX;
+      const probeY =
+        direction < 0 ? viewRect.top + margin : viewRect.bottom - margin;
+      const point = resolveTextPointAt(store, scroller, x, probeY);
+      if (point) {
+        const node = store.getNode(point.node);
+        if (node && node.kind === "text") {
+          const focus = pointAtOffset(
+            point.node,
+            node.content,
+            clampOffset(point.offset, node.content.text.length),
+          );
+          const moved =
+            focus.node !== sel.focus.node || focus.offset !== sel.focus.offset;
+          if (moved) {
+            store.dispatch({
+              origin: "local",
+              selectionAfter: {
+                anchor: extend ? sel.anchor : focus,
+                focus,
+                type: "text",
+              },
+              steps: [],
+            });
+            goalColumnRef.current = x;
+            if (focus.node !== sel.focus.node) focusBlock(focus.node);
+            revealBlock(focus.node);
+            return true;
+          }
+        }
+      }
+      // No resolvable line at the edge (e.g. the empty area past the last block):
+      // fall back to a plain page scroll so the surface still pages.
+      const page = scroller.clientHeight * PAGE_SCROLL_FRACTION;
+      const next = Math.max(0, scroller.scrollTop + direction * page);
+      if (Math.abs(next - scroller.scrollTop) < 0.5) return false;
+      scroller.scrollTop = next;
+      setScrollTop(next);
+      return true;
+    },
+    [focusBlock, goalColumnRef, revealBlock, store],
   );
 
   const serializeSelection = useCallback(
@@ -485,6 +555,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       if (!text) return;
       event.clipboardData?.setData("text/plain", text);
       event.preventDefault();
+      // Cut is a hard undo boundary (docs/011 §7.5): never fold into a typing run.
+      store.breakUndoCoalescing();
       store.command({ type: "delete-selection" });
       syncFocusToSelection();
     },
@@ -495,6 +567,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
       // Rich HTML paste parses through the single sanitization boundary into
       // model blocks (AC8); plain text falls back to an inline insert (AC5).
+      // Either way paste is a hard undo boundary (docs/011 §7.5).
+      store.breakUndoCoalescing();
       const html = event.clipboardData?.getData("text/html");
       if (html) {
         const compat = sanitizeHtmlToCompat(html);
@@ -821,12 +895,14 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       cut: () => {
         const text = collectSelectionText(store, store.selection);
         if (text) void navigator.clipboard?.writeText(text).catch(() => {});
+        store.breakUndoCoalescing();
         if (store.command({ type: "delete-selection" })) syncFocusToSelection();
       },
       paste: () => {
         void (async () => {
           try {
             const text = await navigator.clipboard?.readText();
+            store.breakUndoCoalescing();
             if (text && store.command({ text, type: "insert-text" })) {
               syncFocusToSelection();
             }
@@ -1108,6 +1184,27 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     };
   }, [store, order]);
 
+  // Reflect a selected atomic object through `aria-activedescendant` on the
+  // surface (docs/011 §8.7, docs/018 §2.3). Text blocks use real element focus
+  // and need no roving descendant, so this is set only for a node selection and
+  // cleared otherwise. Imperative + selection-subscribed, so it never re-renders
+  // the virtualized block list.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const update = () => {
+      const sel = store.selection;
+      const objectId =
+        sel?.type === "node" && store.getNode(sel.node)?.kind === "object"
+          ? sel.node
+          : null;
+      if (objectId) root.setAttribute("aria-activedescendant", objectId);
+      else root.removeAttribute("aria-activedescendant");
+    };
+    update();
+    return store.subscribeSelection(update);
+  }, [store]);
+
   const diagnostics = useCallback((): OwnedModelEditorViewDiagnostics => {
     const blockTexts: Record<NodeId, string> = {};
     const objects: Record<NodeId, ObjectBlockDiagnostics> = {};
@@ -1225,6 +1322,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       id={id}
       key={id}
       onRender={recordBlockRender}
+      pageCaret={pageCaret}
       registerBlock={registerBlock}
       registerInputBackend={registerInputBackend}
       registerObjectEditor={registerObjectEditor}
@@ -1341,6 +1439,9 @@ const INDEX_REBUILD_DEBOUNCE_MS = 200;
 // into view (~one line). Small enough that each line-move scrolls about one
 // line, not a whole block. Trivially promotable to a prop if a knob is wanted.
 const CARET_REVEAL_MARGIN_PX = 24;
+// PageUp/PageDown fall-back scroll distance when no caret line sits at the edge
+// (docs/018 §2.4). A touch under one viewport keeps a little overlap for context.
+const PAGE_SCROLL_FRACTION = 0.9;
 // A still-held touch this long becomes a word-select (vs a tap); a pre-threshold
 // drag becomes a scroll. Matches the platform long-press feel.
 const TOUCH_LONG_PRESS_MS = 450;
@@ -1377,6 +1478,7 @@ function EngineBlock(props: {
   readonly beginDrag: (anchor: TextPoint) => void;
   readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
   readonly goalColumnRef: RefObject<number | null>;
+  readonly pageCaret: (direction: -1 | 1, extend: boolean) => boolean;
 }) {
   const {
     id,
@@ -1390,6 +1492,7 @@ function EngineBlock(props: {
     beginDrag,
     registerObjectEditor,
     goalColumnRef,
+    pageCaret,
   } = props;
   const node = useEditorNode(store, id);
   onRender(id);
@@ -1403,6 +1506,7 @@ function EngineBlock(props: {
         forcePolyfill={forcePolyfill}
         goalColumnRef={goalColumnRef}
         node={node}
+        pageCaret={pageCaret}
         registerBlock={registerBlock}
         registerInputBackend={registerInputBackend}
         requestFocus={requestFocus}

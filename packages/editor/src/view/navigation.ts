@@ -9,12 +9,14 @@
  * `applyEditContextText` directly.
  */
 import {
+  pendingFormatMarkSteps,
   pointAtOffset,
   replaceTextContent,
   sliceTextContent,
   type EditorSelection,
   type EditorStore,
   type NodeId,
+  type Step,
   type TextLeafNode,
   type TextPoint,
 } from "../core";
@@ -309,7 +311,7 @@ export function applyEditContextText(
     diff.removed.length,
     inserted,
   );
-  const steps =
+  const steps: Step[] =
     diff.removed.length > 0 || diff.inserted.length > 0
       ? [
           {
@@ -325,6 +327,28 @@ export function applyEditContextText(
           },
         ]
       : [];
+  // A sticky pending collapsed-caret format applies to each typed run (docs/018
+  // §2.0): any insertion on the pending leaf — including an IME composition update
+  // that replaces its own preedit (`removed > 0`) — folds the format's mark steps
+  // over the newly inserted text into this same transaction (one undo step, marks
+  // anchored to the new content). The store's commit then re-anchors the pending
+  // format to the resulting caret (durable across continued typing, an Enter into
+  // a new block, deletes, and mid-composition diacritics), and clears it only on a
+  // real navigation move. The offset is not required to match, so neither a
+  // focus/caret hiccup before the first keystroke nor a tone key can swallow it.
+  const pending = store.pendingFormat;
+  if (pending && pending.node === nodeId && diff.inserted.length > 0) {
+    steps.push(
+      ...pendingFormatMarkSteps(
+        store,
+        pending,
+        nodeId,
+        diff.at,
+        diff.inserted.length,
+        nextContent,
+      ),
+    );
+  }
   onBeforeDispatch?.();
   store.dispatch({
     origin: "local",

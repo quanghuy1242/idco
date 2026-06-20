@@ -1,19 +1,19 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * docs/010 Phase 7 AC3 / docs/011 §8.7 — accessibility of the non-contenteditable
- * surface. A model-owned editor gets no a11y for free, so the engine must expose
- * textbox semantics, accessible names, and announce selection changes itself.
- *
- * This is a structured, automated a11y invariant scan (role/name/live-region/
- * focusability), not a full axe-core audit; wiring axe-core is a follow-on noted
- * in the ledger. It runs on chromium/webkit/firefox.
+ * docs/010 Phase 7 AC3 / docs/011 §8.7 + docs/018 §2.3 — accessibility of the
+ * non-contenteditable surface. A model-owned editor gets no a11y for free, so the
+ * engine must expose textbox semantics, accessible names, announce selection
+ * changes, reflect a selected atomic object through `aria-activedescendant`, and
+ * pass an axe-core audit of the editing subtree. It runs on chromium/webkit/firefox.
  */
 const EDITING_STORY = "engine--owned-model--phase55-editing";
+const MIXED_STORY = "engine--owned-model--phase6-mixed-book";
 const API = "__IDCO_ENGINE_VIEW_API__";
 
-async function open(page: Page): Promise<void> {
-  await page.goto(`/?story=${EDITING_STORY}`, { waitUntil: "commit" });
+async function open(page: Page, story: string = EDITING_STORY): Promise<void> {
+  await page.goto(`/?story=${story}`, { waitUntil: "commit" });
   await page.locator("[data-engine-view-root]").waitFor({ state: "visible" });
   await page
     .locator("[data-engine-text-id]")
@@ -86,9 +86,72 @@ test("AC3 a structured a11y scan finds no role/name/focus violations", async ({
         "";
       if (name.trim().length === 0) problems.push("textbox without a name");
     }
+
+    // aria-activedescendant, when set, must resolve to an element in the tree.
+    const active = root.getAttribute("aria-activedescendant");
+    if (active && !root.querySelector(`#${CSS.escape(active)}`)) {
+      problems.push("aria-activedescendant points at a missing element");
+    }
     return problems;
   });
   expect(violations).toEqual([]);
+});
+
+test("§2.3 atomic objects expose role, name, and id; selection reflects via aria-activedescendant", async ({
+  page,
+}) => {
+  await open(page, MIXED_STORY);
+  const objectProblems = await page.evaluate(() => {
+    const root = document.querySelector("[data-engine-view-root]");
+    if (!root) return ["no editor root"];
+    const problems: string[] = [];
+    const objects = Array.from(
+      root.querySelectorAll<HTMLElement>("[data-engine-object-type]"),
+    );
+    if (objects.length === 0) problems.push("no object blocks in the story");
+    for (const el of objects) {
+      if (!el.id)
+        problems.push(`object ${el.dataset.engineObjectType} has no id`);
+      if (!el.getAttribute("role")) {
+        problems.push(`object ${el.dataset.engineObjectType} has no role`);
+      }
+      const name = el.getAttribute("aria-label")?.trim() ?? "";
+      if (name.length === 0) {
+        problems.push(`object ${el.dataset.engineObjectType} has no name`);
+      }
+    }
+    return problems;
+  });
+  expect(objectProblems).toEqual([]);
+
+  // Selecting an object reflects it through aria-activedescendant on the surface.
+  const firstObject = page.locator("[data-engine-object-type]").first();
+  await firstObject.click();
+  await expect
+    .poll(async () =>
+      page
+        .locator("[data-engine-view-root]")
+        .getAttribute("aria-activedescendant"),
+    )
+    .not.toBeNull();
+});
+
+test("§2.3 axe-core finds no serious violations in the editing surface", async ({
+  page,
+}) => {
+  await open(page);
+  const results = await new AxeBuilder({ page })
+    .include("[data-engine-view-root]")
+    // The editor is an embedded widget, not a full page: landmark/region and
+    // page-level rules do not apply, and contrast is theme-dependent in the story
+    // harness. The audit targets the widget's own role/name/structure semantics.
+    .disableRules(["color-contrast", "region", "landmark-unique"])
+    .analyze();
+  const serious = results.violations.filter(
+    (violation) =>
+      violation.impact === "serious" || violation.impact === "critical",
+  );
+  expect(serious).toEqual([]);
 });
 
 test("AC3 selection changes are announced through the live region", async ({

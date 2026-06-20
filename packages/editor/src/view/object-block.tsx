@@ -35,6 +35,32 @@ import {
   objectStatusStyle,
 } from "./styles";
 
+/** A friendly object-kind name for screen readers (docs/018 §2.3). */
+const OBJECT_LABELS: Record<string, string> = {
+  "code-block": "Code block",
+  divider: "Divider",
+  embed: "Embedded content",
+  media: "Image",
+  "post-ref": "Linked post",
+  table: "Table",
+  "table-of-contents": "Table of contents",
+};
+
+/** The accessible name for an atomic object block. */
+function objectAriaLabel(node: ObjectNode): string {
+  const kind = OBJECT_LABELS[node.type] ?? `${node.type} block`;
+  return node.status === "ready" || node.status === "dirty"
+    ? kind
+    : `${kind} (${node.status})`;
+}
+
+/** The ARIA role for an atomic object block, by type. */
+function objectAriaRole(type: string): string {
+  if (type === "divider") return "separator";
+  if (type === "media") return "img";
+  return "group";
+}
+
 /**
  * One heavy object in the body (docs/010 §5.3). At rest it mounts only its baked
  * static snapshot — no editor instance (AC1) — and activates on pointer down. The
@@ -104,10 +130,19 @@ export function EngineObjectBlock(props: {
   );
   return (
     <div
+      aria-current={live ? "true" : undefined}
+      // Atomic objects are not text-caret targets, so the engine reflects their
+      // focus/selection itself (docs/011 §8.7, docs/018 §2.3): a stable DOM `id`
+      // the surface points `aria-activedescendant` at, a role + accessible name so
+      // a screen reader announces the object, and `aria-selected` while live.
+      aria-label={objectAriaLabel(node)}
+      aria-selected={live ? "true" : undefined}
       data-engine-block-id={node.id}
       data-engine-object-state={live ? "live" : "resting"}
       data-engine-object-status={node.status}
       data-engine-object-type={node.type}
+      id={node.id}
+      role={objectAriaRole(node.type)}
       onMouseDown={
         live
           ? undefined

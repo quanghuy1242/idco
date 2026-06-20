@@ -422,3 +422,67 @@ test("following the caret down scrolls by the line, not by the whole block", asy
   // pre-fix block-granular reveal would jump ~blockHeight (5 lines) at once.
   expect(maxStep).toBeLessThan(blockHeight * 0.6);
 });
+
+test("PageDown / PageUp page the caret through the document (§2.4)", async ({
+  page,
+}) => {
+  await open(page);
+  // Start at the very top of the document.
+  const first = page.locator("[data-engine-block-id]").first();
+  const box = (await first.boundingBox())!;
+  await page.mouse.click(box.x + 8, box.y + 6);
+  const start = await focus(page);
+  expect(start).not.toBeNull();
+  const startScroll = await scrollTopOf(page);
+
+  // PageDown moves the caret to a block further down and scrolls the viewport.
+  await page.keyboard.press("PageDown");
+  const afterDown = await focus(page);
+  expect(afterDown).not.toBeNull();
+  expect(afterDown!.node).not.toBe(start!.node);
+  expect(await scrollTopOf(page)).toBeGreaterThan(startScroll);
+
+  // A second PageDown keeps paging forward (different block again).
+  await page.keyboard.press("PageDown");
+  const afterDown2 = await focus(page);
+  expect(afterDown2!.node).not.toBe(afterDown!.node);
+
+  // PageUp pages back toward the top.
+  await page.keyboard.press("PageUp");
+  const afterUp = await focus(page);
+  expect(afterUp).not.toBeNull();
+  expect(afterUp!.node).not.toBe(afterDown2!.node);
+});
+
+test("Shift+PageDown extends the selection by a page (§2.4)", async ({
+  page,
+}) => {
+  await open(page);
+  const first = page.locator("[data-engine-block-id]").first();
+  const box = (await first.boundingBox())!;
+  await page.mouse.click(box.x + 8, box.y + 6);
+  const start = await focus(page);
+
+  await page.keyboard.press("Shift+PageDown");
+  // The selection is now a range: the anchor stayed, the focus paged down.
+  const sel = await page.evaluate((key) => {
+    const s = (
+      window as unknown as Record<
+        string,
+        {
+          diagnostics: () => {
+            selection: {
+              type: string;
+              anchor?: { node: string; offset: number };
+              focus?: { node: string; offset: number };
+            } | null;
+          };
+        }
+      >
+    )[key].diagnostics().selection;
+    return s;
+  }, API);
+  expect(sel?.type).toBe("text");
+  expect(sel?.anchor?.node).toBe(start!.node);
+  expect(sel?.focus?.node).not.toBe(start!.node);
+});

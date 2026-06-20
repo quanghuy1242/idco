@@ -51,9 +51,11 @@ import {
   type TextLeafNode,
   type TextLeafType,
   type TextMark,
+  type TextMarkKind,
   type TextPoint,
   type TextSlice,
 } from "./model";
+import { safeHref } from "./url-safety";
 import {
   compileCommand,
   runQuery,
@@ -105,6 +107,22 @@ export type CompositionRange = {
   readonly node: NodeId;
   readonly from: number;
   readonly to: number;
+};
+
+/**
+ * The collapsed-caret pending format (docs/018 §2.0). Toggling bold/italic/link
+ * with no selection is not a no-op: it records the desired format here, anchored
+ * to the caret, and the next typed character inherits it. `marks` is the desired
+ * active format-mark set at the caret (seeded from the marks covering it, so
+ * toggling inside a bold run turns bold *off* for the next character); `link` is
+ * a pending link applied to the next typed run. Runtime view state, never a
+ * document step: it is dropped the moment the caret moves without typing.
+ */
+export type PendingFormat = {
+  readonly node: NodeId;
+  readonly offset: number;
+  readonly marks: ReadonlySet<TextMarkKind>;
+  readonly link?: { readonly href: string } | null;
 };
 
 export type EditorSubscriber = (dirty: StoreDirty) => void;
@@ -261,6 +279,15 @@ export class EditorStore {
   #order: NodeId[] = [];
   #selection: EditorSelection | null;
   #settings: DocumentSettings = {};
+  #pendingFormat: PendingFormat | null = null;
+  #markCounter = 0;
+  // Undo-coalescing bookkeeping (docs/011 §7.5, docs/018 §2.2). A typing run
+  // folds consecutive same-direction text edits on one leaf into a single history
+  // entry; `#coalesceBroken` starts true so the first edit opens its own group,
+  // and a hard boundary (undo/redo, paste, object activation, a caret move) sets
+  // it again so the next edit starts fresh.
+  #coalesceBroken = true;
+  #lastEditAt = 0;
 
   constructor(options: EditorStoreOptions) {
     /*
@@ -416,6 +443,8 @@ export class EditorStore {
     const node = this.requireNode(id);
     if (node.kind !== "object") throw new Error(`Node is not an object: ${id}`);
     if (this.#activeObjectId === id) return;
+    // Object activation is a hard undo boundary (docs/011 §7.5).
+    this.breakUndoCoalescing();
     if (this.#activeObjectId) this.deactivateObject();
     // Suspend the text caret: unbind the active leaf and select the object as one
     // atomic unit (block-atomic selection, docs/010 §6.5).
@@ -478,6 +507,104 @@ export class EditorStore {
     this.setComposition(null);
   }
 
+  /** A fresh, store-scoped mark id (docs/011 §4.4). */
+  nextMarkId(): string {
+    this.#markCounter += 1;
+    return `${this.#allocator.clientId}_mark_${this.#markCounter}`;
+  }
+
+  /** The collapsed-caret pending format, or null (docs/018 §2.0). */
+  get pendingFormat(): PendingFormat | null {
+    return this.#pendingFormat;
+  }
+
+  /**
+   * Toggle one format mark in the pending set at the collapsed caret. The set is
+   * seeded from the marks already covering the caret the first time it is touched
+   * at this position, so toggling a mark the caret sits inside turns it *off* for
+   * the next character. Notifies selection subscribers so the toolbar reflects it.
+   */
+  togglePendingMark(kind: TextMarkKind): void {
+    const selection = this.#selection;
+    if (selection?.type !== "text") return;
+    const node = this.getNode(selection.focus.node);
+    if (!node || node.kind !== "text") return;
+    const offset = selection.focus.offset;
+    const marks = new Set(
+      this.#pendingFormat &&
+        this.#pendingFormat.node === node.id &&
+        this.#pendingFormat.offset === offset
+        ? this.#pendingFormat.marks
+        : marksCoveringCaret(node, offset),
+    );
+    if (marks.has(kind)) marks.delete(kind);
+    else marks.add(kind);
+    this.#pendingFormat = {
+      link: this.#pendingFormat?.link ?? null,
+      marks,
+      node: node.id,
+      offset,
+    };
+    this.#notifySelectionOnly();
+  }
+
+  /** Set (or clear, with `null`/unsafe href) a pending link at the caret. */
+  setPendingLink(href: string | null): void {
+    const selection = this.#selection;
+    if (selection?.type !== "text") return;
+    const node = this.getNode(selection.focus.node);
+    if (!node || node.kind !== "text") return;
+    const offset = selection.focus.offset;
+    const cleaned = href === null ? "" : safeHref(href);
+    const base =
+      this.#pendingFormat &&
+      this.#pendingFormat.node === node.id &&
+      this.#pendingFormat.offset === offset
+        ? this.#pendingFormat
+        : { link: null, marks: new Set<TextMarkKind>(), node: node.id, offset };
+    this.#pendingFormat = {
+      ...base,
+      link: cleaned.length > 0 ? { href: cleaned } : null,
+    };
+    this.#notifySelectionOnly();
+  }
+
+  /** Drop the pending format (caret moved without typing, or it was consumed). */
+  clearPendingFormat(): void {
+    if (!this.#pendingFormat) return;
+    this.#pendingFormat = null;
+    this.#notifySelectionOnly();
+  }
+
+  /**
+   * Open a fresh undo group on the next edit (docs/011 §7.5 hard boundary). The
+   * view calls this on paste; the store calls it on undo/redo and object
+   * activation, so a typing run never coalesces across those.
+   */
+  breakUndoCoalescing(): void {
+    this.#coalesceBroken = true;
+  }
+
+  #isCollapsedTextCaret(): boolean {
+    const selection = this.#selection;
+    return (
+      selection?.type === "text" &&
+      selection.anchor.node === selection.focus.node &&
+      selection.anchor.offset === selection.focus.offset
+    );
+  }
+
+  #notifySelectionOnly(): void {
+    this.#selectionSubscribers.forEach((subscriber) =>
+      subscriber({
+        nodes: new Set(),
+        selection: true,
+        settings: false,
+        structure: false,
+      }),
+    );
+  }
+
   /** Subscribe to live-object slot changes (the view's resting↔live switch). */
   subscribeActiveObject(subscriber: () => void): () => void {
     this.#activeObjectSubscribers.add(subscriber);
@@ -523,6 +650,24 @@ export class EditorStore {
    * no-op for the current state.
    */
   command(command: EditorCommand): CommittedTransaction | null {
+    // A format toggle over a collapsed caret is not a no-op: it records a
+    // pending format the next typed character inherits (docs/018 §2.0), the way
+    // a native editor lets you press Bold then type. Over a real selection the
+    // command compiles and dispatches as usual.
+    if (this.#isCollapsedTextCaret()) {
+      if (command.type === "toggle-mark") {
+        this.togglePendingMark(command.mark);
+        return null;
+      }
+      if (command.type === "set-link") {
+        this.setPendingLink(command.href);
+        return null;
+      }
+      if (command.type === "clear-link") {
+        this.setPendingLink(null);
+        return null;
+      }
+    }
     const tr = compileCommand(this, command);
     return tr ? this.dispatch(tr) : null;
   }
@@ -546,6 +691,10 @@ export class EditorStore {
   undo(): CommittedTransaction | null {
     const entry = this.#history.done.pop();
     if (!entry) return null;
+    // Undo/redo end any open typing run and drop a pending format, so the next
+    // edit starts a fresh history group (docs/011 §7.5).
+    this.#coalesceBroken = true;
+    this.#pendingFormat = null;
     const committed = this.#commit(
       {
         origin: "local",
@@ -562,6 +711,8 @@ export class EditorStore {
   redo(): CommittedTransaction | null {
     const entry = this.#history.undone.pop();
     if (!entry) return null;
+    this.#coalesceBroken = true;
+    this.#pendingFormat = null;
     const committed = this.#commit(
       {
         origin: "local",
@@ -716,7 +867,8 @@ export class EditorStore {
       structureChanged: state.structureChanged,
       touched: new Set(state.touched),
     };
-    if (options.recordHistory) this.#history.done.push(committed);
+    if (options.recordHistory) this.#recordHistory(committed);
+    this.#reconcilePendingFormat(draft.steps.length > 0, selectionChanged);
     const dirtyNodes = new Set(committed.touched);
     // Skipping the active leaf's re-render is only safe when its DOM was already
     // patched out of band — that is exactly the input controller's `textupdate`
@@ -758,6 +910,70 @@ export class EditorStore {
     // edit, including typing the view dispatches directly.
     this.#commitSubscribers.forEach((subscriber) => subscriber(committed));
     return committed;
+  }
+
+  /**
+   * Record a committed transaction in history, coalescing a typing run into the
+   * previous entry instead of pushing a new one (docs/011 §7.5, docs/018 §2.2).
+   * The merge keeps the run's original `selectionBefore` and the latest
+   * `selectionAfter`, so a single undo reverts the whole run and lands the caret
+   * where it started. A hard boundary (`#coalesceBroken`), a stale gap, a
+   * direction change, or any non-text step opens a fresh entry.
+   */
+  #recordHistory(committed: CommittedTransaction): void {
+    const now = nowMs();
+    const previous = this.#history.done.at(-1);
+    if (
+      !this.#coalesceBroken &&
+      previous &&
+      now - this.#lastEditAt <= TYPING_COALESCE_MS &&
+      canCoalesceTyping(previous, committed)
+    ) {
+      this.#history.done[this.#history.done.length - 1] = mergeTypingEntries(
+        previous,
+        committed,
+      );
+    } else {
+      this.#history.done.push(committed);
+    }
+    this.#coalesceBroken = false;
+    this.#lastEditAt = now;
+  }
+
+  /**
+   * Keep the collapsed-caret pending format durable across edits (docs/018 §2.0).
+   * Deterministic, not a heuristic, so it does not drop unpredictably:
+   *  - an edit (`hadSteps`) that leaves a collapsed text caret — typing, an
+   *    Enter/split, a delete/merge, an IME composition replacing its preedit —
+   *    re-anchors pending to the new caret, so the format follows the caret,
+   *    including across an Enter into a brand-new block;
+   *  - a stepless caret move that changes the selection (arrow, click, find) is
+   *    navigation and clears pending;
+   *  - a selection that is no longer a collapsed caret (a range, an object)
+   *    clears pending;
+   *  - a stepless no-op (a focus re-sync to the same caret) leaves it untouched.
+   */
+  #reconcilePendingFormat(hadSteps: boolean, selectionChanged: boolean): void {
+    const pending = this.#pendingFormat;
+    if (!pending) return;
+    const sel = this.#selection;
+    if (
+      sel?.type !== "text" ||
+      sel.anchor.node !== sel.focus.node ||
+      sel.anchor.offset !== sel.focus.offset
+    ) {
+      this.#pendingFormat = null;
+      return;
+    }
+    if (hadSteps) {
+      this.#pendingFormat = {
+        ...pending,
+        node: sel.focus.node,
+        offset: sel.focus.offset,
+      };
+    } else if (selectionChanged) {
+      this.#pendingFormat = null;
+    }
   }
 
   #applyAndInvert(step: Step, state: MutableDispatchState): Step {
@@ -1431,4 +1647,97 @@ function sign(value: number): -1 | 0 | 1 {
   if (value < 0) return -1;
   if (value > 0) return 1;
   return 0;
+}
+
+// A typing run within this idle gap coalesces into one undo entry; a longer
+// pause opens a fresh group (docs/011 §7.5: "a ~500 ms idle gap").
+const TYPING_COALESCE_MS = 500;
+
+function nowMs(): number {
+  return typeof performance !== "undefined" && performance.now
+    ? performance.now()
+    : Date.now();
+}
+
+/** The format-mark kinds whose range covers a collapsed caret at `offset`. */
+function marksCoveringCaret(
+  node: TextLeafNode,
+  offset: number,
+): ReadonlySet<TextMarkKind> {
+  const covering = new Set<TextMarkKind>();
+  for (const mark of node.marks) {
+    if (mark.kind === "link") continue;
+    const from = resolveBoundaryOffset(node.content, mark.from);
+    const to = resolveBoundaryOffset(node.content, mark.to);
+    if (from <= offset && offset <= to) covering.add(mark.kind);
+  }
+  return covering;
+}
+
+/**
+ * The single text leaf a coalescible typing entry edits, or null when the entry
+ * is not a text run on one leaf. Inline mark steps on the same leaf are allowed
+ * (sticky pending format marks each typed run, docs/018 §2.0), so formatted
+ * typing still coalesces; a node-type/attr/structural step ends the run.
+ */
+function typingRunNode(entry: CommittedTransaction): NodeId | null {
+  if (entry.steps.length === 0) return null;
+  let node: NodeId | null = null;
+  let hasText = false;
+  for (const step of entry.steps) {
+    if (step.type === "replace-text") hasText = true;
+    else if (step.type !== "add-mark" && step.type !== "remove-mark") {
+      return null;
+    }
+    if (node === null) node = step.node;
+    else if (node !== step.node) return null;
+  }
+  return hasText ? node : null;
+}
+
+/** Net character delta of a text-only entry (positive = inserting). */
+function typingRunDelta(entry: CommittedTransaction): number {
+  let delta = 0;
+  for (const step of entry.steps) {
+    if (step.type === "replace-text") {
+      delta += step.inserted.text.length - step.removed.text.length;
+    }
+  }
+  return delta;
+}
+
+/**
+ * Whether `next` continues `previous` as one typing run: both pure text edits on
+ * the same leaf, the same direction (both inserting or both deleting), and with
+ * the caret unmoved between them (`previous.selectionAfter === next.selectionBefore`).
+ * Same-direction + continuity is what splits "type, then backspace" into two
+ * groups and keeps an IME composition's per-update edits in one (docs/018 §2.2).
+ */
+function canCoalesceTyping(
+  previous: CommittedTransaction,
+  next: CommittedTransaction,
+): boolean {
+  const node = typingRunNode(previous);
+  if (node === null || node !== typingRunNode(next)) return false;
+  if (!selectionsEqual(previous.selectionAfter, next.selectionBefore)) {
+    return false;
+  }
+  return typingRunDelta(previous) >= 0 === typingRunDelta(next) >= 0;
+}
+
+/** Fold `next` into `previous` as one history entry (steps forward, inverse reversed). */
+function mergeTypingEntries(
+  previous: CommittedTransaction,
+  next: CommittedTransaction,
+): CommittedTransaction {
+  return {
+    inverse: [...next.inverse, ...previous.inverse],
+    origin: previous.origin,
+    selectionAfter: next.selectionAfter,
+    selectionBefore: previous.selectionBefore,
+    settingsChanged: previous.settingsChanged || next.settingsChanged,
+    steps: [...previous.steps, ...next.steps],
+    structureChanged: previous.structureChanged || next.structureChanged,
+    touched: new Set([...previous.touched, ...next.touched]),
+  };
 }

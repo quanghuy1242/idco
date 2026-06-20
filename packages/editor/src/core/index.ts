@@ -93,6 +93,8 @@ export {
   type BlockShortcut,
   type InlineCodeShortcut,
   type MarkdownShortcut,
+  type SubstituteShortcut,
+  type WrapPairShortcut,
 } from "./markdown-shortcuts";
 export { safeHref } from "./url-safety";
 export type { BakeService, WorkerLike } from "./bake-service";
@@ -134,6 +136,7 @@ export type {
 export { createEngineScheduler } from "./scheduler";
 export {
   compileCommand,
+  pendingFormatMarkSteps,
   runQuery,
   type EditorCommand,
   type EditorCommandType,
@@ -162,6 +165,7 @@ export {
   type EditorStore,
   type EditorStoreOptions,
   type EditorSubscriber,
+  type PendingFormat,
 } from "./store";
 export {
   TEXT_FORMAT,

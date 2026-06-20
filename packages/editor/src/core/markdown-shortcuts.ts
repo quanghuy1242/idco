@@ -8,9 +8,9 @@
  * built on the Phase 5.5 command layer. Keeping detection pure makes it testable
  * without the DOM and reusable wherever input lands.
  *
- * Smart-quote substitution and bracket auto-pairing are named in AC8 but are a
- * typing-loop refinement (they mutate as you type, across the IME path); they are
- * the docs/010 Phase 9 follow-on, not implemented here.
+ * Smart-quote substitution and bracket auto-pairing (docs/018 §2.1) live here
+ * too: they are detected the same pure way and gated on the just-typed character
+ * so a deletion that leaves the caret after `(` or `"` never retriggers them.
  */
 import type { TextLeafType } from "./model";
 
@@ -29,7 +29,53 @@ export type InlineCodeShortcut = {
   readonly closeBacktick: number;
 };
 
-export type MarkdownShortcut = BlockShortcut | InlineCodeShortcut;
+/** Replace one character (a straight quote) with its curly form at `at`. */
+export type SubstituteShortcut = {
+  readonly kind: "substitute";
+  readonly at: number;
+  readonly to: string;
+};
+
+/** Insert a closing partner after the opening char typed at `at` (auto-pairing). */
+export type WrapPairShortcut = {
+  readonly kind: "wrap-pair";
+  readonly at: number;
+  readonly open: string;
+  readonly close: string;
+};
+
+export type MarkdownShortcut =
+  | BlockShortcut
+  | InlineCodeShortcut
+  | SubstituteShortcut
+  | WrapPairShortcut;
+
+/** Opening bracket → its closing partner. Backticks are left to inline-code. */
+const BRACKET_PAIRS: Readonly<Record<string, string>> = {
+  "(": ")",
+  "[": "]",
+  "{": "}",
+};
+
+const CURLY = {
+  doubleClose: "”", // ”
+  doubleOpen: "“", // “
+  singleClose: "’", // ’
+  singleOpen: "‘", // ‘
+} as const;
+
+/** A straight quote opens when at the start or after whitespace/an opening char. */
+function curlyQuoteFor(text: string, at: number, quote: '"' | "'"): string {
+  const before = at > 0 ? text[at - 1] : "";
+  const opening =
+    before === "" ||
+    /\s/.test(before) ||
+    before === "(" ||
+    before === "[" ||
+    before === "{";
+  if (quote === '"') return opening ? CURLY.doubleOpen : CURLY.doubleClose;
+  return opening ? CURLY.singleOpen : CURLY.singleClose;
+}
 
 const BLOCK_PREFIXES: readonly {
   readonly prefix: string;
@@ -49,11 +95,19 @@ const BLOCK_PREFIXES: readonly {
  * Detect a markdown shortcut at `caret` in `text`. Block prefixes fire only when
  * the caret sits just after the prefix at the start of an as-yet-unconverted
  * block; inline code fires when a closing backtick just completed a `` `x` `` run.
+ *
+ * `insertedText` is what the triggering input event inserted (the view passes
+ * it). The typing affordances — inline code, smart quotes, auto-pairing — fire
+ * only when it is a single typed character, so a deletion or a multi-char paste
+ * that happens to leave the caret after `` ` `` / `(` / `"` never retriggers
+ * them. It is omitted by headless callers (the detector tests), where the
+ * text/caret pair is treated as authoritative.
  */
 export function detectMarkdownShortcut(
   text: string,
   caret: number,
   currentType: TextLeafType,
+  insertedText?: string,
 ): MarkdownShortcut | null {
   // Block prefix: caret right after "PREFIX" at offset 0, and not already that
   // type with no extra prefix text (so it does not re-fire mid-edit).
@@ -70,15 +124,36 @@ export function detectMarkdownShortcut(
     }
   }
   void currentType;
+  // The typing affordances need a single just-typed character. A multi-char
+  // insert (paste) never auto-pairs; a deletion (no inserted text) never fires.
+  const typed =
+    insertedText === undefined
+      ? caret >= 1
+        ? text[caret - 1]
+        : undefined
+      : insertedText.length === 1
+        ? insertedText
+        : undefined;
+  if (typed === undefined) return null;
   // Inline code: the char before the caret is a backtick closing a non-empty run
   // opened by an earlier backtick on the same line (no backticks between them).
-  if (caret >= 2 && text[caret - 1] === "`") {
+  if (caret >= 2 && typed === "`" && text[caret - 1] === "`") {
     const close = caret - 1;
     const lineStart = text.lastIndexOf("\n", close - 1) + 1;
     const open = text.lastIndexOf("`", close - 1);
     if (open >= lineStart && close - open >= 2) {
       return { closeBacktick: close, kind: "inline-code", openBacktick: open };
     }
+  }
+  const at = caret - 1;
+  // Smart quotes: replace the straight quote with its curly form by context.
+  if (typed === '"' || typed === "'") {
+    return { at, kind: "substitute", to: curlyQuoteFor(text, at, typed) };
+  }
+  // Bracket auto-pairing: insert the closing partner after the opening char.
+  const close = BRACKET_PAIRS[typed];
+  if (close !== undefined) {
+    return { at, close, kind: "wrap-pair", open: typed };
   }
   return null;
 }

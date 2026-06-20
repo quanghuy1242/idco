@@ -39,6 +39,7 @@
     "react-stately": "3.46.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@ladle/react": "^5.1.1",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.3.0",
@@ -51,6 +52,7 @@
     "@typescript/native-preview": "7.0.0-dev.20260603.1",
     "@vitejs/plugin-react": "6.0.2",
     "aislop": "0.9.0",
+    "axe-core": "^4.12.1",
     "daisyui": "^5.5.23",
     "fallow": "2.75.0",
     "jsdom": "^29.1.1",

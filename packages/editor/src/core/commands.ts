@@ -40,9 +40,16 @@ import {
   type TextSlice,
 } from "./model";
 import { bakeObjectData } from "./bake";
-import type { MarkdownShortcut } from "./markdown-shortcuts";
+import type {
+  BlockShortcut,
+  InlineCodeShortcut,
+  MarkdownShortcut,
+  SubstituteShortcut,
+  WrapPairShortcut,
+} from "./markdown-shortcuts";
+import type { Step } from "./steps";
 import { safeHref } from "./url-safety";
-import type { EditorStore, TransactionBuilder } from "./store";
+import type { EditorStore, PendingFormat, TransactionBuilder } from "./store";
 
 const EMPTY_SLICE: TextSlice = { runs: [], text: "" };
 
@@ -637,7 +644,7 @@ function compileToggleMark(
     if (allMarked) {
       removeMarkOverRange(tr, store, node, kind, from, to);
     } else if (!isRangeMarked(node, kind, from, to)) {
-      tr.addMark(node.id, markOver(node, kind, from, to, newMarkId(store)));
+      tr.addMark(node.id, markOver(node, kind, from, to, store.nextMarkId()));
     }
   }
   return tr.setSelection(store.selection as EditorSelection);
@@ -692,7 +699,7 @@ function compileLink(
       tr.addMark(node.id, {
         attrs: { href: cleaned },
         from: boundaryAtOffset(node.content, from, "before"),
-        id: newMarkId(store),
+        id: store.nextMarkId(),
         kind: "link",
         to: boundaryAtOffset(node.content, to, "after"),
       });
@@ -744,15 +751,55 @@ function compileSetBlockType(
 }
 
 /**
- * Apply a detected markdown shortcut (AC8). Block prefixes strip the prefix and
- * retype the block in one invertible transaction; inline-code wrapping is the
- * docs/010 Phase 9 typing-loop follow-on and compiles to a no-op here.
+ * Apply a detected markdown shortcut (AC8 + docs/018 §2.1). Block prefixes strip
+ * the prefix and retype the block; inline code wraps the run in a `code` mark and
+ * removes both backticks; auto-pairing wraps/inserts the closing partner. Each is
+ * one invertible transaction.
  */
 function compileApplyMarkdown(
   store: EditorStore,
   shortcut: MarkdownShortcut,
 ): TransactionBuilder | null {
-  if (shortcut.kind !== "block") return null;
+  switch (shortcut.kind) {
+    case "block":
+      return compileBlockShortcut(store, shortcut);
+    case "inline-code":
+      return compileInlineCodeShortcut(store, shortcut);
+    case "substitute":
+      return compileSubstituteShortcut(store, shortcut);
+    case "wrap-pair":
+      return compileWrapPairShortcut(store, shortcut);
+  }
+}
+
+/** Replace one character (a straight quote) with its curly form (docs/018 §2.1). */
+function compileSubstituteShortcut(
+  store: EditorStore,
+  shortcut: SubstituteShortcut,
+): TransactionBuilder | null {
+  const sel = store.selection;
+  if (sel?.type !== "text") return null;
+  const node = store.getNode(sel.focus.node);
+  if (!node || node.kind !== "text") return null;
+  const at = shortcut.at;
+  const removed = node.content.text.slice(at, at + 1);
+  if (removed.length !== 1) return null;
+  const tr = store.transaction();
+  tr.replaceText({ at, inserted: shortcut.to, node: node.id, removed });
+  const finalContent = replaceTextContent(
+    node.content,
+    at,
+    1,
+    store.allocator.createTextSlice(shortcut.to),
+  );
+  const focus = pointAtOffset(node.id, finalContent, at + shortcut.to.length);
+  return tr.setSelection({ anchor: focus, focus, type: "text" });
+}
+
+function compileBlockShortcut(
+  store: EditorStore,
+  shortcut: BlockShortcut,
+): TransactionBuilder | null {
   const sel = store.selection;
   if (sel?.type !== "text") return null;
   const node = store.getNode(sel.focus.node);
@@ -792,6 +839,79 @@ function compileApplyMarkdown(
     EMPTY_SLICE,
   );
   const focus = pointAtOffset(node.id, finalContent, 0);
+  return tr.setSelection({ anchor: focus, focus, type: "text" });
+}
+
+/**
+ * Wrap `` `x` `` in a `code` mark and remove both backticks (docs/018 §2.1). The
+ * close backtick is removed first (higher offset) so the open offset stays live,
+ * then the surviving run gets a code mark and the caret lands at its end.
+ */
+function compileInlineCodeShortcut(
+  store: EditorStore,
+  shortcut: InlineCodeShortcut,
+): TransactionBuilder | null {
+  const sel = store.selection;
+  if (sel?.type !== "text") return null;
+  const node = store.getNode(sel.focus.node);
+  if (!node || node.kind !== "text") return null;
+  const text = node.content.text;
+  const { openBacktick: open, closeBacktick: close } = shortcut;
+  if (text[open] !== "`" || text[close] !== "`" || close - open < 2)
+    return null;
+  const tr = store.transaction();
+  // Remove the close backtick first so `open` stays a valid offset.
+  tr.replaceText({ at: close, inserted: "", node: node.id, removed: "`" });
+  tr.replaceText({ at: open, inserted: "", node: node.id, removed: "`" });
+  const afterClose = replaceTextContent(node.content, close, 1, EMPTY_SLICE);
+  const finalContent = replaceTextContent(afterClose, open, 1, EMPTY_SLICE);
+  // The inner run [open+1, close) becomes [open, close-1) once both ticks go.
+  const markFrom = open;
+  const markTo = close - 1;
+  tr.addMark(node.id, {
+    from: boundaryAtOffset(finalContent, markFrom, "before"),
+    id: store.nextMarkId(),
+    kind: "code",
+    to: boundaryAtOffset(finalContent, markTo, "after"),
+  });
+  const focus = pointAtOffset(node.id, finalContent, markTo);
+  return tr.setSelection({ anchor: focus, focus, type: "text" });
+}
+
+/**
+ * Auto-pairing (docs/018 §2.1): the user typed an opening bracket/quote. With a
+ * selection, wrap it in the pair (the just-typed open char already replaced the
+ * selection on the input path, so the model holds `(`; we re-insert the wrapped
+ * run). With a collapsed caret, insert the closing partner after the caret and
+ * leave the caret between the two. Smart quotes ride this same path with curly
+ * partners.
+ */
+function compileWrapPairShortcut(
+  store: EditorStore,
+  shortcut: WrapPairShortcut,
+): TransactionBuilder | null {
+  const sel = store.selection;
+  if (sel?.type !== "text") return null;
+  const node = store.getNode(sel.focus.node);
+  if (!node || node.kind !== "text") return null;
+  const at = shortcut.at;
+  if (node.content.text[at] !== shortcut.open) return null;
+  const tr = store.transaction();
+  // Insert the closing partner just after the opening char the user typed.
+  tr.replaceText({
+    at: at + 1,
+    inserted: shortcut.close,
+    node: node.id,
+    removed: "",
+  });
+  const finalContent = replaceTextContent(
+    node.content,
+    at + 1,
+    0,
+    store.allocator.createTextSlice(shortcut.close),
+  );
+  // Caret stays between the pair (just after the opening char).
+  const focus = pointAtOffset(node.id, finalContent, at + 1);
   return tr.setSelection({ anchor: focus, focus, type: "text" });
 }
 
@@ -1152,7 +1272,17 @@ function isMarkActive(store: EditorStore, kind: TextMarkKind): boolean {
     range.start.node === range.end.node &&
     range.start.offset === range.end.offset
   ) {
-    // Collapsed: active if any mark of this kind contains the caret.
+    // Collapsed: a pending format (set by toggling at this caret) wins, so the
+    // toolbar shows what the next typed character will be (docs/018 §2.0).
+    const pending = store.pendingFormat;
+    if (
+      pending &&
+      pending.node === range.start.node &&
+      pending.offset === range.start.offset
+    ) {
+      return pending.marks.has(kind);
+    }
+    // Otherwise active if any mark of this kind contains the caret.
     const node = store.requireTextNode(range.start.node);
     return node.marks.some((mark) => {
       if (mark.kind !== kind) return false;
@@ -1381,6 +1511,16 @@ function cloneMarkOver(
 function activeLinkHref(store: EditorStore): string | null {
   const range = textRange(store);
   if (!range) return null;
+  // A pending link set at this caret wins over the underlying mark (docs/018 §2.0).
+  const pending = store.pendingFormat;
+  if (
+    pending &&
+    pending.node === range.start.node &&
+    pending.offset === range.start.offset &&
+    pointsEqual(range.start, range.end)
+  ) {
+    return pending.link ? pending.link.href : null;
+  }
   const node = store.getNode(range.start.node);
   if (!node || node.kind !== "text") return null;
   const at = range.start.offset;
@@ -1394,6 +1534,112 @@ function activeLinkHref(store: EditorStore): string | null {
     }
   }
   return null;
+}
+
+/**
+ * The mark steps that apply a collapsed-caret pending format to a freshly
+ * inserted range `[at, at+length)` on `node` (docs/018 §2.0). The typing path
+ * folds these into the same transaction as the `replace-text` insert, so the run
+ * is one undo step and the marks anchor to the post-insert content.
+ *
+ * `postContent` is the leaf content *after* the insert (the caller already
+ * computed it); the store still holds the pre-insert node, so we read its marks
+ * to decide what the inserted text already inherits. A pending mark the inserted
+ * run already inherits (the caret sat inside an existing same-kind mark, which
+ * the §4.5 remap extends over the new text) needs no step; a covering mark the
+ * caret toggled *off* is carved out so "caret inside bold, press Bold, type"
+ * yields unbolded text.
+ */
+export function pendingFormatMarkSteps(
+  store: EditorStore,
+  pending: PendingFormat,
+  node: NodeId,
+  at: number,
+  length: number,
+  postContent: TextContent,
+): readonly Step[] {
+  if (length <= 0) return [];
+  const pre = store.getNode(node);
+  if (!pre || pre.kind !== "text") return [];
+  const covering = new Set<TextMarkKind>();
+  const steps: Step[] = [];
+  for (const mark of pre.marks) {
+    if (mark.kind === "link") continue;
+    const from = resolveBoundaryOffset(pre.content, mark.from);
+    const to = resolveBoundaryOffset(pre.content, mark.to);
+    // Strictly inside (`to > at`), not merely abutting: a mark that ends exactly
+    // at the caret will NOT extend over the inserted run (the §4.5 remap clamps
+    // its end at the insertion point), so the run still needs its own mark. This
+    // is what makes a sticky pending format keep marking each new character
+    // instead of silently relying on an extension that never happens.
+    if (!(from <= at && to > at)) continue;
+    covering.add(mark.kind);
+    // A covering mark the caret turned off is split so the inserted run escapes
+    // it; the §4.5 remap will have extended it over the insert otherwise.
+    if (!pending.marks.has(mark.kind)) {
+      steps.push({ mark, node, type: "remove-mark" });
+      if (from < at) {
+        steps.push({
+          mark: formatMarkSpan(postContent, mark.kind, from, at, store, mark),
+          node,
+          type: "add-mark",
+        });
+      }
+      steps.push({
+        mark: formatMarkSpan(
+          postContent,
+          mark.kind,
+          at + length,
+          to + length,
+          store,
+          mark,
+        ),
+        node,
+        type: "add-mark",
+      });
+    }
+  }
+  // Add each desired mark the inserted run does not already inherit.
+  for (const kind of pending.marks) {
+    if (covering.has(kind)) continue;
+    steps.push({
+      mark: formatMarkSpan(postContent, kind, at, at + length, store),
+      node,
+      type: "add-mark",
+    });
+  }
+  if (pending.link && pending.link.href.length > 0) {
+    steps.push({
+      mark: {
+        attrs: { href: pending.link.href },
+        from: boundaryAtOffset(postContent, at, "before"),
+        id: store.nextMarkId(),
+        kind: "link",
+        to: boundaryAtOffset(postContent, at + length, "after"),
+      },
+      node,
+      type: "add-mark",
+    });
+  }
+  return steps;
+}
+
+/** A format range mark over `[from, to)` of `content`, carrying `source`'s attrs. */
+function formatMarkSpan(
+  content: TextContent,
+  kind: TextMarkKind,
+  from: number,
+  to: number,
+  store: EditorStore,
+  source?: TextMark,
+): TextMark {
+  return {
+    ...(source?.attrs ? { attrs: source.attrs } : {}),
+    from: boundaryAtOffset(content, from, "before"),
+    id: store.nextMarkId(),
+    kind,
+    to: boundaryAtOffset(content, to, "after"),
+  };
 }
 
 function isRangeMarked(
@@ -1420,12 +1666,6 @@ function isRangeMarked(
 
 function boundaryOffset(node: TextLeafNode, mark: TextMark): number {
   return resolveBoundaryOffset(node.content, mark.from);
-}
-
-let markCounter = 0;
-function newMarkId(store: EditorStore): string {
-  markCounter += 1;
-  return `${store.allocator.clientId}_mark_${markCounter}`;
 }
 
 // Grapheme boundaries via Intl.Segmenter, so Backspace/Delete remove a whole
