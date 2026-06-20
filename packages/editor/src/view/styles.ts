@@ -68,7 +68,12 @@ export const ENGINE_SURFACE_SUPPRESS_CSS =
   // the engine overlay on a formatted run (the "double selection", Phase 8 AC3).
   "[data-engine-view-root] [data-engine-text-id] *::selection{background:transparent;color:inherit;}" +
   "[data-engine-view-root]::selection{background:transparent;color:inherit;}" +
-  "[data-engine-view-root] [data-engine-object-editor],[data-engine-view-root] [data-engine-object-editor] *{caret-color:auto;}";
+  // A live object editor (the code <textarea>, the config inputs) is a real
+  // native input and must keep its visible native caret. Use a concrete color,
+  // not `caret-color:auto`: the code editor renders highlighted text via a `<pre>`
+  // underneath a `text-transparent` textarea (CodeEditor), so `auto` (= follow
+  // the text color) would make the caret transparent too — the missing-caret bug.
+  "[data-engine-view-root] [data-engine-object-editor],[data-engine-view-root] [data-engine-object-editor] *{caret-color:var(--color-base-content, CanvasText);}";
 
 /**
  * Visible typography for the editing surface (docs/010 Phase 8 AC2/AC3).
@@ -91,7 +96,20 @@ export const ENGINE_TYPOGRAPHY_CSS =
   '[data-engine-view-root] [data-engine-heading="h2"]{font-size:1.5em;}' +
   '[data-engine-view-root] [data-engine-heading="h3"]{font-size:1.25em;}' +
   '[data-engine-view-root] [data-engine-heading="h4"]{font-size:1.1em;}' +
-  '[data-engine-view-root] [data-engine-block-type="quote"]{border-left:3px solid color-mix(in srgb, currentColor 30%, transparent);padding-left:12px;font-style:italic;opacity:0.85;}' +
+  // Quote: a left rule + faint base tint reading off DaisyUI base tokens (not a
+  // washed-out opacity), so it matches the rest of the theme.
+  '[data-engine-view-root] [data-engine-block-type="quote"]{border-left:4px solid color-mix(in oklab, var(--color-base-content, currentColor) 25%, transparent);background:color-mix(in oklab, var(--color-base-content, currentColor) 4%, transparent);border-radius:0 6px 6px 0;font-style:italic;color:color-mix(in oklab, var(--color-base-content, currentColor) 80%, transparent);}' +
+  // Callout: a tinted note box themed per `tone` with the same DaisyUI semantic
+  // tokens the `Alert` component uses (info/success/warning/error), so it reads
+  // as a callout while editing and matches the resting `alert` render (docs/018
+  // §2.8). The editing surface is a `role=textbox` div, so it cannot use the
+  // `.alert` grid class (it would break inline-mark flow); these rules reproduce
+  // the alert palette with `display:block` instead. Padding comes from
+  // BLOCK_TYPE_STYLE; the default (no tone) uses the info token.
+  '[data-engine-view-root] [data-engine-block-type="callout"]{border-radius:var(--radius-box, 0.5rem);border:1px solid color-mix(in oklab, var(--color-info, #0ea5e9) 35%, transparent);background:color-mix(in oklab, var(--color-info, #0ea5e9) 10%, var(--color-base-100, transparent));color:var(--color-base-content, CanvasText);}' +
+  '[data-engine-view-root] [data-engine-callout-tone="success"]{border-color:color-mix(in oklab, var(--color-success, #16a34a) 35%, transparent);background:color-mix(in oklab, var(--color-success, #16a34a) 10%, var(--color-base-100, transparent));}' +
+  '[data-engine-view-root] [data-engine-callout-tone="warning"]{border-color:color-mix(in oklab, var(--color-warning, #d97706) 35%, transparent);background:color-mix(in oklab, var(--color-warning, #d97706) 10%, var(--color-base-100, transparent));}' +
+  '[data-engine-view-root] [data-engine-callout-tone="error"]{border-color:color-mix(in oklab, var(--color-error, #dc2626) 35%, transparent);background:color-mix(in oklab, var(--color-error, #dc2626) 10%, var(--color-base-100, transparent));}' +
   // The list padding-left + bullet offset are applied inline per block
   // (`blockStyleFor`) because the functional `blockStyle` sets an inline padding
   // shorthand that would otherwise win the cascade; only the bullet glyph itself
@@ -137,7 +155,16 @@ export const ENGINE_RESTING_TYPOGRAPHY_CSS =
   ":where([data-engine-resting-document] ul){list-style:disc;padding-left:1.6em;margin:0.5em 0;}" +
   ":where([data-engine-resting-document] ol){list-style:decimal;padding-left:1.6em;margin:0.5em 0;}" +
   ":where([data-engine-resting-document] li){margin:0.15em 0;}" +
-  ":where([data-engine-resting-document] blockquote){border-left:3px solid color-mix(in srgb, currentColor 30%, transparent);padding-left:12px;font-style:italic;opacity:0.85;margin:0.5em 0;}" +
+  ":where([data-engine-resting-document] blockquote){border-left:4px solid color-mix(in oklab, var(--color-base-content, currentColor) 25%, transparent);background:color-mix(in oklab, var(--color-base-content, currentColor) 4%, transparent);border-radius:0 6px 6px 0;padding:6px 12px;font-style:italic;color:color-mix(in oklab, var(--color-base-content, currentColor) 80%, transparent);margin:0.5em 0;}" +
+  // Callout `<aside>` *fallback* styling for when DaisyUI is absent (the reader,
+  // docs/015). With DaisyUI present the resting render uses the real `alert
+  // alert-{tone}` classes (resting-document.tsx), which win over this
+  // zero-specificity rule; this only keeps the box legible without them. Tones
+  // track the `Alert` component (info default / success / warning / error).
+  ":where([data-engine-resting-document] aside){border-radius:var(--radius-box, 0.5rem);border:1px solid color-mix(in oklab, var(--color-info, #0ea5e9) 35%, transparent);background:color-mix(in oklab, var(--color-info, #0ea5e9) 10%, var(--color-base-100, transparent));padding:8px 12px;margin:0.5em 0;}" +
+  ':where([data-engine-resting-document] aside[data-engine-callout-tone="success"]){border-color:color-mix(in oklab, var(--color-success, #16a34a) 35%, transparent);background:color-mix(in oklab, var(--color-success, #16a34a) 10%, var(--color-base-100, transparent));}' +
+  ':where([data-engine-resting-document] aside[data-engine-callout-tone="warning"]){border-color:color-mix(in oklab, var(--color-warning, #d97706) 35%, transparent);background:color-mix(in oklab, var(--color-warning, #d97706) 10%, var(--color-base-100, transparent));}' +
+  ':where([data-engine-resting-document] aside[data-engine-callout-tone="error"]){border-color:color-mix(in oklab, var(--color-error, #dc2626) 35%, transparent);background:color-mix(in oklab, var(--color-error, #dc2626) 10%, var(--color-base-100, transparent));}' +
   ":where([data-engine-resting-document] a){color:var(--color-primary, #2563eb);text-decoration:underline;text-underline-offset:2px;}" +
   ":where([data-engine-resting-document] code){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:color-mix(in srgb, currentColor 8%, transparent);padding:0.05em 0.3em;border-radius:3px;}" +
   ":where([data-engine-resting-document] mark){background:color-mix(in srgb, var(--color-warning, gold) 45%, transparent);color:inherit;border-radius:2px;}" +
@@ -171,30 +198,10 @@ export const objectStatusStyle: CSSProperties = {
   font: "13px/1.5 ui-sans-serif, system-ui, sans-serif",
 };
 
-export const codeBakedStyle: CSSProperties = {
-  background: "color-mix(in srgb, CanvasText 6%, transparent)",
-  borderRadius: 4,
-  font: "13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace",
-  margin: 0,
-  overflow: "auto",
-  padding: 8,
-  whiteSpace: "pre",
-};
-
-export const codeLiveStyle: CSSProperties = {
-  ...codeBakedStyle,
-  border: "none",
-  // border-box so width:100% fills the container exactly like the resting <pre>,
-  // and an auto-set height of scrollHeight (content + padding) matches the baked
-  // box so activation does not shift layout (AC3, the no-drift property).
-  boxSizing: "border-box",
-  color: "CanvasText",
-  display: "block",
-  outline: "2px solid color-mix(in srgb, CanvasText 28%, transparent)",
-  overflow: "hidden",
-  resize: "none",
-  width: "100%",
-};
+// The code-block live + resting render now both flow through `@idco/ui`'s
+// `CodeEditor` (Prism highlighting, DaisyUI styling) for syntax highlighting and
+// a guaranteed no-shift box (docs/018 §2.8), so the old hand-rolled `<pre>`/
+// `<textarea>` inline styles were retired.
 
 export const mediaBakedStyle: CSSProperties = {
   font: "13px/1.5 ui-sans-serif, system-ui, sans-serif",
@@ -275,7 +282,19 @@ export const blockStyle: LonghandBlockStyle = {
 };
 
 /** One visual indent level, in em (matches the legacy editor's step). */
-const INDENT_STEP_EM = 1.6;
+export const INDENT_STEP_EM = 1.6;
+
+/**
+ * The left-margin style for a block's `attrs.indent` level, or `undefined` when
+ * unindented. Shared by the editing surface (`blockStyleFor`) and the resting
+ * render (`resting-document.tsx`) so an indented block reads the same in both —
+ * the §2.8 indent persist/resting-render parity (docs/018).
+ */
+export function indentMarginStyle(indent: unknown): CSSProperties | undefined {
+  return typeof indent === "number" && indent > 0
+    ? { marginLeft: `${indent * INDENT_STEP_EM}em` }
+    : undefined;
+}
 
 // List items sit tighter than paragraphs (a list reads as one grouped block, the
 // typographic convention) — less top/bottom padding and a smaller min height than
@@ -302,6 +321,13 @@ const LIST_ITEM_MIN_HEIGHT = 22;
 const BLOCK_TYPE_STYLE: Partial<
   Record<TextLeafType, Partial<LonghandBlockStyle>>
 > = {
+  // The callout box needs gutter room past its left accent bar (the bar is drawn
+  // in ENGINE_TYPOGRAPHY_CSS) plus a little vertical breathing room.
+  callout: {
+    paddingBottom: 8,
+    paddingLeft: "1em",
+    paddingTop: 8,
+  },
   // The bullet gutter is reserved inline (stylesheet `padding-left` would lose to
   // the inline padding); list items also sit tighter than paragraphs.
   listitem: {

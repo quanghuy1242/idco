@@ -42,6 +42,7 @@ import {
   SelectionAnnouncer,
   SelectionOverlay,
 } from "./selection-overlay";
+import { CalloutChrome } from "./callout-chrome";
 import { EngineObjectBlock } from "./object-block";
 import { sanitizeHtmlToCompat } from "./paste-html";
 import { cancelFrame, requestFrame } from "./raf";
@@ -1500,7 +1501,7 @@ function EngineBlock(props: {
   // the order change unmounts this block.
   if (!node) return null;
   if (node.kind === "text") {
-    return (
+    const textBlock = (
       <EngineTextBlock
         beginDrag={beginDrag}
         forcePolyfill={forcePolyfill}
@@ -1514,6 +1515,21 @@ function EngineBlock(props: {
         store={store}
       />
     );
+    // A callout carries floating block chrome (badge + tone + delete). It renders
+    // as a sibling overlay in a `group/block relative` wrapper — never inside the
+    // `role=textbox` (which would nest an interactive control, an ARIA violation).
+    // The chrome is absolutely positioned, so the wrapper's box equals the text
+    // block's and the block-window measurement (which reads the registered text
+    // element) is unchanged.
+    if (node.type === "callout") {
+      return (
+        <div className="group/block relative">
+          <CalloutChrome node={node} store={store} />
+          {textBlock}
+        </div>
+      );
+    }
+    return textBlock;
   }
   if (node.kind === "object") {
     return (

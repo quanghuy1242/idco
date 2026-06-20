@@ -94,6 +94,12 @@ const BLOCK_TYPES: readonly {
     label: "Quote",
     preview: "text-sm italic text-base-content/70",
   },
+  {
+    blockType: "callout",
+    icon: "Info",
+    label: "Callout",
+    preview: "text-sm text-info",
+  },
 ];
 
 /** A stable id for a block-type menu item (independent of array order). */
@@ -103,6 +109,7 @@ function blockTypeKey(choice: { blockType: string; tag?: string }): string {
 
 /** Insert-menu icon per node type (falls back to a generic block icon). */
 const INSERT_ICONS: Record<string, string> = {
+  "code-block": "Code",
   divider: "Minus",
   media: "Image",
   table: "Table",

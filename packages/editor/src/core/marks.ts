@@ -89,9 +89,51 @@ export function segmentText(
     const covering = marks
       .filter((mark) => mark.from <= from && mark.to >= to)
       .sort((a, b) => a.from - b.from || b.to - a.to);
+    // Merge into the previous segment when the covering set is equivalent. Sticky
+    // typing under a continuous format mints one mark per character (011 §4.4:
+    // the open end clamps at the insertion point, so each keystroke adds its own
+    // adjacent mark rather than extending), so without this merge a run typed
+    // with inline `code`/`highlight` on renders as one padded chip per character.
+    // Equivalence is by kind, plus identity for marks that carry data (a link's
+    // href, a comment/glossary thread) so distinct links/threads never fuse.
+    const previous = segments.at(-1);
+    if (
+      previous &&
+      previous.to === from &&
+      segmentSignature(previous.marks) === segmentSignature(covering)
+    ) {
+      segments[segments.length - 1] = {
+        from: previous.from,
+        marks: previous.marks,
+        text: previous.text + text.slice(from, to),
+        to,
+      };
+      continue;
+    }
     segments.push({ from, marks: covering, text: text.slice(from, to), to });
   }
   return segments;
+}
+
+/** Marks whose identity (not just kind) distinguishes adjacent segments. */
+const IDENTITY_MARKS = new Set<TextMarkKind>(["link", "comment", "glossary"]);
+
+/**
+ * A stable key for a segment's covering set: kind for format marks, kind + id
+ * (and href) for data-bearing marks, so two segments merge only when they would
+ * render as the same nested element tree.
+ */
+function segmentSignature(marks: readonly ResolvedMark[]): string {
+  return marks
+    .map((mark) =>
+      IDENTITY_MARKS.has(mark.kind)
+        ? `${mark.kind}#${mark.id}#${
+            typeof mark.attrs?.href === "string" ? mark.attrs.href : ""
+          }`
+        : mark.kind,
+    )
+    .sort()
+    .join("|");
 }
 
 /** Convenience: resolve and segment a leaf in one call. */

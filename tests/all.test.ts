@@ -65,6 +65,7 @@ await import("./editor/engine-payload-import.test");
 await import("./editor/engine-input-affordances.test");
 await import("./editor/engine-phase9-affordances.test");
 await import("./editor/engine-phase9-a11y.test");
+await import("./editor/engine-phase9-block-parity.test");
 await import("./editor/engine-phase8-integration.test");
 await import("./editor/engine-parity.test");
 await import("./editor/engine-url-safety.test");

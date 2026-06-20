@@ -24,6 +24,7 @@ export * from "./info-popover";
 export * from "./popover";
 export * from "./page-intro";
 export * from "./code-block";
+export * from "./block-chrome";
 export * from "./data-table";
 export * from "./nav-icons";
 export * from "./topbar-search-field";

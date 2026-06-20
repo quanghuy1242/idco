@@ -75,6 +75,18 @@ export type EditorCommand =
       /** Optional heading tag (`h1`..`h6`) carried as a `tag` attr. */
       readonly tag?: string;
     }
+  | {
+      readonly type: "set-block-attr";
+      readonly key: string;
+      /** The new attr value; `undefined` clears it. */
+      readonly value: JsonValue | undefined;
+      /** Target a specific block; defaults to the covered leaves (selection). */
+      readonly node?: NodeId;
+    }
+  | {
+      readonly type: "remove-block";
+      readonly node: NodeId;
+    }
   | { readonly type: "indent" }
   | { readonly type: "outdent" }
   | {
@@ -144,6 +156,14 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
       ? compileMoveBlock(store, command.node, command.toIndex)
       : null,
   outdent: (store) => compileIndent(store, "outdent"),
+  "remove-block": (store, command) =>
+    command.type === "remove-block"
+      ? compileRemoveBlock(store, command.node)
+      : null,
+  "set-block-attr": (store, command) =>
+    command.type === "set-block-attr"
+      ? compileSetBlockAttr(store, command.key, command.value, command.node)
+      : null,
   "set-block-type": (store, command) =>
     command.type === "set-block-type"
       ? compileSetBlockType(store, command.blockType, command.tag)
@@ -708,6 +728,48 @@ function compileLink(
   return tr.setSelection(store.selection as EditorSelection);
 }
 
+/**
+ * Set one attribute on every covered text leaf (the callout `tone`, etc.). Like
+ * `set-block-type` it works for a collapsed caret and a multi-block selection,
+ * and skips leaves already at the target value so a no-op returns null.
+ */
+function compileSetBlockAttr(
+  store: EditorStore,
+  key: string,
+  value: JsonValue | undefined,
+  target?: NodeId,
+): TransactionBuilder | null {
+  // A specific target (the floating block chrome) sets the attr on that node
+  // regardless of the caret; otherwise it applies across the covered leaves.
+  let targets: readonly TextLeafNode[];
+  if (target) {
+    const node = store.getNode(target);
+    if (!node || node.kind !== "text") return null;
+    targets = [node];
+  } else {
+    const range = textRange(store);
+    if (!range) return null;
+    targets = coveredTextLeaves(store, range);
+  }
+  if (targets.length === 0) return null;
+  const tr = store.transaction();
+  let changed = false;
+  for (const node of targets) {
+    const current = node.attrs?.[key];
+    if (current === value) continue;
+    tr.push({
+      from: current,
+      key,
+      node: node.id,
+      to: value,
+      type: "set-node-attr",
+    });
+    changed = true;
+  }
+  if (!changed) return null;
+  return tr.setSelection(store.selection as EditorSelection);
+}
+
 function compileSetBlockType(
   store: EditorStore,
   blockType: TextLeafType,
@@ -935,6 +997,24 @@ function compileMoveBlock(
     type: "move-node",
   });
   return tr.setSelection(store.selection as EditorSelection);
+}
+
+/**
+ * Remove one top-level block (the floating chrome's delete button). The selection
+ * is left to `mapSelection` (§8.8), which relocates a caret off the removed node
+ * to the deletion boundary rather than stranding it.
+ */
+function compileRemoveBlock(
+  store: EditorStore,
+  node: NodeId,
+): TransactionBuilder | null {
+  const entry = store.parentEntry(node);
+  if (!entry) return null;
+  const target = store.getNode(node);
+  if (!target) return null;
+  const tr = store.transaction();
+  tr.removeNode(entry.parent, entry.index, target);
+  return tr;
 }
 
 /**

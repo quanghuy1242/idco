@@ -227,7 +227,7 @@ function importCompatNode(
     state.blocks.set(
       id,
       makeTextNode({
-        attrs: pickAttrs(node, ["format"]),
+        attrs: pickAttrs(node, ["format", "indent"]),
         content,
         id,
         marks: marksFromInlineChildren(node.children, content, id),
@@ -243,7 +243,7 @@ function importCompatNode(
     state.blocks.set(
       id,
       makeTextNode({
-        attrs: pickAttrs(node, ["anchorId", "format", "tag"]),
+        attrs: pickAttrs(node, ["anchorId", "format", "indent", "tag"]),
         content,
         id,
         marks: marksFromInlineChildren(node.children, content, id),
@@ -274,7 +274,7 @@ function importCompatNode(
     state.blocks.set(
       id,
       makeTextNode({
-        attrs: pickAttrs(node, ["format"]),
+        attrs: pickAttrs(node, ["format", "indent"]),
         content,
         id,
         marks: marksFromInlineChildren(node.children, content, id),
@@ -305,7 +305,7 @@ function importCompatNode(
     state.blocks.set(
       id,
       makeTextNode({
-        attrs: pickAttrs(node, ["tone"]),
+        attrs: pickAttrs(node, ["indent", "tone"]),
         content,
         id,
         marks: marksFromInlineChildren(node.children, content, id),
@@ -357,7 +357,7 @@ function importCompatNode(
     state.blocks.set(
       id,
       makeTextNode({
-        attrs: pickAttrs(node, ["checked", "value"]),
+        attrs: pickAttrs(node, ["checked", "indent", "value"]),
         content,
         id,
         marks: marksFromInlineChildren(node.children, content, id),

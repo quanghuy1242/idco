@@ -11,11 +11,21 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
-import { AnchoredPopover, Button, Input } from "@quanghuy1242/idco-ui";
+import {
+  AnchoredPopover,
+  BlockChrome,
+  Button,
+  ChromeSelect,
+  type ChromeSelectOption,
+  CodeEditor,
+  type CodeEditorLanguage,
+  Input,
+} from "@quanghuy1242/idco-ui";
 import {
   type EditorStore,
   type JsonValue,
@@ -26,14 +36,43 @@ import { getNodeView, registerNodeView } from "./node-view";
 import { renderRestingObject } from "./resting-document";
 import { useUpload } from "./upload-context";
 import {
-  codeBakedStyle,
-  codeLiveStyle,
   mediaBakedStyle,
   mediaThumbStyle,
   objectBlockStyle,
   objectConfigFieldStyle,
   objectStatusStyle,
 } from "./styles";
+
+/** A stable no-op for the read-only code surface's required `onChange`. */
+const noop = () => {};
+
+/**
+ * `display:contents` so the chrome wrapper generates no box (its `BlockChrome`
+ * children are absolutely positioned against the block container) while still
+ * catching the mousedown that must not bubble to the container's activate.
+ */
+const contentsStyle = { display: "contents" } as const;
+
+/** Code languages the highlighter supports, with their display labels. */
+const CODE_LANGUAGES: readonly ChromeSelectOption<CodeEditorLanguage>[] = [
+  { label: "TypeScript", value: "ts" },
+  { label: "JavaScript", value: "js" },
+  { label: "JSON", value: "json" },
+  { label: "Python", value: "python" },
+  { label: "TSX", value: "tsx" },
+  { label: "Plain text", value: "text" },
+];
+
+const CODE_LANGUAGE_VALUES = new Set<string>(
+  CODE_LANGUAGES.map((l) => l.value),
+);
+
+/** Coerce a stored language string to one the highlighter knows (else plain). */
+function toCodeLanguage(value: string): CodeEditorLanguage {
+  return CODE_LANGUAGE_VALUES.has(value)
+    ? (value as CodeEditorLanguage)
+    : "text";
+}
 
 /** A friendly object-kind name for screen readers (docs/018 §2.3). */
 const OBJECT_LABELS: Record<string, string> = {
@@ -97,6 +136,16 @@ export function EngineObjectBlock(props: {
     },
     [node.id, registerBlock],
   );
+  // True while a chrome menu (a portal) is open, so a focus-out into it does not
+  // deactivate an in-place live surface (the toolbar/chrome focus pattern, §8.6).
+  const menuOpenRef = useRef(false);
+  const focusInPlace = useCallback(() => {
+    containerRef.current?.querySelector("textarea")?.focus();
+  }, []);
+  const removeBlock = useCallback(() => {
+    store.deactivateObject(node.id);
+    store.command({ node: node.id, type: "remove-block" });
+  }, [node.id, store]);
   const view = getNodeView(node.type);
   // "in-place" live surfaces (code) replace the baked view at the captured
   // height; everything else keeps the baked view and edits in an anchored React
@@ -137,12 +186,33 @@ export function EngineObjectBlock(props: {
       // a screen reader announces the object, and `aria-selected` while live.
       aria-label={objectAriaLabel(node)}
       aria-selected={live ? "true" : undefined}
+      // `group/block` scopes the chrome's hover-reveal (CHROME_REVEAL).
+      className="group/block"
       data-engine-block-id={node.id}
       data-engine-object-state={live ? "live" : "resting"}
       data-engine-object-status={node.status}
       data-engine-object-type={node.type}
       id={node.id}
       role={objectAriaRole(node.type)}
+      // An in-place live surface (code) deactivates when focus leaves the whole
+      // block — not just the editor — so the floating chrome (inside the block)
+      // can be clicked without deactivating; a chrome menu (a portal) is guarded
+      // by `menuOpenRef`. Popover-live objects deactivate via the popover instead.
+      onBlur={
+        inPlaceLive
+          ? (event) => {
+              if (menuOpenRef.current) return;
+              if (
+                containerRef.current?.contains(
+                  event.relatedTarget as Node | null,
+                )
+              ) {
+                return;
+              }
+              store.deactivateObject(node.id);
+            }
+          : undefined
+      }
       onMouseDown={
         live
           ? undefined
@@ -159,6 +229,13 @@ export function EngineObjectBlock(props: {
       ref={bindContainer}
       style={objectBlockStyle}
     >
+      <ObjectChrome
+        focusInPlace={focusInPlace}
+        menuOpenRef={menuOpenRef}
+        node={node}
+        onRemove={removeBlock}
+        store={store}
+      />
       {inPlaceLive ? (
         view!.renderLive!({
           initialHeight: restHeightRef.current,
@@ -185,6 +262,79 @@ export function EngineObjectBlock(props: {
   );
 }
 
+/** Badge icon + label per object type for the floating chrome. */
+const OBJECT_CHROME_META: Record<string, { icon: string; label: string }> = {
+  "code-block": { icon: "Code", label: "Code" },
+  divider: { icon: "Minus", label: "Divider" },
+  embed: { icon: "ExternalLink", label: "Embed" },
+  media: { icon: "Image", label: "Image" },
+  "post-ref": { icon: "FileText", label: "Linked post" },
+  table: { icon: "Table", label: "Table" },
+  "table-of-contents": { icon: "List", label: "Contents" },
+};
+
+/**
+ * The standardized floating chrome for an object block (docs/018 §2.8): the name
+ * badge (left) and the config + delete actions (right), shared with callouts and
+ * the legacy nodes via `@idco/ui`'s `BlockChrome`. The `display:contents` wrapper
+ * stops a chrome press from bubbling to the container's activate-on-mousedown, so
+ * configuring or deleting a resting block does not first enter live-edit.
+ */
+function ObjectChrome(props: {
+  readonly node: ObjectNode;
+  readonly store: EditorStore;
+  readonly menuOpenRef: { current: boolean };
+  readonly focusInPlace: () => void;
+  readonly onRemove: () => void;
+}) {
+  const { node, store, menuOpenRef, focusInPlace, onRemove } = props;
+  const meta = OBJECT_CHROME_META[node.type] ?? {
+    icon: "Square",
+    label: node.type,
+  };
+  return (
+    <div onMouseDown={(event) => event.stopPropagation()} style={contentsStyle}>
+      <BlockChrome
+        actions={renderObjectConfig(node, store, menuOpenRef, focusInPlace)}
+        icon={meta.icon}
+        label={meta.label}
+        onRemove={onRemove}
+      />
+    </div>
+  );
+}
+
+/** Per-type chrome config control; code carries a language selector. */
+function renderObjectConfig(
+  node: ObjectNode,
+  store: EditorStore,
+  menuOpenRef: { current: boolean },
+  focusInPlace: () => void,
+) {
+  if (node.type !== "code-block") return null;
+  const language = toCodeLanguage(stringField(asRecord(node.data), "language"));
+  return (
+    <ChromeSelect
+      label="Code language"
+      menuClassName="w-40"
+      onChange={(value) => {
+        const record = currentObjectRecord(store, node.id);
+        store.command({
+          data: { ...record, language: value },
+          node: node.id,
+          type: "set-object-data",
+        });
+      }}
+      onOpenChange={(open) => {
+        menuOpenRef.current = open;
+        if (!open) requestAnimationFrame(focusInPlace);
+      }}
+      options={CODE_LANGUAGES}
+      value={language}
+    />
+  );
+}
+
 /**
  * The static, publish-ready render of an object's baked snapshot. Delegates to
  * the shared `renderRestingObject` (resting-document.tsx) so the editor's at-rest
@@ -201,70 +351,47 @@ function BakedObjectView(props: {
   return <>{renderRestingObject(node, store.registry)}</>;
 }
 
-/** In-place code editing surface; commits re-bake the block through the store. */
+/**
+ * In-place code editing surface (docs/018 §2.8). The live edit reuses `@idco/ui`'s
+ * `CodeEditor` (transparent textarea over a Prism-highlighted `<pre>`), and the
+ * resting render mounts the *same* component read-only, so highlighting matches
+ * and the box does not drift on activation (AC3, the no-shift contract). The
+ * language selector and delete live in the shared block chrome (`ObjectChrome`);
+ * deactivation-on-blur is owned by the block container so chrome clicks do not
+ * drop the surface. Commits re-bake the block through the store.
+ */
 function CodeLiveSurface(props: {
   readonly node: ObjectNode;
   readonly store: EditorStore;
   readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
-  /** Resting baked height captured at activation; opens at this height (AC3). */
-  readonly initialHeight: number;
 }) {
-  const { node, store, registerObjectEditor, initialHeight } = props;
+  const { node, store, registerObjectEditor } = props;
   const id = node.id;
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // Local editing state, seeded once at activation. The store is the source of
-  // truth on commit, but the textarea owns the caret while live, so it must not
-  // re-seed from the node on every keystroke commit.
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  // Code text is local (the textarea owns the caret while live), so it is seeded
+  // once and never re-seeded on a commit. The language is derived from the live
+  // node, so the chrome's language selector updates the highlighting immediately.
   const [code, setCode] = useState(() => bakedCodeText(node));
+  const language = toCodeLanguage(stringField(asRecord(node.data), "language"));
 
-  // Auto-size the textarea to its content so the live box matches the resting
-  // baked <pre> (same font, padding, and line count) and activation does not
-  // shift layout (AC3, the no-drift property).
-  const autoSize = useCallback(() => {
-    const element = textareaRef.current;
-    if (!element) return;
-    element.style.height = "auto";
-    element.style.height = `${element.scrollHeight}px`;
-  }, []);
-
-  useEffect(() => {
+  // Bridge to the reused CodeEditor: it does not expose its inner <textarea>
+  // (no ref/data-attr/focus props), so the owned-editor live-slot contract — the
+  // focusable, fillable `data-engine-object-editor="code"` element (e2e AC1/AC4/
+  // AC5) plus autofocus on activation — is wired onto that one textarea here.
+  // CodeEditor renders exactly one; React leaves the foreign attribute in place
+  // across re-renders since it never set it.
+  useLayoutEffect(() => {
     registerObjectEditor(id, true);
-    // Open at the captured resting height so the box matches exactly (AC3);
-    // subsequent edits auto-size to content.
-    const element = textareaRef.current;
-    if (element) {
-      if (initialHeight > 0) element.style.height = `${initialHeight}px`;
-      else autoSize();
+    const textarea = wrapperRef.current?.querySelector("textarea");
+    if (textarea) {
+      textarea.setAttribute("data-engine-object-editor", "code");
+      textarea.focus();
     }
-    element?.focus();
     return () => registerObjectEditor(id, false);
-  }, [autoSize, id, initialHeight, registerObjectEditor]);
-
-  const commit = useCallback(
-    (next: string) => {
-      const record = currentObjectRecord(store, id);
-      store.command({
-        data: {
-          ...record,
-          code: next,
-          language: stringField(record, "language") || "ts",
-        },
-        node: id,
-        type: "set-object-data",
-      });
-    },
-    [id, store],
-  );
+  }, [id, registerObjectEditor]);
 
   return (
-    <textarea
-      data-engine-object-editor="code"
-      onBlur={() => store.deactivateObject(id)}
-      onChange={(event) => {
-        setCode(event.target.value);
-        commit(event.target.value);
-        autoSize();
-      }}
+    <div
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -273,11 +400,22 @@ function CodeLiveSurface(props: {
         // Keep keystrokes inside the object; the document key handler is for text.
         event.stopPropagation();
       }}
-      ref={textareaRef}
-      spellCheck={false}
-      style={codeLiveStyle}
-      value={code}
-    />
+      ref={wrapperRef}
+    >
+      <CodeEditor
+        language={language}
+        onChange={(value) => {
+          setCode(value);
+          const record = currentObjectRecord(store, id);
+          store.command({
+            data: { ...record, code: value, language },
+            node: id,
+            type: "set-object-data",
+          });
+        }}
+        value={code}
+      />
+    </div>
   );
 }
 
@@ -408,22 +546,45 @@ function bakedCodeText(node: ObjectNode): string {
 // lifted verbatim behind the registry, plus the divider worked example.
 
 registerNodeView({
-  // Code edits in place (the textarea replaces the baked <pre> at its height),
-  // so activation does not shift layout (AC3); everything else uses the popover.
+  // The Insert (+) menu can drop a fresh code block; it activates for editing on
+  // click, where the floating language selector picks the highlight grammar.
+  insert: {
+    createData: () => ({ code: "", language: "ts" }),
+    group: "Blocks",
+    keywords: ["code", "snippet", "```"],
+    label: "Code block",
+  },
+  // Code edits in place (the CodeEditor replaces the baked render at the same
+  // box), so activation does not shift layout (AC3); everything else uses the
+  // popover.
   liveMode: "in-place",
   renderLive: (args) => (
     <CodeLiveSurface
-      initialHeight={args.initialHeight}
       node={args.node}
       registerObjectEditor={args.registerObjectEditor}
       store={args.store}
     />
   ),
-  renderResting: ({ baked }) => (
-    <pre data-engine-object-baked="code" style={codeBakedStyle}>
-      <code>{stringField(asRecord(baked.payload), "code")}</code>
-    </pre>
-  ),
+  // The resting render is the *same* CodeEditor read-only: Prism-highlighted code
+  // (no longer a bare unhighlighted <pre>, docs/018 §2.8) and, because it is the
+  // identical component the live surface uses, the box cannot drift on activation
+  // (AC3). The read-only textarea carries no `data-engine-object-editor`, so AC1's
+  // "no editor instance at rest" selector count stays zero. Highlighting runs in
+  // the view layer (not core, G3/G4); routing it through a worker baker and the
+  // shared reader primitive is the §2.8 follow-up when packages/reader lands.
+  renderResting: ({ baked }) => {
+    const payload = asRecord(baked.payload);
+    return (
+      <div data-engine-object-baked="code">
+        <CodeEditor
+          language={toCodeLanguage(stringField(payload, "language"))}
+          onChange={noop}
+          readOnly
+          value={stringField(payload, "code")}
+        />
+      </div>
+    );
+  },
   type: "code-block",
 });
 

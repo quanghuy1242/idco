@@ -617,6 +617,11 @@ export function EngineTextBlock(props: {
       aria-multiline="true"
       data-engine-block-id={node.id}
       data-engine-block-type={node.type}
+      data-engine-callout-tone={
+        node.type === "callout" && typeof node.attrs?.tone === "string"
+          ? node.attrs.tone
+          : undefined
+      }
       data-engine-heading={
         node.type === "heading" && typeof node.attrs?.tag === "string"
           ? node.attrs.tag

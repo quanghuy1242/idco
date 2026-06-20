@@ -15,6 +15,11 @@
  */
 import type { ReactNode } from "react";
 import {
+  AlertGlyph,
+  alertToneClass,
+  type AlertTone,
+} from "@quanghuy1242/idco-ui";
+import {
   bakeObjectData,
   createDefaultBlockRegistry,
   type BlockRegistry,
@@ -26,7 +31,7 @@ import {
 } from "../core";
 import { getNodeView } from "./node-view";
 import { renderLeafMarks } from "./mark-render";
-import { ENGINE_RESTING_TYPOGRAPHY_CSS } from "./styles";
+import { ENGINE_RESTING_TYPOGRAPHY_CSS, indentMarginStyle } from "./styles";
 
 /**
  * The single resting render of a heavy object's baked content — the source of
@@ -73,30 +78,74 @@ function headingTag(
   return "h2";
 }
 
+/** The valid callout tones (matching the `Alert` component); default `info`. */
+const CALLOUT_TONES = new Set<AlertTone>([
+  "info",
+  "success",
+  "warning",
+  "error",
+]);
+
+/** Coerce a stored tone to a valid `AlertTone`, defaulting to `info`. */
+export function calloutTone(value: unknown): AlertTone {
+  return typeof value === "string" && CALLOUT_TONES.has(value as AlertTone)
+    ? (value as AlertTone)
+    : "info";
+}
+
 /** Render one text leaf as its semantic element with its marks. */
 export function RestingLeaf(props: { readonly node: TextLeafNode }) {
   const { node } = props;
   // The reader navigates links; only the editor keeps them inert.
   const children = renderLeafMarks(node, "navigable");
+  // The block indent rides on `attrs.indent` (set by indent/outdent) as a left
+  // margin, the same step the editing surface uses, so a persisted indent shows
+  // identically at rest and in the reader (docs/018 §2.8).
+  const style = indentMarginStyle(node.attrs?.indent);
   switch (node.type) {
     case "heading": {
       const Tag = headingTag(node);
-      return <Tag data-engine-resting-block={node.id}>{children}</Tag>;
+      return (
+        <Tag data-engine-resting-block={node.id} style={style}>
+          {children}
+        </Tag>
+      );
     }
     case "quote":
       return (
-        <blockquote data-engine-resting-block={node.id}>{children}</blockquote>
-      );
-    case "callout":
-      return (
-        <aside data-engine-resting-block={node.id} role="note">
+        <blockquote data-engine-resting-block={node.id} style={style}>
           {children}
+        </blockquote>
+      );
+    case "callout": {
+      // Render the real DaisyUI alert (the legacy callout look) so the published
+      // page matches the editor surface and the theme (docs/018 §2.8).
+      const tone = calloutTone(node.attrs?.tone);
+      return (
+        <aside
+          className={`alert ${alertToneClass[tone]} items-start`}
+          data-engine-callout-tone={tone}
+          data-engine-resting-block={node.id}
+          role="note"
+          style={style}
+        >
+          <AlertGlyph tone={tone} />
+          <span className="w-full">{children}</span>
         </aside>
       );
+    }
     case "listitem":
-      return <li data-engine-resting-block={node.id}>{children}</li>;
+      return (
+        <li data-engine-resting-block={node.id} style={style}>
+          {children}
+        </li>
+      );
     default:
-      return <p data-engine-resting-block={node.id}>{children}</p>;
+      return (
+        <p data-engine-resting-block={node.id} style={style}>
+          {children}
+        </p>
+      );
   }
 }
 
