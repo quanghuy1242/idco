@@ -94,18 +94,15 @@ const BLOCK_TYPES: readonly {
     label: "Quote",
     preview: "text-sm italic text-base-content/70",
   },
-  {
-    blockType: "callout",
-    icon: "Info",
-    label: "Callout",
-    preview: "text-sm text-info",
-  },
 ];
 
 /** A stable id for a block-type menu item (independent of array order). */
 function blockTypeKey(choice: { blockType: string; tag?: string }): string {
   return `${choice.blockType}:${choice.tag ?? ""}`;
 }
+
+/** Menu key for the structural callout insert (not a registered object node). */
+const CALLOUT_INSERT_KEY = "callout";
 
 /** Insert-menu icon per node type (falls back to a generic block icon). */
 const INSERT_ICONS: Record<string, string> = {
@@ -460,11 +457,11 @@ export function EditorToolbar(props: {
         </PopoverTrigger>
       </span>
 
-      {inserts.length > 0 ? (
-        <>
-          <Sep />
-          <span data-engine-insert-menu="">
-            <MenuTrigger>
+      {/* The insert menu always carries the structural callout, plus any
+          registered object nodes (code/media/embed/…). */}
+      <Sep />
+      <span data-engine-insert-menu="">
+        <MenuTrigger>
               <Button
                 ariaLabel="Insert block"
                 iconName="Plus"
@@ -475,6 +472,12 @@ export function EditorToolbar(props: {
               />
               <Menu
                 onAction={(key) => {
+                  // A callout is a structural container, not a registered object
+                  // node, so it inserts through its own command (docs/019).
+                  if (key === CALLOUT_INSERT_KEY) {
+                    run(() => store.command({ type: "insert-callout" }));
+                    return;
+                  }
                   const view = inserts.find((entry) => entry.type === key);
                   if (view) {
                     run(() =>
@@ -487,6 +490,14 @@ export function EditorToolbar(props: {
                   }
                 }}
               >
+                <MenuItem
+                  id={CALLOUT_INSERT_KEY}
+                  key={CALLOUT_INSERT_KEY}
+                  textValue="Callout"
+                >
+                  <NavIcon name="Info" />
+                  Callout
+                </MenuItem>
                 {inserts.map((entry) => (
                   <MenuItem
                     id={entry.type}
@@ -500,8 +511,6 @@ export function EditorToolbar(props: {
               </Menu>
             </MenuTrigger>
           </span>
-        </>
-      ) : null}
 
       {onFind ? (
         <>

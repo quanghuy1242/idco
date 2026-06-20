@@ -206,6 +206,33 @@ export function compatFromSnapshot(
   };
 }
 
+/**
+ * Wrap a callout's inline text children in a single paragraph leaf and register
+ * it, returning its id. The legacy inline-content callout had no inner block, so
+ * its text becomes one paragraph child of the structural callout — the same shape
+ * a freshly inserted callout carries.
+ */
+function importInlineAsParagraph(
+  node: RichTextCompatNode,
+  state: BuildState,
+): NodeId[] {
+  const content = state.allocator.createTextSlice(
+    textFromInlineChildren(node.children),
+  );
+  const paragraphId = state.allocator.createNodeId();
+  state.blocks.set(
+    paragraphId,
+    makeTextNode({
+      attrs: pickAttrs(node, ["indent"]),
+      content,
+      id: paragraphId,
+      marks: marksFromInlineChildren(node.children, content, paragraphId),
+      type: "paragraph",
+    }),
+  );
+  return [paragraphId];
+}
+
 function importCompatNode(
   node: RichTextCompatNode,
   state: BuildState,
@@ -284,31 +311,19 @@ function importCompatNode(
     return [id];
   }
   if (node.type === "callout") {
-    if (hasBlockChildren(node.children)) {
-      const children = (node.children ?? []).flatMap((child) =>
-        importCompatNode(child, state),
-      );
-      state.blocks.set(
-        id,
-        makeStructuralNode({
-          attrs: pickAttrs(node, ["tone"]),
-          children,
-          id,
-          type: "callout",
-        }),
-      );
-      return [id];
-    }
-    const content = state.allocator.createTextSlice(
-      textFromInlineChildren(node.children),
-    );
+    // A callout is a structural container holding block children (docs/019): it can
+    // nest paragraphs, lists, etc. A callout carrying block children imports them
+    // directly; one carrying only inline text wraps that text in a single paragraph
+    // so the legacy inline-content shape becomes the same container model.
+    const children = hasBlockChildren(node.children)
+      ? (node.children ?? []).flatMap((child) => importCompatNode(child, state))
+      : importInlineAsParagraph(node, state);
     state.blocks.set(
       id,
-      makeTextNode({
-        attrs: pickAttrs(node, ["indent", "tone"]),
-        content,
+      makeStructuralNode({
+        attrs: pickAttrs(node, ["tone"]),
+        children,
         id,
-        marks: marksFromInlineChildren(node.children, content, id),
         type: "callout",
       }),
     );
@@ -902,8 +917,7 @@ export function textNodeTypeFromCompat(type: string): TextLeafType | null {
   return type === "paragraph" ||
     type === "heading" ||
     type === "quote" ||
-    type === "listitem" ||
-    type === "callout"
+    type === "listitem"
     ? type
     : null;
 }

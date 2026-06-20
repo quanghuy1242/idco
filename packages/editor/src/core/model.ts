@@ -188,12 +188,7 @@ export type TextMark = {
   readonly attrs?: JsonObject;
 };
 
-export type TextLeafType =
-  | "paragraph"
-  | "heading"
-  | "listitem"
-  | "quote"
-  | "callout";
+export type TextLeafType = "paragraph" | "heading" | "listitem" | "quote";
 
 export type StructuralNodeType =
   | "body"

@@ -239,7 +239,12 @@ const fakeGapUpload: UploadImage = async (file) => {
   return { alt: file.name, src: `/uploads/${file.name}` };
 };
 
-/** docs/019 repro: atoms (media/embed) then a callout (text) as the last block. */
+/**
+ * docs/019 repro: atoms (media/embed) then a structural callout as the last
+ * block. The callout is a container, so it nests block children — a lead
+ * paragraph plus a bulleted list, the shape the old text-leaf callout could not
+ * hold. A body gap opens after the trailing container (arrow-down / click below).
+ */
 export const Phase019CalloutTail: Story = () => {
   const store = useMemo(() => {
     const allocator = createIdAllocator("idco_client_phase019_callout");
@@ -255,23 +260,46 @@ export const Phase019CalloutTail: Story = () => {
       src: "",
     });
     const embed = objectNode(allocator, registry, "embed", { url: "" });
-    const callout = makeTextNode({
-      attrs: { tone: "info" },
+    const calloutLead = makeTextNode({
       content: allocator.createTextSlice("A callout at the very bottom."),
+      id: allocator.createNodeId(),
+      type: "paragraph",
+    });
+    const calloutItem1 = makeTextNode({
+      attrs: { listType: "bullet" },
+      content: allocator.createTextSlice("with a list inside it"),
+      id: allocator.createNodeId(),
+      type: "listitem",
+    });
+    const calloutItem2 = makeTextNode({
+      attrs: { listType: "bullet" },
+      content: allocator.createTextSlice("which the old callout could not hold"),
+      id: allocator.createNodeId(),
+      type: "listitem",
+    });
+    const callout = makeStructuralNode({
+      attrs: { tone: "info" },
+      children: [calloutLead.id, calloutItem1.id, calloutItem2.id],
       id: allocator.createNodeId(),
       type: "callout",
     });
-    const blocks: EditorNode[] = [p, media, embed, callout];
+    const topLevel: EditorNode[] = [p, media, embed, callout];
+    const allBlocks: EditorNode[] = [
+      ...topLevel,
+      calloutLead,
+      calloutItem1,
+      calloutItem2,
+    ];
     return createEditorStore({
       allocator,
       registry,
       snapshot: {
         body: {
-          blocks: Object.fromEntries(blocks.map((n) => [n.id, n])) as Record<
+          blocks: Object.fromEntries(allBlocks.map((n) => [n.id, n])) as Record<
             NodeId,
             EditorNode
           >,
-          order: blocks.map((n) => n.id),
+          order: topLevel.map((n) => n.id),
         },
         settings: {},
         version: 1,

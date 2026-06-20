@@ -117,23 +117,6 @@ export function RestingLeaf(props: { readonly node: TextLeafNode }) {
           {children}
         </blockquote>
       );
-    case "callout": {
-      // Render the real DaisyUI alert (the legacy callout look) so the published
-      // page matches the editor surface and the theme (docs/018 §2.8).
-      const tone = calloutTone(node.attrs?.tone);
-      return (
-        <aside
-          className={`alert ${alertToneClass[tone]} items-start`}
-          data-engine-callout-tone={tone}
-          data-engine-resting-block={node.id}
-          role="note"
-          style={style}
-        >
-          <AlertGlyph tone={tone} />
-          <span className="w-full">{children}</span>
-        </aside>
-      );
-    }
     case "listitem":
       return (
         <li data-engine-resting-block={node.id} style={style}>
@@ -179,6 +162,26 @@ function renderRestingStructural(
   const children = node.children
     .map((id) => snapshot.body.blocks[id as NodeId])
     .filter((child): child is EditorNode => Boolean(child));
+  if (node.type === "callout") {
+    // The published callout is the real DaisyUI alert (the legacy look), now a
+    // container that stacks its block children so the page matches the editor
+    // surface and the theme (docs/018 §2.8, docs/019).
+    const tone = calloutTone(node.attrs?.tone);
+    return (
+      <aside
+        className={`alert ${alertToneClass[tone]} items-start`}
+        data-engine-callout-tone={tone}
+        data-engine-resting-block={node.id}
+        key={node.id}
+        role="note"
+      >
+        <AlertGlyph tone={tone} />
+        <div className="w-full">
+          {renderBlockSequence(children, snapshot, registry)}
+        </div>
+      </aside>
+    );
+  }
   if (node.type === "list") {
     const items = children.map((child) =>
       renderRestingListItem(child, snapshot, registry),
@@ -203,7 +206,7 @@ function renderRestingStructural(
   }
   return (
     <div data-engine-resting-block={node.id} key={node.id}>
-      {children.map((child) => renderBlock(child, snapshot, registry))}
+      {renderBlockSequence(children, snapshot, registry)}
     </div>
   );
 }
@@ -262,19 +265,17 @@ function restingListFlavour(node: EditorNode): "bullet" | "number" | null {
 }
 
 /**
- * Render a document snapshot as themed resting HTML. Lists are flat-by-design
- * (docs/018 §2.10): a run of consecutive `listitem` leaves of the same flavour is
- * wrapped in one real `<ul>` (bullet) or `<ol>` (number), so the published page
- * numbers an ordered list with the browser's own counter and matches the editor
- * surface. A flavour change between adjacent items starts a new list; everything
- * else renders block by block.
+ * Render a sequence of sibling blocks, wrapping each run of consecutive
+ * same-flavour `listitem` leaves in one real `<ul>`/`<ol>` (docs/018 §2.10) so an
+ * ordered list numbers with the browser's counter. Shared by the body and by any
+ * structural container (a callout, a quote-with-blocks) so a nested list numbers
+ * identically — a bare `<li>` outside a list would lose its bullet/number.
  */
-export function RestingDocument(props: RestingDocumentProps) {
-  const {
-    snapshot,
-    className = "prose max-w-none",
-    registry = DEFAULT_RESTING_REGISTRY,
-  } = props;
+function renderBlockSequence(
+  nodes: readonly EditorNode[],
+  snapshot: EditorDocumentSnapshot,
+  registry: BlockRegistry,
+): ReactNode[] {
   const blocks: ReactNode[] = [];
   let listBuffer: ReactNode[] = [];
   let listFlavour: "bullet" | "number" = "bullet";
@@ -294,27 +295,45 @@ export function RestingDocument(props: RestingDocumentProps) {
     );
     listBuffer = [];
   };
-  for (const id of snapshot.body.order) {
-    const node = snapshot.body.blocks[id as NodeId];
-    if (!node) continue;
+  for (const node of nodes) {
     const flavour = restingListFlavour(node);
     if (flavour && node.kind === "text") {
       // A flavour switch (bullet→number) ends the current list and opens a new one.
-      if (listBuffer.length > 0 && flavour !== listFlavour) flushList(id);
+      if (listBuffer.length > 0 && flavour !== listFlavour) flushList(node.id);
       listFlavour = flavour;
       listBuffer.push(<RestingLeaf key={node.id} node={node} />);
       continue;
     }
-    flushList(id);
+    flushList(node.id);
     blocks.push(renderBlock(node, snapshot, registry));
   }
   flushList("end");
+  return blocks;
+}
+
+/**
+ * Render a document snapshot as themed resting HTML. Lists are flat-by-design
+ * (docs/018 §2.10): a run of consecutive `listitem` leaves of the same flavour is
+ * wrapped in one real `<ul>` (bullet) or `<ol>` (number), so the published page
+ * numbers an ordered list with the browser's own counter and matches the editor
+ * surface. A flavour change between adjacent items starts a new list; everything
+ * else renders block by block.
+ */
+export function RestingDocument(props: RestingDocumentProps) {
+  const {
+    snapshot,
+    className = "prose max-w-none",
+    registry = DEFAULT_RESTING_REGISTRY,
+  } = props;
+  const bodyNodes = snapshot.body.order
+    .map((id) => snapshot.body.blocks[id as NodeId])
+    .filter((node): node is EditorNode => Boolean(node));
   return (
     <div className={className} data-engine-resting-document="">
       {/* Zero-specificity baseline so the published render is never unstyled when
           the host lacks a typography plugin; a real `prose` still overrides it. */}
       <style>{ENGINE_RESTING_TYPOGRAPHY_CSS}</style>
-      {blocks}
+      {renderBlockSequence(bodyNodes, snapshot, registry)}
     </div>
   );
 }

@@ -28,6 +28,7 @@ import {
   sliceTextContent,
   type EditorNode,
   type EditorSelection,
+  type JsonObject,
   type JsonValue,
   type NodeId,
   type StructuralNode,
@@ -110,6 +111,7 @@ export type EditorCommand =
       readonly type: "insert-blocks";
       readonly nodes: readonly EditorNode[];
     }
+  | { readonly type: "insert-callout" }
   | {
       readonly type: "set-object-data";
       readonly node: NodeId;
@@ -146,6 +148,7 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
     command.type === "insert-blocks"
       ? compileInsertBlocks(store, command.nodes)
       : null,
+  "insert-callout": (store) => compileInsertCallout(store),
   "insert-object": (store, command) =>
     command.type === "insert-object"
       ? compileInsertObject(store, command.objectType, command.data)
@@ -672,9 +675,12 @@ type LeafRange = {
 
 /**
  * The text leaves a selection covers, each with its local range. A single-leaf
- * selection yields one entry; a cross-leaf selection walks the body order from
- * the start leaf to the end leaf (top-level prose, which is blog parity — nested
- * list-item leaves are a books follow-on). Zero-length local ranges are dropped.
+ * selection yields one entry; a cross-leaf selection walks the document in model
+ * order from the start leaf to the end leaf. The walk uses `orderedTextLeaves`,
+ * which descends into container scopes (a callout, a list), so a selection that
+ * spans leaves *inside* a structural container is covered too — `store.order` is
+ * only the top-level body order and would miss them. Zero-length local ranges
+ * are dropped.
  */
 function leafRangesInSelection(store: EditorStore): readonly LeafRange[] {
   const range = textRange(store);
@@ -684,14 +690,13 @@ function leafRangesInSelection(store: EditorStore): readonly LeafRange[] {
     if (range.start.offset === range.end.offset) return [];
     return [{ from: range.start.offset, node, to: range.end.offset }];
   }
-  const order = store.order;
-  const startIndex = order.indexOf(range.start.node);
-  const endIndex = order.indexOf(range.end.node);
+  const leaves = orderedLeavesInDocument(store);
+  const startIndex = leaves.findIndex((leaf) => leaf.id === range.start.node);
+  const endIndex = leaves.findIndex((leaf) => leaf.id === range.end.node);
   if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return [];
   const out: LeafRange[] = [];
   for (let i = startIndex; i <= endIndex; i += 1) {
-    const node = store.getNode(order[i]!);
-    if (!node || node.kind !== "text") continue;
+    const node = leaves[i]!;
     const from = i === startIndex ? range.start.offset : 0;
     const to = i === endIndex ? range.end.offset : node.content.text.length;
     if (to > from) out.push({ from, node, to });
@@ -699,7 +704,34 @@ function leafRangesInSelection(store: EditorStore): readonly LeafRange[] {
   return out;
 }
 
-/** Every text leaf a (possibly collapsed) range touches, start..end inclusive. */
+/**
+ * The document's text leaves in model order, descending into container scopes (a
+ * callout, a list) via `childrenOf` — `store.order` alone is only the top-level
+ * body. Local to this module so the block commands resolve a cross-scope
+ * selection without importing the copy serializer (which would form an import
+ * cycle through the store). Not a hot path: block-type/attr/format commands are
+ * user gestures, not per-keystroke.
+ */
+function orderedLeavesInDocument(store: EditorStore): TextLeafNode[] {
+  const leaves: TextLeafNode[] = [];
+  const visit = (scope: NodeId): void => {
+    for (const id of childrenOf(store, scope)) {
+      const node = store.getNode(id);
+      if (!node) continue;
+      if (node.kind === "text") leaves.push(node);
+      else if (node.kind === "structural") visit(id);
+    }
+  };
+  visit(store.bodyId);
+  return leaves;
+}
+
+/**
+ * Every text leaf a (possibly collapsed) range touches, start..end inclusive.
+ * Like `leafRangesInSelection`, this walks document model order across container
+ * scopes, so a multi-block selection inside a callout/list is covered (block-type
+ * and block-attr commands operate on the nested leaves, not nothing).
+ */
 function coveredTextLeaves(
   store: EditorStore,
   range: TextRange,
@@ -707,16 +739,11 @@ function coveredTextLeaves(
   if (range.start.node === range.end.node) {
     return [store.requireTextNode(range.start.node)];
   }
-  const order = store.order;
-  const startIndex = order.indexOf(range.start.node);
-  const endIndex = order.indexOf(range.end.node);
+  const leaves = orderedLeavesInDocument(store);
+  const startIndex = leaves.findIndex((leaf) => leaf.id === range.start.node);
+  const endIndex = leaves.findIndex((leaf) => leaf.id === range.end.node);
   if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return [];
-  const out: TextLeafNode[] = [];
-  for (let i = startIndex; i <= endIndex; i += 1) {
-    const node = store.getNode(order[i]!);
-    if (node && node.kind === "text") out.push(node);
-  }
-  return out;
+  return leaves.slice(startIndex, endIndex + 1);
 }
 
 function compileToggleMark(
@@ -812,11 +839,14 @@ function compileSetBlockAttr(
   target?: NodeId,
 ): TransactionBuilder | null {
   // A specific target (the floating block chrome) sets the attr on that node
-  // regardless of the caret; otherwise it applies across the covered leaves.
-  let targets: readonly TextLeafNode[];
+  // regardless of the caret; otherwise it applies across the covered leaves. A
+  // structural container's chrome (the callout tone gear) targets the container
+  // node itself, which is not a text leaf, so a targeted set accepts any node.
+  let targets: readonly EditorNode[];
   if (target) {
     const node = store.getNode(target);
-    if (!node || node.kind !== "text") return null;
+    if (!node || (node.kind !== "text" && node.kind !== "structural"))
+      return null;
     targets = [node];
   } else {
     const range = textRange(store);
@@ -1177,6 +1207,73 @@ function compileInsertBlocks(
   return tr;
 }
 
+/**
+ * Insert a callout — a structural container holding one empty paragraph — at the
+ * caret and land the caret inside that paragraph (docs/019 §4). A callout is a
+ * scope, not an atom: it can later hold lists/paragraphs, and an arrow can walk
+ * into and out of it. The container plus its inner paragraph are inserted as one
+ * subtree (one invertible transaction).
+ */
+function compileInsertCallout(store: EditorStore): TransactionBuilder | null {
+  const paragraphId = store.allocator.createNodeId();
+  const paragraph = makeTextNode({
+    content: store.allocator.createTextSlice(""),
+    id: paragraphId,
+    type: "paragraph",
+  });
+  const calloutId = store.allocator.createNodeId();
+  const callout = makeStructuralNode({
+    attrs: { tone: "info" },
+    children: [paragraphId],
+    id: calloutId,
+    type: "callout",
+  });
+  const tr = store.transaction();
+  const point = insertionPointForInsert(tr, store);
+  placeSubtree(tr, store, point, callout, [paragraph]);
+  const focus = pointAtOffset(paragraphId, paragraph.content, 0);
+  return tr.setSelection({ anchor: focus, focus, type: "text" });
+}
+
+/**
+ * Place a single container subtree (a root node plus its already-built
+ * descendants) at an `InsertionPoint`, mirroring `placeNodes` but carrying the
+ * descendants on the insert step so the whole subtree registers at once. Used by
+ * container inserts (a callout wrapping a paragraph) that `placeNodes`' flat
+ * sibling run cannot express.
+ */
+function placeSubtree(
+  tr: TransactionBuilder,
+  store: EditorStore,
+  point: InsertionPoint,
+  root: EditorNode,
+  descendants: readonly EditorNode[],
+): void {
+  const insert = (parent: NodeId, index: number) =>
+    tr.push({ descendants, index, node: root, parent, type: "insert-node" });
+  if (point.kind === "replace") {
+    const entry = store.parentEntry(point.node);
+    const removed = store.getNode(point.node);
+    if (entry && removed) {
+      tr.removeNode(entry.parent, entry.index, removed);
+      insert(entry.parent, entry.index);
+      return;
+    }
+    insert(store.bodyId, store.order.length);
+    return;
+  }
+  if (point.kind === "split") {
+    const seam = splitLeafAt(tr, store, point);
+    if (!seam) {
+      insert(store.bodyId, store.order.length);
+      return;
+    }
+    insert(seam.parent, seam.index + 1);
+    return;
+  }
+  insert(point.scope, point.index);
+}
+
 // ---------------------------------------------------------------------------
 // Positional insertion (docs/019 §4): resolve any selection to where a block
 // lands. Insertion is a caret operation — a block goes where the caret is, and
@@ -1269,6 +1366,26 @@ export function placeNodes(
  * from the store, so it is correct after a prior in-transaction delete (the
  * range-then-insert path, §7.8).
  */
+/**
+ * The block-level attrs a split continuation inherits (docs/018 §2.10). A new
+ * line started with Enter keeps the depth (`indent`) of the block it split from,
+ * and a list item keeps its flavour (`listType`) so a numbered list keeps
+ * numbering instead of falling back to bullet. Heading-only attrs (`tag`) are not
+ * carried — the continuation of a heading is a paragraph.
+ */
+function continuationAttrs(
+  attrs: JsonObject | undefined,
+  type: TextLeafType,
+): JsonObject | undefined {
+  if (!attrs) return undefined;
+  const out: Record<string, JsonValue> = {};
+  if (attrs.indent !== undefined) out.indent = attrs.indent;
+  if (type === "listitem" && attrs.listType !== undefined) {
+    out.listType = attrs.listType;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function splitLeafAt(
   tr: TransactionBuilder,
   store: EditorStore,
@@ -1295,6 +1412,7 @@ function splitLeafAt(
     splitNode.type === "heading" ? "paragraph" : splitNode.type;
   const tailMarks = clipMarks(splitNode.marks, content, at, length, -at);
   const newNode = makeTextNode({
+    attrs: continuationAttrs(splitNode.attrs, newType),
     content: tailSlice,
     id: newId,
     marks: reanchorMarks(tailMarks, tailSlice),

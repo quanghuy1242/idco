@@ -47,8 +47,10 @@ import {
   SelectionAnnouncer,
   SelectionOverlay,
 } from "./selection-overlay";
+import { AlertGlyph } from "@quanghuy1242/idco-ui";
 import { CalloutChrome } from "./callout-chrome";
 import { EngineObjectBlock } from "./object-block";
+import { calloutTone } from "./resting-document";
 import { sanitizeHtmlToCompat } from "./paste-html";
 import { cancelFrame, requestFrame } from "./raf";
 import { useEditorNode, useEditorOrder } from "./store-hooks";
@@ -716,9 +718,11 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
 
   // Clicking the white gaps around the content (most visibly the empty area
   // Hit-test a pointer against the body's inter-block gaps; returns a gap
-  // selection only when the slot is adjacent to an atom (an object), the
-  // position a text caret cannot occupy (docs/019 §4.9/§5.8). Elsewhere the
-  // caller falls back to the nearest-text-leaf caret.
+  // selection only when the slot is adjacent to an atom (an object) or a
+  // structural container (a callout) — the body-level position a text caret
+  // cannot occupy, since a caret there would land *inside* the container or its
+  // sibling, never between them (docs/019 §4.9/§5.8). Elsewhere the caller falls
+  // back to the nearest-text-leaf caret.
   const gapAtPointer = useCallback(
     (clientX: number, clientY: number): GapSelection | null => {
       void clientX;
@@ -739,7 +743,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           right: r.right,
           top: r.top,
         });
-        atomicFlags.push(store.getNode(children[i]!)?.kind === "object");
+        const kind = store.getNode(children[i]!)?.kind;
+        atomicFlags.push(kind === "object" || kind === "structural");
         bodyIndex.push(i);
       }
       if (rects.length === 0) return null;
@@ -1777,20 +1782,6 @@ function EngineBlock(props: {
         store={store}
       />
     );
-    // A callout carries floating block chrome (badge + tone + delete). It renders
-    // as a sibling overlay in a `group/block relative` wrapper — never inside the
-    // `role=textbox` (which would nest an interactive control, an ARIA violation).
-    // The chrome is absolutely positioned, so the wrapper's box equals the text
-    // block's and the block-window measurement (which reads the registered text
-    // element) is unchanged.
-    if (node.type === "callout") {
-      return (
-        <div className="group/block relative">
-          <CalloutChrome node={node} store={store} />
-          {textBlock}
-        </div>
-      );
-    }
     return textBlock;
   }
   if (node.kind === "object") {
@@ -1819,19 +1810,33 @@ function EngineBlock(props: {
   // are the *separate* recursive-windowing tier (docs/018 §2.11), built against
   // the measurement guardrail when a real consumer needs it — that is the only
   // deferred half, and it is a virtualization concern, not this render.
-  const childListMeta =
-    node.type === "list"
-      ? computeWindowListMeta(store, node.children, 0)
-      : undefined;
-  return (
+  // Any structural container numbers the list runs among its children — a `list`,
+  // but also a callout holding list items — so a nested numbered list renders as
+  // `N.`, not bullets. Containers with no list items get an empty map (paragraphs
+  // are unaffected). Without this, nested items fell back to the bullet default.
+  const childListMeta = computeWindowListMeta(store, node.children, 0);
+  // A callout is a tinted box (the `[data-engine-callout-tone]` CSS) carrying
+  // floating block chrome (badge + tone + delete) and the tone glyph in the left
+  // gutter — the same `AlertGlyph` the resting render uses, so the two surfaces
+  // read alike. Its tone rides the `tone` attr and defaults to info. Other
+  // containers (a `list`, a future quote-with-blocks) just stack their children.
+  const isCallout = node.type === "callout";
+  const tone = calloutTone(node.attrs?.tone);
+  const container = (
     <div
       data-engine-block-id={node.id}
+      data-engine-callout-tone={isCallout ? tone : undefined}
       data-engine-structural={node.type}
       ref={(element) => registerBlock(node.id, element)}
       style={
         node.type === "list" ? structuralListStyle : structuralContainerStyle
       }
     >
+      {isCallout ? (
+        <span aria-hidden="true" data-engine-callout-glyph="">
+          <AlertGlyph tone={tone} />
+        </span>
+      ) : null}
       {node.children.map((childId) => (
         <EngineBlock
           beginDrag={beginDrag}
@@ -1853,6 +1858,17 @@ function EngineBlock(props: {
       ))}
     </div>
   );
+  // The chrome is a sibling overlay in a `group/block relative` wrapper (never
+  // inside the measured container box), mirroring the object blocks' chrome.
+  if (isCallout) {
+    return (
+      <div className="group/block relative">
+        <CalloutChrome node={node} store={store} />
+        {container}
+      </div>
+    );
+  }
+  return container;
 }
 
 /**

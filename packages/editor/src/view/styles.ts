@@ -102,14 +102,25 @@ export const ENGINE_TYPOGRAPHY_CSS =
   // Callout: a tinted note box themed per `tone` with the same DaisyUI semantic
   // tokens the `Alert` component uses (info/success/warning/error), so it reads
   // as a callout while editing and matches the resting `alert` render (docs/018
-  // §2.8). The editing surface is a `role=textbox` div, so it cannot use the
-  // `.alert` grid class (it would break inline-mark flow); these rules reproduce
-  // the alert palette with `display:block` instead. Padding comes from
-  // BLOCK_TYPE_STYLE; the default (no tone) uses the info token.
-  '[data-engine-view-root] [data-engine-block-type="callout"]{border-radius:var(--radius-box, 0.5rem);border:1px solid color-mix(in oklab, var(--color-info, #0ea5e9) 35%, transparent);background:color-mix(in oklab, var(--color-info, #0ea5e9) 10%, var(--color-base-100, transparent));color:var(--color-base-content, CanvasText);}' +
+  // §2.8, docs/019). A callout is now a structural container (it stacks block
+  // children — paragraphs, lists), so the box is the container div, not a text
+  // leaf; these rules reproduce the alert palette on it. The default (no/`info`
+  // tone) uses the info token; padding gives the inner blocks gutter room.
+  '[data-engine-view-root] [data-engine-structural="callout"]{border-radius:var(--radius-box, 0.5rem);border:1px solid color-mix(in oklab, var(--color-info, #0ea5e9) 35%, transparent);background:color-mix(in oklab, var(--color-info, #0ea5e9) 10%, var(--color-base-100, transparent));color:var(--color-base-content, CanvasText);padding:8px 1em 8px 2.75rem;}' +
   '[data-engine-view-root] [data-engine-callout-tone="success"]{border-color:color-mix(in oklab, var(--color-success, #16a34a) 35%, transparent);background:color-mix(in oklab, var(--color-success, #16a34a) 10%, var(--color-base-100, transparent));}' +
   '[data-engine-view-root] [data-engine-callout-tone="warning"]{border-color:color-mix(in oklab, var(--color-warning, #d97706) 35%, transparent);background:color-mix(in oklab, var(--color-warning, #d97706) 10%, var(--color-base-100, transparent));}' +
   '[data-engine-view-root] [data-engine-callout-tone="error"]{border-color:color-mix(in oklab, var(--color-error, #dc2626) 35%, transparent);background:color-mix(in oklab, var(--color-error, #dc2626) 10%, var(--color-base-100, transparent));}' +
+  // The tone glyph (the same `AlertGlyph` the resting render uses) sits in the
+  // left gutter the padding reserves, tinted to match the tone — so the editing
+  // surface reads like the published alert, not just a tinted box.
+  // `top` aligns the glyph centre with the first text line: box pad-top (8px) +
+  // the lead block's pad-top (5px) + half the line-leading, so it reads level
+  // with the first line rather than floating at the box top.
+  '[data-engine-view-root] [data-engine-callout-glyph]{position:absolute;left:0.7rem;top:14px;pointer-events:none;color:var(--color-info, #0ea5e9);}' +
+  '[data-engine-view-root] [data-engine-callout-glyph] svg{height:1.4rem;width:1.4rem;}' +
+  '[data-engine-view-root] [data-engine-callout-tone="success"] [data-engine-callout-glyph]{color:var(--color-success, #16a34a);}' +
+  '[data-engine-view-root] [data-engine-callout-tone="warning"] [data-engine-callout-glyph]{color:var(--color-warning, #d97706);}' +
+  '[data-engine-view-root] [data-engine-callout-tone="error"] [data-engine-callout-glyph]{color:var(--color-error, #dc2626);}' +
   // The list padding-left + bullet offset are applied inline per block
   // (`blockStyleFor`) because the functional `blockStyle` sets an inline padding
   // shorthand that would otherwise win the cascade; only the bullet glyph itself
@@ -453,13 +464,6 @@ export function computeWindowListMeta(
 const BLOCK_TYPE_STYLE: Partial<
   Record<TextLeafType, Partial<LonghandBlockStyle>>
 > = {
-  // The callout box needs gutter room past its left accent bar (the bar is drawn
-  // in ENGINE_TYPOGRAPHY_CSS) plus a little vertical breathing room.
-  callout: {
-    paddingBottom: 8,
-    paddingLeft: "1em",
-    paddingTop: 8,
-  },
   // The bullet gutter is reserved inline (stylesheet `padding-left` would lose to
   // the inline padding); list items also sit tighter than paragraphs.
   listitem: {

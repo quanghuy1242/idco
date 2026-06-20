@@ -1,18 +1,17 @@
 /**
- * The floating chrome for a callout text leaf (docs/018 §2.8): the "Callout"
- * badge, a tone gear, and a delete button — the same standardized `BlockChrome`
- * the object blocks and legacy nodes use. It renders as a sibling *overlay* of
- * the `role=textbox` block (in the block wrapper, not inside the textbox) so it
- * never nests an interactive control inside a textbox (an ARIA violation), and a
- * `display:contents` host stops a chrome press from reaching the block's
- * pointer-down (which would re-place the caret).
+ * The floating chrome for a callout container (docs/018 §2.8, docs/019): the
+ * "Callout" badge, a tone gear, and a delete button — the same standardized
+ * `BlockChrome` the object blocks and legacy nodes use. It renders as a sibling
+ * *overlay* of the structural callout box (in the block wrapper, not inside the
+ * content) and a `display:contents` host stops a chrome press from reaching the
+ * block's pointer-down (which would re-place the caret).
  */
 import {
   BlockChrome,
   ChromeSelect,
   type ChromeSelectOption,
 } from "@quanghuy1242/idco-ui";
-import type { EditorStore, NodeId, TextLeafNode } from "../core";
+import type { EditorStore, NodeId, StructuralNode } from "../core";
 
 /** Callout tones, matching the `Alert` component (info / success / warning / error). */
 const CALLOUT_TONES: readonly ChromeSelectOption<string>[] = [
@@ -40,7 +39,7 @@ const CALLOUT_TONES: readonly ChromeSelectOption<string>[] = [
 const contentsStyle = { display: "contents" } as const;
 
 export function CalloutChrome(props: {
-  readonly node: TextLeafNode;
+  readonly node: StructuralNode;
   readonly store: EditorStore;
 }) {
   const { node, store } = props;

@@ -611,9 +611,7 @@ export function ariaLabelForLeaf(node: TextLeafNode): string {
         ? "List item"
         : node.type === "quote"
           ? "Quote"
-          : node.type === "callout"
-            ? "Callout"
-            : "Paragraph";
+          : "Paragraph";
   const preview = node.content.text.trim().slice(0, 40);
   return preview ? `${role}: ${preview}` : `${role}, empty`;
 }

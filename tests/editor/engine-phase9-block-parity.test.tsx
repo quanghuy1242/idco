@@ -4,8 +4,9 @@
  *
  * - Block `indent` persists through the compat round-trip and is applied by the
  *   resting render (it was editor-session-only before).
- * - `callout` is authorable from the block-type command and renders as a styled
- *   `<aside role="note">` at rest, with its `tone` carried onto a data attribute.
+ * - `callout` is a structural container (docs/019): inserted via `insert-callout`,
+ *   it holds block children and renders as a styled `<aside role="note">` at rest,
+ *   with its `tone` carried onto a data attribute.
  *
  * The code-block highlighting + language work is verified by the object lifecycle
  * e2e (tests/e2e/engine-objects.spec.ts), which owns the resting↔live no-shift
@@ -19,6 +20,7 @@ import {
   createIdAllocator,
   createEditorStore,
   editorSnapshotFromCompat,
+  makeStructuralNode,
   makeTextNode,
   pointAtOffset,
   segmentText,
@@ -70,7 +72,11 @@ describe("§2.8 block indent persists through the compat round-trip", () => {
     expect(findChild(out, "heading")?.indent).toBe(1);
     expect(findChild(out, "quote")?.indent).toBe(3);
     expect(findChild(out, "listitem")?.indent).toBe(1);
-    expect(findChild(out, "callout")?.indent).toBe(2);
+    // A callout is now a structural container; a legacy inline-content callout
+    // wraps its text (and its indent) in an inner paragraph, so the indent rides
+    // that child, not the container.
+    const callout = findChild(out, "callout");
+    expect(callout?.children?.[0]?.indent).toBe(2);
   });
 
   it("does not invent an indent attr when none was set", () => {
@@ -95,15 +101,24 @@ describe("§2.8 indent + callout in the resting render", () => {
       id: allocator.createNodeId(),
       type: "paragraph",
     });
-    const callout = makeTextNode({
-      attrs: { tone: "warning" },
+    const calloutInner = makeTextNode({
       content: allocator.createTextSlice("heads up"),
+      id: allocator.createNodeId(),
+      type: "paragraph",
+    });
+    const callout = makeStructuralNode({
+      attrs: { tone: "warning" },
+      children: [calloutInner.id],
       id: allocator.createNodeId(),
       type: "callout",
     });
     const snapshot: EditorDocumentSnapshot = {
       body: {
-        blocks: { [para.id]: para, [callout.id]: callout },
+        blocks: {
+          [para.id]: para,
+          [callout.id]: callout,
+          [calloutInner.id]: calloutInner,
+        },
         order: [para.id, callout.id],
       },
       settings: {},
@@ -119,10 +134,49 @@ describe("§2.8 indent + callout in the resting render", () => {
     expect(aside?.getAttribute("data-engine-callout-tone")).toBe("warning");
     expect(aside?.textContent).toContain("heads up");
   });
+
+  it("numbers a list nested inside a callout (real <ol>, not bare <li>)", () => {
+    const allocator = createIdAllocator("idco_client_callout_ol");
+    const item1 = makeTextNode({
+      attrs: { listType: "number" },
+      content: allocator.createTextSlice("one"),
+      id: allocator.createNodeId(),
+      type: "listitem",
+    });
+    const item2 = makeTextNode({
+      attrs: { listType: "number" },
+      content: allocator.createTextSlice("two"),
+      id: allocator.createNodeId(),
+      type: "listitem",
+    });
+    const callout = makeStructuralNode({
+      attrs: { tone: "info" },
+      children: [item1.id, item2.id],
+      id: allocator.createNodeId(),
+      type: "callout",
+    });
+    const snapshot: EditorDocumentSnapshot = {
+      body: {
+        blocks: {
+          [callout.id]: callout,
+          [item1.id]: item1,
+          [item2.id]: item2,
+        },
+        order: [callout.id],
+      },
+      settings: {},
+      version: 1,
+    };
+    const { container } = render(<RestingDocument snapshot={snapshot} />);
+    // The nested run is grouped into one ordered list, so the browser numbers it.
+    const ol = container.querySelector<HTMLElement>("aside ol");
+    expect(ol?.getAttribute("data-engine-resting-list")).toBe("number");
+    expect(ol?.querySelectorAll("li")).toHaveLength(2);
+  });
 });
 
-describe("§2.8 callout is authorable from the block-type command", () => {
-  it("turns a paragraph into a callout leaf via set-block-type", () => {
+describe("§2.8 callout is inserted as a structural container", () => {
+  it("insert-callout wraps an empty paragraph and lands the caret inside", () => {
     const allocator = createIdAllocator("idco_client_callout");
     const para = makeTextNode({
       content: allocator.createTextSlice("note me"),
@@ -140,7 +194,7 @@ describe("§2.8 callout is authorable from the block-type command", () => {
     const caret = pointAtOffset(
       para.id,
       store.requireTextNode(para.id).content,
-      0,
+      store.requireTextNode(para.id).content.text.length,
     );
     store.dispatch({
       origin: "local",
@@ -148,20 +202,138 @@ describe("§2.8 callout is authorable from the block-type command", () => {
       steps: [],
     });
 
-    store.command({ blockType: "callout", type: "set-block-type" });
-    expect(store.requireTextNode(para.id).type).toBe("callout");
-    expect(store.query({ type: "current-block-type" })).toBe("callout");
+    store.command({ type: "insert-callout" });
 
-    // The tone is configurable through `set-block-attr` (the floating chrome).
-    store.command({ key: "tone", type: "set-block-attr", value: "warning" });
-    expect(store.requireTextNode(para.id).attrs?.tone).toBe("warning");
+    const calloutId = store
+      .toSnapshot()
+      .body.order.find((id) => store.getNode(id)?.kind === "structural");
+    const callout = calloutId ? store.getNode(calloutId) : undefined;
+    expect(callout?.kind).toBe("structural");
+    expect(callout?.type).toBe("callout");
+    // The callout holds exactly one inner paragraph, and the caret lands in it.
+    const innerId =
+      callout?.kind === "structural" ? callout.children[0] : undefined;
+    expect(innerId && store.getNode(innerId)?.type).toBe("paragraph");
+    const focusNode =
+      store.selection?.type === "text" ? store.selection.focus.node : null;
+    expect(focusNode).toBe(innerId);
+
+    // The tone is configurable through `set-block-attr` on the container (the
+    // floating chrome's tone gear).
+    store.command({
+      key: "tone",
+      node: calloutId!,
+      type: "set-block-attr",
+      value: "warning",
+    });
+    expect(calloutId && store.getNode(calloutId)?.attrs?.tone).toBe("warning");
+  });
+
+  it("set-block-type covers a multi-block selection nested inside a callout", () => {
+    // A selection spanning two leaves *inside* a container must resolve through
+    // document order, not the top-level body order (which omits nested leaves) —
+    // otherwise the list/heading/quote toggle silently no-ops on callout content.
+    const allocator = createIdAllocator("idco_client_nested_toggle");
+    const lineA = makeTextNode({
+      content: allocator.createTextSlice("first"),
+      id: allocator.createNodeId(),
+      type: "paragraph",
+    });
+    const lineB = makeTextNode({
+      content: allocator.createTextSlice("second"),
+      id: allocator.createNodeId(),
+      type: "paragraph",
+    });
+    const callout = makeStructuralNode({
+      attrs: { tone: "info" },
+      children: [lineA.id, lineB.id],
+      id: allocator.createNodeId(),
+      type: "callout",
+    });
+    const store = createEditorStore({
+      allocator,
+      snapshot: {
+        body: {
+          blocks: {
+            [callout.id]: callout,
+            [lineA.id]: lineA,
+            [lineB.id]: lineB,
+          },
+          order: [callout.id],
+        },
+        settings: {},
+        version: 1,
+      },
+    });
+    // Select from the start of the first inner line to the end of the second.
+    store.dispatch({
+      origin: "local",
+      selectionAfter: {
+        anchor: pointAtOffset(lineA.id, lineA.content, 0),
+        focus: pointAtOffset(lineB.id, lineB.content, lineB.content.text.length),
+        type: "text",
+      },
+      steps: [],
+    });
+
+    store.command({
+      blockType: "listitem",
+      listType: "bullet",
+      type: "set-block-type",
+    });
+
+    expect(store.requireTextNode(lineA.id).type).toBe("listitem");
+    expect(store.requireTextNode(lineB.id).type).toBe("listitem");
+    expect(store.requireTextNode(lineA.id).attrs?.listType).toBe("bullet");
+    expect(store.requireTextNode(lineB.id).attrs?.listType).toBe("bullet");
+  });
+
+  it("Enter continues a numbered list item with the same flavour and indent", () => {
+    const allocator = createIdAllocator("idco_client_split_list");
+    const item = makeTextNode({
+      attrs: { indent: 1, listType: "number" },
+      content: allocator.createTextSlice("one"),
+      id: allocator.createNodeId(),
+      type: "listitem",
+    });
+    const store = createEditorStore({
+      allocator,
+      snapshot: {
+        body: { blocks: { [item.id]: item }, order: [item.id] },
+        settings: {},
+        version: 1,
+      },
+    });
+    const end = pointAtOffset(item.id, item.content, item.content.text.length);
+    store.dispatch({
+      origin: "local",
+      selectionAfter: { anchor: end, focus: end, type: "text" },
+      steps: [],
+    });
+
+    store.command({ type: "split-block" });
+
+    // The new block the caret landed in is a numbered list item, not a bullet.
+    const focusId =
+      store.selection?.type === "text" ? store.selection.focus.node : null;
+    expect(focusId).not.toBe(item.id);
+    const created = focusId ? store.requireTextNode(focusId) : null;
+    expect(created?.type).toBe("listitem");
+    expect(created?.attrs?.listType).toBe("number");
+    expect(created?.attrs?.indent).toBe(1);
   });
 });
 
 function twoBlockStore() {
   const allocator = createIdAllocator("idco_client_chrome");
-  const a = makeTextNode({
+  const inner = makeTextNode({
     content: allocator.createTextSlice("first"),
+    id: allocator.createNodeId(),
+    type: "paragraph",
+  });
+  const a = makeStructuralNode({
+    attrs: { tone: "info" },
+    children: [inner.id],
     id: allocator.createNodeId(),
     type: "callout",
   });
@@ -173,7 +345,10 @@ function twoBlockStore() {
   const store = createEditorStore({
     allocator,
     snapshot: {
-      body: { blocks: { [a.id]: a, [b.id]: b }, order: [a.id, b.id] },
+      body: {
+        blocks: { [a.id]: a, [b.id]: b, [inner.id]: inner },
+        order: [a.id, b.id],
+      },
       settings: {},
       version: 1,
     },
@@ -204,7 +379,7 @@ describe("§2.8 standardized block-chrome commands", () => {
       type: "set-block-attr",
       value: "error",
     });
-    expect(store.requireTextNode(a.id).attrs?.tone).toBe("error");
+    expect(store.getNode(a.id)?.attrs?.tone).toBe("error");
     expect(store.requireTextNode(b.id).attrs?.tone).toBeUndefined();
   });
 });
