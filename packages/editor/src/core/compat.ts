@@ -315,29 +315,22 @@ function importCompatNode(
     return [id];
   }
   /*
-   * Structural nodes:
-   *
-   * Lists are not flattened into top-level blocks. They keep child ids so the
-   * document remains a real tree. The top-level `order` array returned by this
-   * module is therefore only the body index; nested order lives on each
-   * structural node's `children` array.
+   * Lists are flat-by-design (docs/018 §2.10): a `list` container is flattened to
+   * top-level `listitem` text leaves carrying `listType` (bullet/number) plus a
+   * depth `indent`, never a structural `list` node. Flattening is what lets an
+   * imported list render on the editor surface (a structural `list` would show the
+   * `[list]` placeholder) and keeps `compileIndentItem`'s structural-nesting
+   * branch unreachable-by-design — the only producer of a structural `list` is now
+   * a hand-built fixture, never a user-creatable or imported document.
    */
   if (node.type === "list" || node.type === "editor-list") {
-    const children = (node.children ?? []).flatMap((child) =>
-      importCompatNode(child, state),
-    );
-    state.blocks.set(
-      id,
-      makeStructuralNode({
-        attrs: pickAttrs(node, ["listType", "start", "tag"]),
-        children,
-        id,
-        type: "list",
-      }),
-    );
-    return [id];
+    return flattenCompatList(node, state, 0);
   }
   if (node.type === "listitem" || node.type === "editor-listitem") {
+    // A `listitem` reached directly (not via a `list` parent) is already a flat
+    // top-level item; carry its own `listType` if one is set, else it defaults to
+    // bullet at render. A block-bearing bare item keeps the structural shape (a
+    // defensive edge — lists themselves never reach here, they flatten above).
     if (hasBlockChildren(node.children)) {
       const children = importListItemChildren(node.children, state);
       state.blocks.set(
@@ -357,7 +350,7 @@ function importCompatNode(
     state.blocks.set(
       id,
       makeTextNode({
-        attrs: pickAttrs(node, ["checked", "indent", "value"]),
+        attrs: pickAttrs(node, ["checked", "indent", "listType", "value"]),
         content,
         id,
         marks: marksFromInlineChildren(node.children, content, id),
@@ -721,6 +714,81 @@ function importListItemChildren(
       }),
     );
     ids.unshift(textId);
+  }
+  return ids;
+}
+
+/** The two list flavours the flat model renders (docs/018 §2.10). */
+type CompatListType = "bullet" | "number";
+
+function isCompatList(node: RichTextCompatNode): boolean {
+  return node.type === "list" || node.type === "editor-list";
+}
+
+/** Resolve a legacy `list` node's flavour from its `listType`/`tag` (default bullet). */
+function compatListType(node: RichTextCompatNode): CompatListType {
+  if (node.listType === "number" || node.tag === "ol") return "number";
+  return "bullet";
+}
+
+/**
+ * Flatten a legacy `list` into top-level `listitem` text leaves (docs/018 §2.10).
+ * Each item carries the list's `listType` and a `depth` indent; a nested list
+ * inside an item flattens into the following items at `depth + 1`, so the visual
+ * nesting survives without a structural `list` node (one level per depth).
+ */
+function flattenCompatList(
+  node: RichTextCompatNode,
+  state: BuildState,
+  depth: number,
+): NodeId[] {
+  const listType = compatListType(node);
+  const ids: NodeId[] = [];
+  for (const child of node.children ?? []) {
+    if (isCompatList(child)) {
+      ids.push(...flattenCompatList(child, state, depth + 1));
+    } else if (child.type === "listitem" || child.type === "editor-listitem") {
+      ids.push(...flattenCompatListItem(child, state, depth, listType));
+    } else {
+      // A stray non-item, non-list child: import it normally rather than drop it.
+      ids.push(...importCompatNode(child, state));
+    }
+  }
+  return ids;
+}
+
+/** One flattened list item: its inline text leaf, then any nested lists after it. */
+function flattenCompatListItem(
+  item: RichTextCompatNode,
+  state: BuildState,
+  depth: number,
+  listType: CompatListType,
+): NodeId[] {
+  const inlineChildren = (item.children ?? []).filter(
+    (child) => !isCompatList(child),
+  );
+  const nestedLists = (item.children ?? []).filter(isCompatList);
+  const id = nodeId(item, state.allocator);
+  const content = state.allocator.createTextSlice(
+    textFromInlineChildren(inlineChildren),
+  );
+  state.blocks.set(
+    id,
+    makeTextNode({
+      attrs: {
+        ...pickAttrs(item, ["checked", "value"]),
+        listType,
+        ...(depth > 0 ? { indent: depth } : {}),
+      },
+      content,
+      id,
+      marks: marksFromInlineChildren(inlineChildren, content, id),
+      type: "listitem",
+    }),
+  );
+  const ids: NodeId[] = [id];
+  for (const sublist of nestedLists) {
+    ids.push(...flattenCompatList(sublist, state, depth + 1));
   }
   return ids;
 }

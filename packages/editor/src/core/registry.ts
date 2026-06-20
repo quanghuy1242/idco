@@ -226,14 +226,16 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
       },
       status: statusValue(node.status) ?? "ready",
     }),
+    // Always bakes — even with no target yet — so a freshly-inserted post-ref
+    // renders its (empty-state) block and can then be configured from the gear
+    // (docs/018 §2.11 follow-up: insert-then-configure). A truly empty reference
+    // renders nothing in the published blog via the content-renderer's own path.
     (data) => {
       const record = isJsonObject(data) ? data : {};
-      const postId = stringValue(record.postId) ?? "";
-      if (postId.length === 0) return null;
       return {
         kind: "post-ref",
         payload: {
-          postId,
+          postId: stringValue(record.postId) ?? "",
           title: stringValue(record.title) ?? "",
           url: stringValue(record.url) ?? "",
         },
@@ -250,13 +252,16 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
       },
       status: statusValue(node.status) ?? "ready",
     }),
+    // Always bakes so a freshly-inserted embed renders an empty-state prompt and
+    // is then configured from the gear (insert-then-configure, docs/018 §2.11).
     (data) => {
       const record = isJsonObject(data) ? data : {};
-      const url = stringValue(record.url) ?? "";
-      if (url.length === 0) return null;
       return {
         kind: "embed",
-        payload: { title: stringValue(record.title) ?? "", url },
+        payload: {
+          title: stringValue(record.title) ?? "",
+          url: stringValue(record.url) ?? "",
+        },
       };
     },
     (data) => stringValue((isJsonObject(data) ? data : {}).title) ?? "",

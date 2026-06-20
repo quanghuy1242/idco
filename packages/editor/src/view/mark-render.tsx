@@ -63,30 +63,65 @@ function wrapMark(
   key: string,
   linkMode: LinkMode,
 ): ReactNode {
-  const common = { "data-engine-mark": mark.kind, key };
+  // `key` is passed directly to each element (never spread): React 19 warns when a
+  // spread object carries a `key`, and these nested mark wrappers each take one.
+  const common = { "data-engine-mark": mark.kind };
   switch (mark.kind) {
     case "bold":
-      return <strong {...common}>{child}</strong>;
+      return (
+        <strong key={key} {...common}>
+          {child}
+        </strong>
+      );
     case "italic":
-      return <em {...common}>{child}</em>;
+      return (
+        <em key={key} {...common}>
+          {child}
+        </em>
+      );
     case "underline":
-      return <u {...common}>{child}</u>;
+      return (
+        <u key={key} {...common}>
+          {child}
+        </u>
+      );
     case "strikethrough":
-      return <s {...common}>{child}</s>;
+      return (
+        <s key={key} {...common}>
+          {child}
+        </s>
+      );
     case "code":
-      return <code {...common}>{child}</code>;
+      return (
+        <code key={key} {...common}>
+          {child}
+        </code>
+      );
     case "highlight":
-      return <mark {...common}>{child}</mark>;
+      return (
+        <mark key={key} {...common}>
+          {child}
+        </mark>
+      );
     case "subscript":
-      return <sub {...common}>{child}</sub>;
+      return (
+        <sub key={key} {...common}>
+          {child}
+        </sub>
+      );
     case "superscript":
-      return <sup {...common}>{child}</sup>;
+      return (
+        <sup key={key} {...common}>
+          {child}
+        </sup>
+      );
     case "link":
       // In the editor the link is inert: no `href` (so a click never navigates
       // away from the editing surface) and mousedown is suppressed so it cannot
       // steal focus from the EditContext host. The reader renders a real link.
       return (
         <a
+          key={key}
           {...common}
           data-engine-mark-href={markHref(mark)}
           data-engine-mark-id={mark.id}
@@ -105,7 +140,7 @@ function wrapMark(
     case "comment":
     case "glossary":
       return (
-        <span {...common} data-engine-mark-id={mark.id}>
+        <span key={key} {...common} data-engine-mark-id={mark.id}>
           {child}
         </span>
       );

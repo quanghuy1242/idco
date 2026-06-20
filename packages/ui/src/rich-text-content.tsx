@@ -223,8 +223,16 @@ export function RichTextEmbed({
       <iframe
         className="aspect-video w-full"
         loading="lazy"
-        referrerPolicy="no-referrer"
-        sandbox="allow-scripts allow-popups allow-forms allow-presentation"
+        // Send the origin (not the full URL): providers like YouTube reject the
+        // embed (player "Error 153") when there is no referrer to authorize the
+        // embedding domain, but the path stays private.
+        referrerPolicy="strict-origin-when-cross-origin"
+        // `allow-same-origin` lets the *third-party* provider (YouTube, etc.)
+        // reach its own origin's storage/caches so its player actually
+        // initializes — without it the frame renders black and logs `caches`/
+        // player errors. Paired with cross-origin `src` it only grants the frame
+        // access to the provider's origin, never the host app's.
+        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-presentation"
         src={url}
         title={title ?? "Embedded content"}
       />

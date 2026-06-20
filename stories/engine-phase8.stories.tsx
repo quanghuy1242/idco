@@ -42,8 +42,14 @@ const PAYLOAD_SAMPLE = {
         ],
         type: "paragraph",
       },
-      { fields: { videoID: "dQw4w9WgXcQ" }, type: "youtube" },
-      { type: "upload", value: { alt: "A diagram", url: "/diagram.png" } },
+      { fields: { videoID: "jNQXAC9IVRw" }, type: "youtube" },
+      {
+        type: "upload",
+        value: {
+          alt: "A scenic landscape",
+          url: "https://picsum.photos/seed/idco-diagram/800/450",
+        },
+      },
       { type: "horizontalrule" },
       {
         children: [

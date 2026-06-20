@@ -15,16 +15,24 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type RefObject,
 } from "react";
 import {
   AnchoredPopover,
   BlockChrome,
   Button,
+  ChromeButton,
   ChromeSelect,
   type ChromeSelectOption,
   CodeEditor,
   type CodeEditorLanguage,
   Input,
+  RichTextEmbed,
+  RichTextMediaFigure,
+  RichTextPostReference,
+  RichTextTable,
+  RichTextTableCell,
+  RichTextTableRow,
 } from "@quanghuy1242/idco-ui";
 import {
   type EditorStore,
@@ -123,6 +131,9 @@ export function EngineObjectBlock(props: {
   // editor opens at exactly this height so the block box does not shift (AC3).
   const restHeightRef = useRef(0);
   const containerRef = useRef<HTMLElement | null>(null);
+  // The settings popover anchors to the chrome gear (not the whole block), so it
+  // opens beside the gear exactly like the callout/code chrome menus do.
+  const gearRef = useRef<HTMLSpanElement | null>(null);
   // A *stable* ref callback. An inline `ref={(el) => …}` gets a new identity each
   // render, so React calls it with null then the element on every re-render —
   // which nulls the popover's `triggerRef` exactly when the block re-renders
@@ -213,10 +224,14 @@ export function EngineObjectBlock(props: {
             }
           : undefined
       }
+      // Only an in-place object (code) activates on a body click — editing its
+      // text in place is the natural gesture. A popover object (media/embed/…)
+      // renders real content (an <img>/<iframe>) that swallows clicks over its
+      // box, so it is configured from the gear in the chrome instead (docs/018
+      // §2.11 follow-up), never by clicking the body.
       onMouseDown={
-        live
-          ? undefined
-          : (event) => {
+        !live && !usesPopover
+          ? (event) => {
               event.preventDefault();
               const baked = (event.currentTarget as HTMLElement).querySelector(
                 "[data-engine-object-baked]",
@@ -225,12 +240,14 @@ export function EngineObjectBlock(props: {
                 baked instanceof HTMLElement ? baked.offsetHeight : 0;
               store.activateObject(node.id);
             }
+          : undefined
       }
       ref={bindContainer}
       style={objectBlockStyle}
     >
       <ObjectChrome
         focusInPlace={focusInPlace}
+        gearRef={gearRef}
         menuOpenRef={menuOpenRef}
         node={node}
         onRemove={removeBlock}
@@ -253,7 +270,8 @@ export function EngineObjectBlock(props: {
           onOpenChange={(open) => {
             if (!open) store.deactivateObject(node.id);
           }}
-          triggerRef={containerRef}
+          placement="bottom end"
+          triggerRef={gearRef}
         >
           {popoverContent}
         </AnchoredPopover>
@@ -284,10 +302,11 @@ function ObjectChrome(props: {
   readonly node: ObjectNode;
   readonly store: EditorStore;
   readonly menuOpenRef: { current: boolean };
+  readonly gearRef: RefObject<HTMLSpanElement | null>;
   readonly focusInPlace: () => void;
   readonly onRemove: () => void;
 }) {
-  const { node, store, menuOpenRef, focusInPlace, onRemove } = props;
+  const { node, store, menuOpenRef, gearRef, focusInPlace, onRemove } = props;
   const meta = OBJECT_CHROME_META[node.type] ?? {
     icon: "Square",
     label: node.type,
@@ -295,7 +314,13 @@ function ObjectChrome(props: {
   return (
     <div onMouseDown={(event) => event.stopPropagation()} style={contentsStyle}>
       <BlockChrome
-        actions={renderObjectConfig(node, store, menuOpenRef, focusInPlace)}
+        actions={renderObjectConfig(
+          node,
+          store,
+          menuOpenRef,
+          focusInPlace,
+          gearRef,
+        )}
         icon={meta.icon}
         label={meta.label}
         onRemove={onRemove}
@@ -304,34 +329,63 @@ function ObjectChrome(props: {
   );
 }
 
-/** Per-type chrome config control; code carries a language selector. */
+/**
+ * Object types with no configurable settings — their gear is hidden (they still
+ * get the badge + delete). `table` has no inline config because cell-by-cell
+ * editing is a deferred workstream (docs/018 §2.13/§2.14).
+ */
+const UNCONFIGURABLE_OBJECTS = new Set(["divider", "table", "editor-table"]);
+
+/**
+ * Per-type chrome config control. Code carries an inline language selector;
+ * everything else opens its settings popover from a gear button (docs/018 §2.11
+ * follow-up) — the standardized chrome path. The gear (not a body click) is what
+ * opens media/embed settings, because a rendered `<img>`/`<iframe>` swallows
+ * clicks over its own box, so click-to-activate could never reach them.
+ */
 function renderObjectConfig(
   node: ObjectNode,
   store: EditorStore,
   menuOpenRef: { current: boolean },
   focusInPlace: () => void,
+  gearRef: RefObject<HTMLSpanElement | null>,
 ) {
-  if (node.type !== "code-block") return null;
-  const language = toCodeLanguage(stringField(asRecord(node.data), "language"));
+  if (node.type === "code-block") {
+    const language = toCodeLanguage(
+      stringField(asRecord(node.data), "language"),
+    );
+    return (
+      <ChromeSelect
+        label="Code language"
+        menuClassName="w-40"
+        onChange={(value) => {
+          const record = currentObjectRecord(store, node.id);
+          store.command({
+            data: { ...record, language: value },
+            node: node.id,
+            type: "set-object-data",
+          });
+        }}
+        onOpenChange={(open) => {
+          menuOpenRef.current = open;
+          if (!open) requestAnimationFrame(focusInPlace);
+        }}
+        options={CODE_LANGUAGES}
+        value={language}
+      />
+    );
+  }
+  if (UNCONFIGURABLE_OBJECTS.has(node.type)) return null;
+  // The gear is the popover's anchor (via `gearRef`), so the settings open beside
+  // it — the same placement as the callout/code chrome (docs/018 §2.11 follow-up).
   return (
-    <ChromeSelect
-      label="Code language"
-      menuClassName="w-40"
-      onChange={(value) => {
-        const record = currentObjectRecord(store, node.id);
-        store.command({
-          data: { ...record, language: value },
-          node: node.id,
-          type: "set-object-data",
-        });
-      }}
-      onOpenChange={(open) => {
-        menuOpenRef.current = open;
-        if (!open) requestAnimationFrame(focusInPlace);
-      }}
-      options={CODE_LANGUAGES}
-      value={language}
-    />
+    <span ref={gearRef}>
+      <ChromeButton
+        icon="Settings"
+        label={`${OBJECT_LABELS[node.type] ?? node.type} settings`}
+        onPress={() => store.activateObject(node.id)}
+      />
+    </span>
   );
 }
 
@@ -523,6 +577,20 @@ function asRecord(value: unknown): Record<string, JsonValue> {
 function stringField(record: Record<string, JsonValue>, key: string): string {
   const value = record[key];
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * Convert a media/embed URL into an iframe-embeddable form. YouTube watch/share
+ * links cannot be framed directly, so they are rewritten to the `/embed/<id>`
+ * player; any other `http(s)` URL is returned unchanged. Returns "" when nothing
+ * is embeddable, so the caller falls back to a link placeholder.
+ */
+function toEmbeddableUrl(url: string): string {
+  if (!/^https?:\/\//i.test(url)) return "";
+  const youtube = url.match(
+    /(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([\w-]{6,})/i,
+  );
+  return youtube ? `https://www.youtube.com/embed/${youtube[1]}` : url;
 }
 
 /** The object's current data as a record, read live from the store. */
@@ -722,22 +790,51 @@ registerNodeView({
     const payload = asRecord(baked.payload);
     const src = stringField(payload, "src");
     const caption = stringField(payload, "caption");
+    // Render the real image (the same `RichTextMediaFigure` the reader uses, so
+    // the editor's at-rest media matches the published page); fall back to a
+    // labelled placeholder only when no source is set yet.
     return (
-      <figure data-engine-object-baked="media" style={mediaBakedStyle}>
-        <div style={mediaThumbStyle}>{src ? `🖼 ${src}` : "🖼 media"}</div>
-        {caption ? <figcaption>{caption}</figcaption> : null}
-      </figure>
+      <div data-engine-object-baked="media">
+        {src ? (
+          <RichTextMediaFigure
+            alt={stringField(payload, "alt")}
+            caption={caption}
+            src={src}
+          />
+        ) : (
+          <figure style={mediaBakedStyle}>
+            <div style={mediaThumbStyle}>🖼 media</div>
+          </figure>
+        )}
+      </div>
     );
   },
   type: "media",
 });
 
 registerNodeView({
+  insert: {
+    createData: () => ({ title: "", url: "" }),
+    group: "Media",
+    keywords: ["video", "youtube", "embed", "iframe"],
+    label: "Embed",
+  },
   renderResting: ({ baked }) => {
     const payload = asRecord(baked.payload);
+    const url = stringField(payload, "url");
+    const embedUrl = toEmbeddableUrl(url);
+    // Render the real embed (the same `RichTextEmbed` iframe the reader uses)
+    // when the URL is embeddable; a freshly-inserted embed has no URL yet, so it
+    // shows a labelled prompt until one is set from the gear.
     return (
-      <div data-engine-object-baked="embed" style={objectStatusStyle}>
-        🔗 {stringField(payload, "title") || stringField(payload, "url")}
+      <div data-engine-object-baked="embed">
+        {embedUrl ? (
+          <RichTextEmbed title={stringField(payload, "title")} url={embedUrl} />
+        ) : (
+          <div style={objectStatusStyle}>
+            🔗 {stringField(payload, "title") || url || "Add an embed URL ⚙"}
+          </div>
+        )}
       </div>
     );
   },
@@ -745,11 +842,26 @@ registerNodeView({
 });
 
 registerNodeView({
+  insert: {
+    createData: () => ({ postId: "", title: "", url: "" }),
+    group: "Blocks",
+    keywords: ["post", "reference", "link", "related"],
+    label: "Linked post",
+  },
   renderResting: ({ baked }) => {
     const payload = asRecord(baked.payload);
+    const title = stringField(payload, "title");
+    const postId = stringField(payload, "postId");
+    const url = stringField(payload, "url");
+    // Render the real post-reference card (the same `RichTextPostReference` the
+    // reader uses); a card with no target yet still reads as a linked-post block.
     return (
-      <div data-engine-object-baked="post-ref" style={objectStatusStyle}>
-        📄 {stringField(payload, "title") || stringField(payload, "postId")}
+      <div data-engine-object-baked="post-ref">
+        <RichTextPostReference
+          href={url || undefined}
+          label={title || postId || "Linked post ⚙"}
+          postId={postId || undefined}
+        />
       </div>
     );
   },
@@ -777,4 +889,137 @@ registerNodeView({
     />
   ),
   type: "divider",
+});
+
+/** Flatten a baked node's nested text into a plain string (cell/inline content). */
+function inlineText(node: JsonValue): string {
+  const record = asRecord(node);
+  const text = stringField(record, "text");
+  if (text) return text;
+  const children = Array.isArray(record.children) ? record.children : [];
+  return children.map(inlineText).join("");
+}
+
+/** Render a baked table read-only via the shared reader table primitives. */
+function renderBakedTable(payload: Record<string, JsonValue>) {
+  const rows = Array.isArray(payload.children) ? payload.children : [];
+  const colWidths = Array.isArray(payload.colWidths)
+    ? payload.colWidths.filter((w): w is number => typeof w === "number")
+    : undefined;
+  return (
+    <div data-engine-object-baked="table">
+      <RichTextTable
+        colWidths={colWidths}
+        layout={stringField(payload, "layout") || undefined}
+        numbered={payload.showRowNumbers === true}
+      >
+        {rows.map((row, ri) => {
+          const cells = Array.isArray(asRecord(row).children)
+            ? (asRecord(row).children as JsonValue[])
+            : [];
+          return (
+            <RichTextTableRow key={`r${ri}`}>
+              {cells.map((cell, ci) => {
+                const cellRecord = asRecord(cell);
+                const header =
+                  (typeof cellRecord.headerState === "number"
+                    ? cellRecord.headerState
+                    : 0) > 0;
+                return (
+                  <RichTextTableCell header={header} key={`c${ri}-${ci}`}>
+                    {inlineText(cell)}
+                  </RichTextTableCell>
+                );
+              })}
+            </RichTextTableRow>
+          );
+        })}
+      </RichTextTable>
+    </div>
+  );
+}
+
+/** A default table row of text cells (the Insert-menu seed). */
+function defaultTableRow(texts: readonly string[], header: boolean): JsonValue {
+  return {
+    children: texts.map((text) => ({
+      children: text ? [{ text, type: "text" }] : [],
+      headerState: header ? 3 : 0,
+      type: "tablecell",
+    })),
+    type: "tablerow",
+  };
+}
+
+// The owned `table` is an opaque object that round-trips and renders read-only
+// (docs/018 §2.13/§2.14): cell-by-cell editing is a separate, deferred workstream.
+// It still renders its real grid (not a placeholder) and is insertable.
+const tableNodeView = {
+  renderResting: ({ baked }: { baked: { payload: JsonValue } }) =>
+    renderBakedTable(asRecord(baked.payload)),
+};
+registerNodeView({
+  insert: {
+    createData: () => ({
+      children: [
+        defaultTableRow(["Column 1", "Column 2"], true),
+        defaultTableRow(["", ""], false),
+      ],
+    }),
+    group: "Blocks",
+    keywords: ["table", "grid", "rows", "columns"],
+    label: "Table",
+  },
+  renderResting: tableNodeView.renderResting,
+  type: "table",
+});
+// New tables serialize as `editor-table`; render it identically.
+registerNodeView({
+  renderResting: tableNodeView.renderResting,
+  type: "editor-table",
+});
+
+/** The card styling for the resting table-of-contents marker. */
+const tocBoxStyle = {
+  background:
+    "color-mix(in oklab, var(--color-base-content, currentColor) 4%, transparent)",
+  border:
+    "1px solid color-mix(in oklab, var(--color-base-content, currentColor) 18%, transparent)",
+  borderRadius: "var(--radius-box, 0.5rem)",
+  padding: "8px 12px",
+} as const;
+
+// The table-of-contents is a positional marker: its entries are derived from the
+// document's headings at publish time (the reader has the whole document; this
+// per-node view does not), so the editor renders its title + a hint while the
+// real list renders in the reader / the TOC rail (docs/018 §2.14).
+registerNodeView({
+  insert: {
+    createData: () => ({
+      maxLevel: 4,
+      minLevel: 2,
+      numbering: "none",
+      placement: "inline",
+      side: "right",
+      style: "default",
+      title: "On this page",
+    }),
+    group: "Blocks",
+    keywords: ["toc", "contents", "outline", "headings"],
+    label: "Table of contents",
+  },
+  renderResting: ({ baked }) => {
+    const payload = asRecord(baked.payload);
+    return (
+      <div data-engine-object-baked="table-of-contents" style={tocBoxStyle}>
+        <div style={{ fontWeight: 600 }}>
+          {stringField(payload, "title") || "On this page"}
+        </div>
+        <div style={{ fontSize: "0.85em", opacity: 0.6 }}>
+          Generated from this page's headings
+        </div>
+      </div>
+    );
+  },
+  type: "table-of-contents",
 });

@@ -111,8 +111,11 @@ function blockTypeKey(choice: { blockType: string; tag?: string }): string {
 const INSERT_ICONS: Record<string, string> = {
   "code-block": "Code",
   divider: "Minus",
+  embed: "ExternalLink",
   media: "Image",
+  "post-ref": "FileText",
   table: "Table",
+  "table-of-contents": "List",
 };
 
 /**
@@ -194,6 +197,12 @@ export function EditorToolbar(props: {
   // (a one-way `set-block-type` to listitem could turn lists on but never off).
   const blockType = store.query({ type: "current-block-type" });
   const listActive = blockType === "listitem";
+  // The list flavour of the current item (null when not a list): a bulleted item
+  // reads as "bullet", a numbered item as "number" (docs/018 §2.10). Each list
+  // button is an independent toggle on its own flavour.
+  const listType = store.query({ type: "current-list-type" });
+  const bulletActive = listType !== null && listType !== "number";
+  const numberActive = listType === "number";
   // The block-type control shows the *current* style by name (a labeled dropdown
   // like the legacy editor), not a generic icon. Heading level rides on the `tag`
   // attr, so match on both type and tag to tell Heading 1/2/3 apart.
@@ -339,15 +348,33 @@ export function EditorToolbar(props: {
         onClick={() =>
           run(() =>
             store.command({
-              blockType: listActive ? "paragraph" : "listitem",
+              blockType: bulletActive ? "paragraph" : "listitem",
+              listType: "bullet",
               type: "set-block-type",
             }),
           )
         }
         size="sm"
         square
-        tooltip="List"
-        variant={listActive ? "primary" : "ghost"}
+        tooltip="Bulleted list"
+        variant={bulletActive ? "primary" : "ghost"}
+      />
+      <Button
+        ariaLabel="Numbered list"
+        iconName="ListOrdered"
+        onClick={() =>
+          run(() =>
+            store.command({
+              blockType: numberActive ? "paragraph" : "listitem",
+              listType: "number",
+              type: "set-block-type",
+            }),
+          )
+        }
+        size="sm"
+        square
+        tooltip="Numbered list"
+        variant={numberActive ? "primary" : "ghost"}
       />
       <Button
         ariaLabel="Outdent"

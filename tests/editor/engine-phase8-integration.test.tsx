@@ -104,11 +104,14 @@ describe("resting/themed render", () => {
     const { container } = render(
       <RestingDocument snapshot={store.toSnapshot()} />,
     );
-    // The media view rendered (its baked figure), and the diagram src is shown.
+    // The media view rendered a real <img> (not the bare type word), so the
+    // editor at rest and the reader show the actual image (docs/018 §2.11).
     expect(
       container.querySelector("[data-engine-object-baked='media']"),
     ).not.toBeNull();
-    expect(container.textContent).toContain("/diagram.png");
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "/diagram.png",
+    );
   });
 });
 

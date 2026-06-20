@@ -13,7 +13,7 @@
  * the object resting render moves onto its L1 primitives. Until then this is the
  * shared resting primitive the editor uses.
  */
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import {
   AlertGlyph,
   alertToneClass,
@@ -149,7 +149,11 @@ export function RestingLeaf(props: { readonly node: TextLeafNode }) {
   }
 }
 
-function renderBlock(node: EditorNode, registry: BlockRegistry): ReactNode {
+function renderBlock(
+  node: EditorNode,
+  snapshot: EditorDocumentSnapshot,
+  registry: BlockRegistry,
+): ReactNode {
   if (node.kind === "text") return <RestingLeaf key={node.id} node={node} />;
   if (node.kind === "object") {
     return (
@@ -158,9 +162,90 @@ function renderBlock(node: EditorNode, registry: BlockRegistry): ReactNode {
       </div>
     );
   }
-  // Structural containers (list) are rendered by grouping below; a bare one here
-  // is a defensive fallback.
-  return null;
+  // A structural container renders its children recursively, so nothing under a
+  // structural node is hidden (docs/018 §2.11): a `list` becomes a real
+  // <ul>/<ol>, and a generic container (a quote/callout holding block children)
+  // stacks them. This mirrors the editor's recursive structural render so the two
+  // surfaces never disagree.
+  return renderRestingStructural(node, snapshot, registry);
+}
+
+/** Render a structural container and everything beneath it (docs/018 §2.11). */
+function renderRestingStructural(
+  node: Extract<EditorNode, { kind: "structural" }>,
+  snapshot: EditorDocumentSnapshot,
+  registry: BlockRegistry,
+): ReactNode {
+  const children = node.children
+    .map((id) => snapshot.body.blocks[id as NodeId])
+    .filter((child): child is EditorNode => Boolean(child));
+  if (node.type === "list") {
+    const items = children.map((child) =>
+      renderRestingListItem(child, snapshot, registry),
+    );
+    return node.attrs?.listType === "number" ? (
+      <ol
+        data-engine-resting-block={node.id}
+        data-engine-resting-list="number"
+        key={node.id}
+      >
+        {items}
+      </ol>
+    ) : (
+      <ul
+        data-engine-resting-block={node.id}
+        data-engine-resting-list="bullet"
+        key={node.id}
+      >
+        {items}
+      </ul>
+    );
+  }
+  return (
+    <div data-engine-resting-block={node.id} key={node.id}>
+      {children.map((child) => renderBlock(child, snapshot, registry))}
+    </div>
+  );
+}
+
+/** Render one item of a structural list: a real `<li>` plus any nested lists. */
+function renderRestingListItem(
+  node: EditorNode,
+  snapshot: EditorDocumentSnapshot,
+  registry: BlockRegistry,
+): ReactNode {
+  if (node.kind === "text" && node.type === "listitem") {
+    return (
+      <li
+        data-engine-resting-block={node.id}
+        key={node.id}
+        style={indentMarginStyle(node.attrs?.indent)}
+      >
+        {renderLeafMarks(node, "navigable")}
+      </li>
+    );
+  }
+  // A structural list item holds its own text leaf plus nested list(s); render the
+  // text inline and the nested lists after it, all inside one `<li>`.
+  if (node.kind === "structural" && node.type === "listitem") {
+    return (
+      <li data-engine-resting-block={node.id} key={node.id}>
+        {node.children
+          .map((id) => snapshot.body.blocks[id as NodeId])
+          .filter((child): child is EditorNode => Boolean(child))
+          .map((child) =>
+            child.kind === "text" && child.type === "listitem" ? (
+              <Fragment key={child.id}>
+                {renderLeafMarks(child, "navigable")}
+              </Fragment>
+            ) : (
+              renderBlock(child, snapshot, registry)
+            ),
+          )}
+      </li>
+    );
+  }
+  return renderBlock(node, snapshot, registry);
 }
 
 export type RestingDocumentProps = {
@@ -170,10 +255,19 @@ export type RestingDocumentProps = {
   readonly registry?: BlockRegistry;
 };
 
+/** The flat-list flavour of a node, or null when it is not a list item. */
+function restingListFlavour(node: EditorNode): "bullet" | "number" | null {
+  if (node.kind !== "text" || node.type !== "listitem") return null;
+  return node.attrs?.listType === "number" ? "number" : "bullet";
+}
+
 /**
- * Render a document snapshot as themed resting HTML. Consecutive `listitem`
- * leaves are wrapped in a single `<ul>` so the typography list styling applies;
- * everything else renders block by block.
+ * Render a document snapshot as themed resting HTML. Lists are flat-by-design
+ * (docs/018 §2.10): a run of consecutive `listitem` leaves of the same flavour is
+ * wrapped in one real `<ul>` (bullet) or `<ol>` (number), so the published page
+ * numbers an ordered list with the browser's own counter and matches the editor
+ * surface. A flavour change between adjacent items starts a new list; everything
+ * else renders block by block.
  */
 export function RestingDocument(props: RestingDocumentProps) {
   const {
@@ -183,24 +277,36 @@ export function RestingDocument(props: RestingDocumentProps) {
   } = props;
   const blocks: ReactNode[] = [];
   let listBuffer: ReactNode[] = [];
+  let listFlavour: "bullet" | "number" = "bullet";
   const flushList = (key: string) => {
     if (listBuffer.length === 0) return;
+    const items = listBuffer;
     blocks.push(
-      <ul data-engine-resting-list="" key={`ul-${key}`}>
-        {listBuffer}
-      </ul>,
+      listFlavour === "number" ? (
+        <ol data-engine-resting-list="number" key={`ol-${key}`}>
+          {items}
+        </ol>
+      ) : (
+        <ul data-engine-resting-list="bullet" key={`ul-${key}`}>
+          {items}
+        </ul>
+      ),
     );
     listBuffer = [];
   };
   for (const id of snapshot.body.order) {
     const node = snapshot.body.blocks[id as NodeId];
     if (!node) continue;
-    if (node.kind === "text" && node.type === "listitem") {
+    const flavour = restingListFlavour(node);
+    if (flavour && node.kind === "text") {
+      // A flavour switch (bullet→number) ends the current list and opens a new one.
+      if (listBuffer.length > 0 && flavour !== listFlavour) flushList(id);
+      listFlavour = flavour;
       listBuffer.push(<RestingLeaf key={node.id} node={node} />);
       continue;
     }
     flushList(id);
-    blocks.push(renderBlock(node, registry));
+    blocks.push(renderBlock(node, snapshot, registry));
   }
   flushList("end");
   return (

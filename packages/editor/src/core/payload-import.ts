@@ -146,7 +146,13 @@ function mapBlock(
   }
   if (type === "list") {
     // Flatten the list to its items (blog parity; deep nesting is a follow-on).
+    // Carry the list flavour (`listType: "bullet" | "number"`) onto each item so
+    // an ordered list survives the flatten and renders as numbers, not bullets
+    // (docs/018 §2.10 editor↔reader ordered-list drift). Lexical lists carry the
+    // flavour on `listType` (or the `ol`/`ul` `tag`); a check list maps to bullet.
     report.map("list");
+    const listType =
+      node.listType === "number" || node.tag === "ol" ? "number" : "bullet";
     for (const item of node.children ?? []) {
       const inline: PayloadNode[] = [];
       const nested: PayloadNode[] = [];
@@ -161,6 +167,7 @@ function mapBlock(
       out.push({
         ...item,
         children: inline,
+        listType,
         type: "listitem",
       } as RichTextCompatNode);
       // Flatten a nested list into following top-level items so its content is

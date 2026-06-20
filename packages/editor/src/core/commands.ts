@@ -74,6 +74,8 @@ export type EditorCommand =
       readonly blockType: TextLeafType;
       /** Optional heading tag (`h1`..`h6`) carried as a `tag` attr. */
       readonly tag?: string;
+      /** Optional list flavour (`bullet`/`number`) carried as a `listType` attr. */
+      readonly listType?: string;
     }
   | {
       readonly type: "set-block-attr";
@@ -122,6 +124,7 @@ export type EditorQuery =
   | { readonly type: "can-indent" }
   | { readonly type: "can-outdent" }
   | { readonly type: "current-block-type" }
+  | { readonly type: "current-list-type" }
   | { readonly type: "active-link-href" };
 
 type CommandCompiler = (
@@ -166,7 +169,12 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
       : null,
   "set-block-type": (store, command) =>
     command.type === "set-block-type"
-      ? compileSetBlockType(store, command.blockType, command.tag)
+      ? compileSetBlockType(
+          store,
+          command.blockType,
+          command.tag,
+          command.listType,
+        )
       : null,
   "set-link": (store, command) =>
     command.type === "set-link" ? compileLink(store, command.href) : null,
@@ -203,6 +211,8 @@ export function runQuery(
       return canOutdent(store);
     case "current-block-type":
       return currentBlockType(store);
+    case "current-list-type":
+      return currentListType(store);
     case "active-link-href":
       return activeLinkHref(store);
   }
@@ -774,6 +784,7 @@ function compileSetBlockType(
   store: EditorStore,
   blockType: TextLeafType,
   tag?: string,
+  listType?: string,
 ): TransactionBuilder | null {
   const range = textRange(store);
   if (!range) return null;
@@ -803,6 +814,22 @@ function compileSetBlockType(
         key: "tag",
         node: node.id,
         to: nextTag,
+        type: "set-node-attr",
+      });
+      changed = true;
+    }
+    // List flavour rides on the `listType` attr; set it for a list item (default
+    // bullet), clear it for any other block type so a list→paragraph toggle never
+    // leaves a stray `listType` behind (docs/018 §2.10).
+    const itemListType = node.attrs?.listType;
+    const nextListType =
+      blockType === "listitem" ? (listType ?? "bullet") : undefined;
+    if (itemListType !== nextListType) {
+      tr.push({
+        from: itemListType,
+        key: "listType",
+        node: node.id,
+        to: nextListType,
         type: "set-node-attr",
       });
       changed = true;
@@ -891,6 +918,21 @@ function compileBlockShortcut(
       key: "tag",
       node: node.id,
       to: nextTag,
+      type: "set-node-attr",
+    });
+  }
+  // A `- `/`* `/`1. ` prefix carries the list flavour onto the new item; a
+  // non-list prefix clears any stale `listType` (docs/018 §2.10).
+  const nextListType =
+    shortcut.blockType === "listitem"
+      ? (shortcut.listType ?? "bullet")
+      : undefined;
+  if (node.attrs?.listType !== nextListType) {
+    tr.push({
+      from: node.attrs?.listType,
+      key: "listType",
+      node: node.id,
+      to: nextListType,
       type: "set-node-attr",
     });
   }
@@ -1413,6 +1455,21 @@ function currentBlockType(store: EditorStore): TextLeafType | null {
   if (!range) return null;
   const node = store.getNode(range.start.node);
   return node && node.kind === "text" ? node.type : null;
+}
+
+/**
+ * The list flavour of the current block, or null when it is not a list item
+ * (docs/018 §2.10). A list item with no explicit `listType` reads as `bullet`,
+ * so the toolbar can tell a bulleted item from a numbered one.
+ */
+function currentListType(store: EditorStore): string | null {
+  const range = textRange(store);
+  if (!range) return null;
+  const node = store.getNode(range.start.node);
+  if (!node || node.kind !== "text" || node.type !== "listitem") return null;
+  return typeof node.attrs?.listType === "string"
+    ? node.attrs.listType
+    : "bullet";
 }
 
 // ---------------------------------------------------------------------------

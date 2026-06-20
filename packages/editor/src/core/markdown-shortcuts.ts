@@ -20,6 +20,8 @@ export type BlockShortcut = {
   readonly removeTo: number;
   readonly blockType: TextLeafType;
   readonly tag?: string;
+  /** List flavour for a `listitem` prefix (`- `/`* ` → bullet, `1. ` → number). */
+  readonly listType?: string;
 };
 
 /** An inline-code shortcut: wrap `[from, to)` as code and remove both backticks. */
@@ -81,13 +83,14 @@ const BLOCK_PREFIXES: readonly {
   readonly prefix: string;
   readonly blockType: TextLeafType;
   readonly tag?: string;
+  readonly listType?: string;
 }[] = [
   { blockType: "heading", prefix: "# ", tag: "h1" },
   { blockType: "heading", prefix: "## ", tag: "h2" },
   { blockType: "heading", prefix: "### ", tag: "h3" },
-  { blockType: "listitem", prefix: "- " },
-  { blockType: "listitem", prefix: "* " },
-  { blockType: "listitem", prefix: "1. " },
+  { blockType: "listitem", listType: "bullet", prefix: "- " },
+  { blockType: "listitem", listType: "bullet", prefix: "* " },
+  { blockType: "listitem", listType: "number", prefix: "1. " },
   { blockType: "quote", prefix: "> " },
 ];
 
@@ -120,6 +123,7 @@ export function detectMarkdownShortcut(
         kind: "block",
         removeTo: entry.prefix.length,
         ...(entry.tag ? { tag: entry.tag } : {}),
+        ...(entry.listType ? { listType: entry.listType } : {}),
       };
     }
   }

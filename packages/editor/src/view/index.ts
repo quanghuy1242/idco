@@ -56,3 +56,8 @@ export {
   RestingLeaf,
   type RestingDocumentProps,
 } from "./resting-document";
+export {
+  computeWindowListMeta,
+  listItemStyle,
+  type ListItemMeta,
+} from "./styles";

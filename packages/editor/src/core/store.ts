@@ -737,6 +737,19 @@ export class EditorStore {
     return () => this.#orderSubscribers.delete(subscriber);
   }
 
+  /**
+   * Diagnostics/tests only (docs/018 §2.9): the count of live per-node
+   * subscribers across all nodes. Under virtualization this must stay bounded by
+   * the mounted window — an unmounted block that fails to release its
+   * `subscribeNode` registration shows up here as unbounded growth over a long
+   * scroll. Empty per-node sets linger in the map (cheap); only live sizes count.
+   */
+  debugNodeSubscriberCount(): number {
+    let total = 0;
+    for (const set of this.#nodeSubscribers.values()) total += set.size;
+    return total;
+  }
+
   subscribeSettings(subscriber: EditorSubscriber): () => void {
     this.#settingsSubscribers.add(subscriber);
     return () => this.#settingsSubscribers.delete(subscriber);
@@ -1124,6 +1137,13 @@ export class EditorStore {
       }),
     );
     state.touched.add(node.id);
+    // A block flipping to/from `listitem` changes list-run grouping, so the view
+    // must recompute neighbour ordinals/boundaries even though the body order is
+    // unchanged (docs/018 §2.10). Re-publish the order so the view's list pass
+    // re-runs (see `#republishOrderForListLayout`).
+    if (step.from === "listitem" || step.to === "listitem") {
+      this.#republishOrderForListLayout(state);
+    }
     return {
       from: step.to,
       node: node.id,
@@ -1141,6 +1161,12 @@ export class EditorStore {
     const attrs = cloneAttrsWithValue(node.attrs, step.key, step.to);
     this.#nodes.set(node.id, withAttrs(node, attrs));
     state.touched.add(node.id);
+    // `listType`/`indent` change list-run flavour or depth, so the view's ordinal
+    // and first/last-in-run pass must re-run for the neighbours too (docs/018
+    // §2.10). The body order is unchanged; re-publish it to trigger that pass.
+    if (step.key === "listType" || step.key === "indent") {
+      this.#republishOrderForListLayout(state);
+    }
     return {
       from: step.to,
       key: step.key,
@@ -1148,6 +1174,20 @@ export class EditorStore {
       to: step.from,
       type: "set-node-attr",
     };
+  }
+
+  /**
+   * Re-publish the body order as a fresh array with the same contents and flag the
+   * commit structural (docs/018 §2.10). A list-layout-affecting attr/type change
+   * does not move any block, so `subscribeOrder` would otherwise never fire and the
+   * view could not renumber a run when an item's flavour/type changed in place.
+   * Giving `store.order` a new reference makes the order-subscribed view (which
+   * owns the render-time ordinal pass) recompute, while text edits — which touch
+   * neither order nor these attrs — stay off this path.
+   */
+  #republishOrderForListLayout(state: MutableDispatchState): void {
+    this.#order = [...this.#order];
+    state.structureChanged = true;
   }
 
   #insertNode(step: InsertNodeStep, state: MutableDispatchState): Step {

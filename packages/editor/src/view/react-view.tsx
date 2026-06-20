@@ -54,7 +54,13 @@ import {
   type TouchSelectionActions,
 } from "./touch-selection";
 import type { ImeBoundsSnapshot, RenderRegistry } from "./types";
-import { baseViewStyle, blockStyle } from "./styles";
+import {
+  baseViewStyle,
+  computeWindowListMeta,
+  structuralContainerStyle,
+  structuralListStyle,
+  type ListItemMeta,
+} from "./styles";
 
 /**
  * React binding for the owned-model engine.
@@ -519,6 +525,13 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
 
   const onClipboardCopy = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
+      // A clipboard event from a real native field — a live object editor (the
+      // code <textarea>) or a config-popover <input> — must keep its native
+      // clipboard. React portals bubble synthetic events through the React tree,
+      // so the popover's paste reaches this root handler even though its DOM lives
+      // elsewhere; without this guard the root would preventDefault and route the
+      // paste into the document model instead of the focused field.
+      if (isNativeEditableTarget(event.target)) return;
       // Clipboard reads the model, not the DOM, so a range spanning virtualized
       // gaps copies the full text including the offscreen middle (docs/011 §13.9).
       const text = collectSelectionText(store, store.selection);
@@ -550,6 +563,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
 
   const onClipboardCut = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
+      // A native field (code editor / config-popover input) keeps native cut.
+      if (isNativeEditableTarget(event.target)) return;
       // Cut writes the model serialization, then deletes the selection through
       // the command layer so the delete is one invertible transaction (AC5).
       const text = collectSelectionText(store, store.selection);
@@ -566,6 +581,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
 
   const onClipboardPaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
+      // A native field (code editor / config-popover input) keeps native paste —
+      // otherwise the root would swallow the paste and insert it into the document
+      // instead of the focused field (the popover Ctrl+V bug).
+      if (isNativeEditableTarget(event.target)) return;
       // Rich HTML paste parses through the single sanitization boundary into
       // model blocks (AC8); plain text falls back to an inline insert (AC5).
       // Either way paste is a hard undo boundary (docs/011 §7.5).
@@ -1315,6 +1334,17 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     [],
   );
 
+  // Lists are flat-by-design (docs/018 §2.10): the per-item ordinal + first/last
+  // boundary is computed here from body-order adjacency, once per render of the
+  // current window, and handed to each block. It is recomputed when the order is
+  // re-published (a structural edit, or a list-flavour/type change — see the
+  // store's `#republishOrderForListLayout`), so a run renumbers correctly even
+  // though a numbered item mounted alone could not from a CSS counter.
+  const listMetaForWindow = computeWindowListMeta(
+    store,
+    windowRange.ids,
+    windowRange.startIndex,
+  );
   const blocks = windowRange.ids.map((id) => (
     <EngineBlock
       beginDrag={beginDrag}
@@ -1322,6 +1352,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       goalColumnRef={goalColumnRef}
       id={id}
       key={id}
+      listMeta={listMetaForWindow.get(id)}
       onRender={recordBlockRender}
       pageCaret={pageCaret}
       registerBlock={registerBlock}
@@ -1480,6 +1511,7 @@ function EngineBlock(props: {
   readonly registerObjectEditor: (id: NodeId, mounted: boolean) => void;
   readonly goalColumnRef: RefObject<number | null>;
   readonly pageCaret: (direction: -1 | 1, extend: boolean) => boolean;
+  readonly listMeta?: ListItemMeta;
 }) {
   const {
     id,
@@ -1494,6 +1526,7 @@ function EngineBlock(props: {
     registerObjectEditor,
     goalColumnRef,
     pageCaret,
+    listMeta,
   } = props;
   const node = useEditorNode(store, id);
   onRender(id);
@@ -1506,6 +1539,7 @@ function EngineBlock(props: {
         beginDrag={beginDrag}
         forcePolyfill={forcePolyfill}
         goalColumnRef={goalColumnRef}
+        listMeta={listMeta}
         node={node}
         pageCaret={pageCaret}
         registerBlock={registerBlock}
@@ -1541,37 +1575,67 @@ function EngineBlock(props: {
       />
     );
   }
-  // Structural nodes render a `[type]` placeholder. This branch is the documented
-  // current behavior of structural blocks (docs/018 §2.10), not unfinished Phase 8
-  // work — Phase 8 ("blog-first feature parity") is complete and never owned it.
+  // A structural container renders its children recursively (docs/018 §2.11:
+  // "Rendering is separable from virtualizing" — mapping a container's `children`
+  // through the same block dispatch *is* the render, and block-level
+  // virtualization already mounts/unmounts the whole small subtree as one
+  // top-level block). The two producers today are a `list` over `listitem`
+  // children and the genuine future use — a multi-block container (a quote/callout
+  // holding block children). Everything under a structural node renders: nested
+  // lists, paragraphs, objects (media/code), the lot — the same `EngineBlock`
+  // dispatch recurses. A `list` numbers its items with the same render-time
+  // ordinal pass the flat top-level lists use (a CSS counter would misnumber a
+  // virtualized run); other containers just stack their children.
   //
-  // What a structural block is *today*: the model has three node kinds — `text`
-  // leaf, `object`, `structural`. `structural` is used by exactly two things in
-  // practice: (1) ROOT, which holds the top-level body order and is never rendered
-  // through this branch; (2) a `list` container over `listitem` children. And the
-  // `list` container is effectively *vestigial* for editing: the toolbar List
-  // button toggles a flat top-level `listitem` text leaf (parent = ROOT), indent
-  // uses the `attrs.indent` flat fallback, and the import flattens lists to flat
-  // `listitem` leaves — so `currentListItem` (core/commands.ts) never gates into the
-  // structural-nesting path, and **no user-creatable or imported document ever
-  // contains a structural `list` node**. The only way one reaches this branch is a
-  // hand-built snapshot (e.g. `stories/engine-owned-model.stories.tsx`
-  // `phase55-editing`). Lists are flat-by-design (depth via `attrs.indent`); that
-  // flat model — not a recursive renderer — is the nested-list answer.
-  //
-  // So this placeholder guards a representation the engine does not produce. The
-  // genuinely-future use of `structural` is multi-block containers (a quote/callout
-  // holding block children), which is the only case that may ever need a recursive
-  // render + windowing (the §2.10 / virtualization seam). Until then `[type]` is the
-  // honest stub.
+  // Large containers (a single subtree big enough that mounting it whole hurts)
+  // are the *separate* recursive-windowing tier (docs/018 §2.11), built against
+  // the measurement guardrail when a real consumer needs it — that is the only
+  // deferred half, and it is a virtualization concern, not this render.
+  const childListMeta =
+    node.type === "list"
+      ? computeWindowListMeta(store, node.children, 0)
+      : undefined;
   return (
     <div
       data-engine-block-id={node.id}
+      data-engine-structural={node.type}
       ref={(element) => registerBlock(node.id, element)}
-      style={blockStyle}
+      style={
+        node.type === "list" ? structuralListStyle : structuralContainerStyle
+      }
     >
-      [{node.type}]
+      {node.children.map((childId) => (
+        <EngineBlock
+          beginDrag={beginDrag}
+          forcePolyfill={forcePolyfill}
+          goalColumnRef={goalColumnRef}
+          id={childId}
+          key={childId}
+          listMeta={childListMeta?.get(childId)}
+          onRender={onRender}
+          pageCaret={pageCaret}
+          registerBlock={registerBlock}
+          registerInputBackend={registerInputBackend}
+          registerObjectEditor={registerObjectEditor}
+          requestFocus={requestFocus}
+          revealBlock={revealBlock}
+          store={store}
+        />
+      ))}
     </div>
+  );
+}
+
+/**
+ * Whether a (synthetic) clipboard event came from a real native editable field —
+ * a live object editor's `<textarea>` or a config-popover `<input>`. React portals
+ * bubble synthetic events through the React tree, so such events reach the editor
+ * root even when their DOM is elsewhere; the root must let them keep their native
+ * clipboard rather than routing them into the document model.
+ */
+function isNativeEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
   );
 }
 

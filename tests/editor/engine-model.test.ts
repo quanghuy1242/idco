@@ -356,7 +356,11 @@ describe("owned-model editor core", () => {
     }
   });
 
-  it("preserves nested list structure instead of flattening it into list-item text", () => {
+  it("flattens an imported list to flat listitem leaves with listType + depth (docs/018 §2.10)", () => {
+    // Lists are flat-by-design: a `list` container (even a nested one) becomes
+    // top-level `listitem` text leaves carrying `listType` and a depth `indent`,
+    // never a structural `list` node — so an imported list renders on the editor
+    // surface and `compileIndentItem`'s nesting branch stays unreachable.
     const compat = {
       root: {
         children: [
@@ -372,7 +376,7 @@ describe("owned-model editor core", () => {
                         type: "listitem",
                       },
                     ],
-                    listType: "bullet",
+                    listType: "number",
                     type: "list",
                   },
                 ],
@@ -389,13 +393,22 @@ describe("owned-model editor core", () => {
     const store = createEditorStoreFromCompat(compat, {
       allocator: createIdAllocator(CLIENT),
     });
-    const list = store.requireNode(store.order[0]!);
-    if (list.kind !== "structural") throw new Error("expected structural list");
-    const item = store.requireNode(list.children[0]!);
-    expect(item.kind).toBe("structural");
-    expect(compatFromEditorStore(store).root.children[0]).toMatchObject(
-      compat.root.children[0],
+    // No structural `list` is produced; both items are flat top-level leaves.
+    const nodes = store.order.map((id) => store.requireNode(id));
+    expect(nodes.every((n) => n.kind === "text" && n.type === "listitem")).toBe(
+      true,
     );
+    const [parent, child] = nodes;
+    if (parent?.kind !== "text" || child?.kind !== "text") {
+      throw new Error("expected two flat listitem leaves");
+    }
+    expect(parent.content.text).toBe("Parent");
+    expect(parent.attrs?.listType).toBe("bullet");
+    expect(parent.attrs?.indent).toBeUndefined();
+    expect(child.content.text).toBe("Child");
+    // The nested list flattens one level deeper and keeps its own flavour.
+    expect(child.attrs?.listType).toBe("number");
+    expect(child.attrs?.indent).toBe(1);
   });
 
   it("stores code-block bodies as piece tables while exporting legacy text", () => {
@@ -935,41 +948,33 @@ const GOLDEN_COMPAT_OUTPUT = {
         tag: "h2",
         type: "heading",
       },
+      // Lists are flat-by-design (docs/018 §2.10): the imported `list` (and its
+      // nested list) flatten to top-level `listitem` leaves carrying `listType`
+      // and a depth `indent`, never a structural `list` node.
       {
         children: [
           {
-            children: [
-              {
-                format: 0,
-                text: "Parent item",
-                type: "text",
-              },
-              {
-                children: [
-                  {
-                    children: [
-                      {
-                        format: 0,
-                        text: "Nested child",
-                        type: "text",
-                      },
-                    ],
-                    id: "idco_node_nested_item",
-                    type: "listitem",
-                  },
-                ],
-                id: "idco_node_nested_list",
-                listType: "bullet",
-                type: "list",
-              },
-            ],
-            id: "idco_node_parent_item",
-            type: "listitem",
+            format: 0,
+            text: "Parent item",
+            type: "text",
           },
         ],
-        id: "idco_node_list",
+        id: "idco_node_parent_item",
         listType: "bullet",
-        type: "list",
+        type: "listitem",
+      },
+      {
+        children: [
+          {
+            format: 0,
+            text: "Nested child",
+            type: "text",
+          },
+        ],
+        id: "idco_node_nested_item",
+        indent: 1,
+        listType: "bullet",
+        type: "listitem",
       },
       {
         id: "idco_node_code",

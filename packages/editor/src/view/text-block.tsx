@@ -49,7 +49,7 @@ import {
 import { requestFrame } from "./raf";
 import { leafHasMarks, renderLeafMarks } from "./mark-render";
 import { ariaLabelForLeaf } from "./selection-overlay";
-import { blockStyleFor } from "./styles";
+import { blockStyleFor, listItemStyle, type ListItemMeta } from "./styles";
 import type {
   CharacterBoundsUpdateEventLike,
   EditContextConstructor,
@@ -74,6 +74,8 @@ export function EngineTextBlock(props: {
   readonly beginDrag: (anchor: TextPoint) => void;
   readonly goalColumnRef: RefObject<number | null>;
   readonly pageCaret: (direction: -1 | 1, extend: boolean) => boolean;
+  /** Render-time list-run metadata for a `listitem` leaf (docs/018 §2.10). */
+  readonly listMeta?: ListItemMeta;
 }) {
   const {
     node,
@@ -86,6 +88,7 @@ export function EngineTextBlock(props: {
     beginDrag,
     goalColumnRef,
     pageCaret,
+    listMeta,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<TextBlockController | null>(null);
@@ -627,6 +630,17 @@ export function EngineTextBlock(props: {
           ? node.attrs.tag
           : undefined
       }
+      // The list-run flavour + ordinal drive the CSS marker (•  vs  `N.`); they are
+      // computed at paint from body-order adjacency, never a CSS counter (docs/018
+      // §2.10). Only a `listitem` carries them.
+      data-engine-list-ordinal={
+        node.type === "listitem" && listMeta?.listType === "number"
+          ? String(listMeta.ordinal)
+          : undefined
+      }
+      data-engine-list-type={
+        node.type === "listitem" ? (listMeta?.listType ?? "bullet") : undefined
+      }
       data-engine-text-id={node.id}
       id={node.id}
       onFocus={focusAtEnd}
@@ -634,7 +648,11 @@ export function EngineTextBlock(props: {
       onMouseDown={focusAtClick}
       ref={bindRef}
       role="textbox"
-      style={blockStyleFor(node)}
+      style={
+        node.type === "listitem"
+          ? listItemStyle(blockStyleFor(node), listMeta)
+          : blockStyleFor(node)
+      }
       tabIndex={0}
     >
       {renderLeafMarks(node)}

@@ -98,6 +98,49 @@ export const Phase55Editing: Story = () => {
   );
 };
 
+// Mixed-direction (bidi) paragraphs: Latin + Hebrew + Latin, and a Latin +
+// Arabic run. The caret affinity at the RTL boundaries (docs/018 §2.9) is the
+// dedicated cross-browser target driven by tests/e2e/engine-bidi.spec.ts.
+function createBidiStore() {
+  const allocator = createIdAllocator("idco_client_bidi");
+  const paragraph = (text: string) =>
+    makeTextNode({
+      content: allocator.createTextSlice(text),
+      id: allocator.createNodeId(),
+      type: "paragraph",
+    });
+  const blocks = [
+    paragraph("Start שלום עולם end"),
+    paragraph("Read مرحبا now"),
+  ];
+  const snapshot: EditorDocumentSnapshot = {
+    body: {
+      blocks: Object.fromEntries(blocks.map((n) => [n.id, n])) as Record<
+        NodeId,
+        EditorNode
+      >,
+      order: blocks.map((n) => n.id),
+    },
+    settings: { story: "owned-model-bidi" },
+    version: 1,
+  };
+  return createEditorStore({ allocator, snapshot });
+}
+
+export const BidiCaret: Story = () => {
+  const store = useMemo(() => createBidiStore(), []);
+  const viewRef = useRef<OwnedModelEditorViewHandle | null>(null);
+
+  return (
+    <OwnedModelStoryFrame
+      store={store}
+      viewRef={viewRef}
+      viewportHeight={PHASE5_VIEWPORT}
+      virtualize={false}
+    />
+  );
+};
+
 /**
  * Phase 8 AC3 — a paragraph whose text carries overlapping bold/italic and a
  * link mark, so the leaf renders as many DOM text nodes across semantic mark
@@ -256,14 +299,28 @@ function hardRefreshOwnedModelInputMode(mode: OwnedModelInputMode): void {
 }
 
 function createEditingStore() {
-  // A small, mixed document for structural editing: paragraphs, a heading, and
-  // a three-item list (a structural `list` over text-leaf `listitem`s).
+  // A small, mixed document for structural editing: paragraphs, a heading, a
+  // bulleted list, an ordered list, AND a structural (nested) list. Two list
+  // shapes coexist on purpose:
+  //  - Flat-by-design lists (docs/018 §2.10): each item is a top-level `listitem`
+  //    text leaf carrying a `listType` (bullet/number); the ordered run is numbered
+  //    by the view's render-time ordinal pass. This is the authoring/import shape.
+  //  - A structural `list` container over `listitem` children (one nesting a
+  //    sublist): the engine renders it recursively (docs/018 §2.11) — nothing under
+  //    a structural node is a placeholder. Kept visible so the capability is real.
   const allocator = createIdAllocator("idco_client_phase55_story");
   const paragraph = (text: string, type: TextLeafNode["type"] = "paragraph") =>
     makeTextNode({
       content: allocator.createTextSlice(text),
       id: allocator.createNodeId(),
       type,
+    });
+  const listItem = (text: string, listType: "bullet" | "number") =>
+    makeTextNode({
+      attrs: { listType },
+      content: allocator.createTextSlice(text),
+      id: allocator.createNodeId(),
+      type: "listitem",
     });
   const intro = paragraph("Phase 5.5 editing surface", "heading");
   const first = paragraph(
@@ -272,23 +329,62 @@ function createEditingStore() {
   const second = paragraph(
     "Press Enter to split this paragraph, Backspace at the start to merge.",
   );
-  const items = ["First item", "Second item", "Third item"].map((t) =>
-    paragraph(t, "listitem"),
+  const bullets = ["First item", "Second item", "Third item"].map((t) =>
+    listItem(t, "bullet"),
   );
-  const list = makeStructuralNode({
-    children: items.map((i) => i.id),
+  const stepsHeading = paragraph("Steps to reproduce");
+  const steps = ["Open the editor", "Type a list", "Toggle ordered"].map((t) =>
+    listItem(t, "number"),
+  );
+  // A *structural* list (a `list` container over `listitem` children, one item
+  // nesting a sublist) — the genuine multi-block-container shape. The engine
+  // renders it recursively: nothing under a structural node is a placeholder
+  // (docs/018 §2.11). Kept on purpose so the capability is visible, not hidden.
+  const nestedHeading = paragraph("Nested (structural) list");
+  const nestedLeaf = listItem("Deeply nested item", "bullet");
+  const subList = makeStructuralNode({
+    children: [nestedLeaf.id],
+    id: allocator.createNodeId(),
+    type: "list",
+  });
+  const parentLeaf = listItem("Parent with a sublist", "bullet");
+  const parentItem = makeStructuralNode({
+    children: [parentLeaf.id, subList.id],
+    id: allocator.createNodeId(),
+    type: "listitem",
+  });
+  const siblingLeaf = listItem("Sibling structural item", "bullet");
+  const structuralList = makeStructuralNode({
+    children: [siblingLeaf.id, parentItem.id],
     id: allocator.createNodeId(),
     type: "list",
   });
   const tail = paragraph("A closing paragraph after the list.");
-  const topLevel: EditorNode[] = [intro, first, second, list, tail];
-  const blocks = [...topLevel, ...items];
+  const topLevel: EditorNode[] = [
+    intro,
+    first,
+    second,
+    ...bullets,
+    stepsHeading,
+    ...steps,
+    nestedHeading,
+    structuralList,
+    tail,
+  ];
+  // The structural list's descendants live in `blocks` but not the top-level
+  // `order` — the engine reaches them through the container's `children`.
+  const descendants: EditorNode[] = [
+    siblingLeaf,
+    parentItem,
+    parentLeaf,
+    subList,
+    nestedLeaf,
+  ];
   const snapshot: EditorDocumentSnapshot = {
     body: {
-      blocks: Object.fromEntries(blocks.map((n) => [n.id, n])) as Record<
-        NodeId,
-        EditorNode
-      >,
+      blocks: Object.fromEntries(
+        [...topLevel, ...descendants].map((n) => [n.id, n]),
+      ) as Record<NodeId, EditorNode>,
       order: topLevel.map((n) => n.id),
     },
     settings: { phase: "5.5", story: "owned-model-editing" },

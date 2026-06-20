@@ -20,7 +20,7 @@
  * - `whiteSpace: pre-wrap` on text blocks (soft breaks + caret geometry).
  */
 import type { CSSProperties } from "react";
-import type { TextLeafType } from "../core";
+import type { EditorStore, NodeId, TextLeafType } from "../core";
 
 export const baseViewStyle: CSSProperties = {
   border: "1px solid color-mix(in srgb, CanvasText 18%, transparent)",
@@ -117,7 +117,15 @@ export const ENGINE_TYPOGRAPHY_CSS =
   // text (the overlap bug, docs/010 §14).
   // `top` matches the list item's (tighter) top padding so the bullet aligns
   // with the first line of text (see LIST_ITEM_PADDING_Y in blockStyleFor).
-  '[data-engine-view-root] [data-engine-block-type="listitem"]::before{content:"•";position:absolute;left:0.55em;top:2px;line-height:inherit;opacity:0.6;}' +
+  // A bulleted item (the default, and any `listType="bullet"`) shows a glyph; an
+  // ordered item (`listType="number"`) shows its model-computed ordinal instead —
+  // the number is computed at paint from list-run adjacency (docs/018 §2.10), not
+  // a CSS counter, because under virtualization a CSS counter would count only the
+  // mounted `<li>`s and renumber a scrolled list from 1. The ordinal rides on
+  // `data-engine-list-ordinal`; it is right-aligned in the same reserved gutter so
+  // multi-digit numbers stay clear of the text.
+  '[data-engine-view-root] [data-engine-block-type="listitem"]:not([data-engine-list-type="number"])::before{content:"•";position:absolute;left:0.55em;top:2px;line-height:inherit;opacity:0.6;}' +
+  '[data-engine-view-root] [data-engine-block-type="listitem"][data-engine-list-type="number"]::before{content:attr(data-engine-list-ordinal) ".";position:absolute;left:0;top:2px;width:1.3em;text-align:right;line-height:inherit;opacity:0.6;font-variant-numeric:tabular-nums;}' +
   // Inline marks. Semantic elements (strong/em/u/s/sub/sup) already render via UA
   // defaults; these style the ones the UA does not (link without href, code,
   // highlight, comment, glossary) and theme the link with the DaisyUI token.
@@ -285,6 +293,24 @@ export const blockStyle: LonghandBlockStyle = {
 export const INDENT_STEP_EM = 1.6;
 
 /**
+ * A structural container (a quote/callout holding block children, the genuine
+ * future use of the `structural` kind) renders its children stacked, with no box
+ * of its own — the children carry their own block geometry (docs/018 §2.11
+ * "rendering is separable from virtualizing").
+ */
+export const structuralContainerStyle: CSSProperties = { position: "relative" };
+
+/**
+ * A structural `list` container indents its items one step, so a nested list
+ * (a list inside a structural list item) visibly steps in per level while each
+ * item still owns its own marker gutter.
+ */
+export const structuralListStyle: CSSProperties = {
+  paddingLeft: `${INDENT_STEP_EM}em`,
+  position: "relative",
+};
+
+/**
  * The left-margin style for a block's `attrs.indent` level, or `undefined` when
  * unindented. Shared by the editing surface (`blockStyleFor`) and the resting
  * render (`resting-document.tsx`) so an indented block reads the same in both —
@@ -301,6 +327,112 @@ export function indentMarginStyle(indent: unknown): CSSProperties | undefined {
 // the default block, so consecutive items are closer than separate paragraphs.
 const LIST_ITEM_PADDING_Y = 2;
 const LIST_ITEM_MIN_HEIGHT = 22;
+// Extra breathing room before the first / after the last item of a list run, so a
+// list reads as a grouped block set apart from the paragraphs around it. A flat
+// list has no `<ul>`/`<ol>` to carry this margin, so the view derives first/last
+// from the same render-time adjacency scan as the ordinals (docs/018 §2.10).
+const LIST_RUN_BOUNDARY_MARGIN = 6;
+
+/**
+ * Per-item list metadata computed at paint from body-order adjacency (docs/018
+ * §2.10): the run flavour, the 1-based ordinal within the run, and whether the
+ * item opens/closes its run. The flat model has no `<ul>`/`<ol>` container, so the
+ * view computes this instead of leaning on a CSS counter or container margins.
+ */
+export type ListItemMeta = {
+  readonly listType: "bullet" | "number";
+  readonly ordinal: number;
+  readonly firstInRun: boolean;
+  readonly lastInRun: boolean;
+};
+
+/**
+ * Add the list-run boundary margins to a list item's base style, or return the
+ * base unchanged (stable reference) for a non-list item or a mid-run item. The
+ * base already carries any indent margin-left, which the spread preserves.
+ */
+export function listItemStyle(
+  base: LonghandBlockStyle,
+  meta: ListItemMeta | undefined,
+): LonghandBlockStyle {
+  if (!meta) return base;
+  const top = meta.firstInRun ? LIST_RUN_BOUNDARY_MARGIN : undefined;
+  const bottom = meta.lastInRun ? LIST_RUN_BOUNDARY_MARGIN : undefined;
+  if (top === undefined && bottom === undefined) return base;
+  return {
+    ...base,
+    ...(top !== undefined ? { marginTop: top } : {}),
+    ...(bottom !== undefined ? { marginBottom: bottom } : {}),
+  };
+}
+
+/** The flat-list run flavour of a node, or null when it is not a list item. */
+function listFlavourOf(
+  store: EditorStore,
+  id: NodeId,
+): "bullet" | "number" | null {
+  const node = store.getNode(id);
+  if (!node || node.kind !== "text" || node.type !== "listitem") return null;
+  return node.attrs?.listType === "number" ? "number" : "bullet";
+}
+
+/**
+ * Compute `ListItemMeta` for the list items in the current window (docs/018
+ * §2.10). A *run* is a maximal sequence of consecutive `listitem` blocks of the
+ * same flavour; an item's ordinal is its 1-based position in that run. The window
+ * is a contiguous slice of the body order, so the run an item belongs to may have
+ * begun before the window — the ordinal is seeded once by walking back from the
+ * window start to the run start, then carried forward across the window in O(1)
+ * per item. (A run spanning a very large offscreen prefix is the §2.11
+ * trigger-gated case, not this flat-list pass.)
+ */
+export function computeWindowListMeta(
+  store: EditorStore,
+  windowIds: readonly NodeId[],
+  windowStartIndex: number,
+): Map<NodeId, ListItemMeta> {
+  const order = store.order;
+  const meta = new Map<NodeId, ListItemMeta>();
+  // Seed the running ordinal from the run that may continue into the window.
+  let runFlavour: "bullet" | "number" | null =
+    windowStartIndex > 0
+      ? listFlavourOf(store, order[windowStartIndex - 1]!)
+      : null;
+  let runOrdinal = 0;
+  if (runFlavour) {
+    runOrdinal = 1;
+    for (let k = windowStartIndex - 2; k >= 0; k--) {
+      if (listFlavourOf(store, order[k]!) !== runFlavour) break;
+      runOrdinal++;
+    }
+  }
+  for (let wi = 0; wi < windowIds.length; wi++) {
+    const id = windowIds[wi]!;
+    const flavour = listFlavourOf(store, id);
+    if (!flavour) {
+      runFlavour = null;
+      runOrdinal = 0;
+      continue;
+    }
+    if (flavour === runFlavour) {
+      runOrdinal++;
+    } else {
+      runFlavour = flavour;
+      runOrdinal = 1;
+    }
+    const globalIndex = windowStartIndex + wi;
+    const nextId = order[globalIndex + 1];
+    const lastInRun =
+      nextId === undefined || listFlavourOf(store, nextId) !== flavour;
+    meta.set(id, {
+      firstInRun: runOrdinal === 1,
+      lastInRun,
+      listType: flavour,
+      ordinal: runOrdinal,
+    });
+  }
+  return meta;
+}
 
 /**
  * Per-text-type style overrides, applied on top of `blockStyle`.

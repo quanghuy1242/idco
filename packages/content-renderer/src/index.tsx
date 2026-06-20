@@ -286,12 +286,57 @@ export function RichTextRenderer({
   return <>{renderRichTextDocument(value, options)}</>;
 }
 
+/**
+ * Lists are flat-by-design (docs/018 §2.10): the editor exports top-level
+ * `listitem` leaves, not a structural `list` wrapper. The reader re-groups a run
+ * of consecutive `listitem` siblings into one synthetic `list` node so it still
+ * renders a real `<ul>`/`<ol>` (and the browser numbers the items) — split by
+ * flavour (bullet / number / check) so a bulleted run and an ordered run that sit
+ * back to back become two separate lists. A real (legacy) `list` node is left
+ * untouched: its `listitem` children are the expected shape, not re-grouped.
+ */
+function groupFlatListItems(
+  children: readonly RichTextNode[],
+): readonly RichTextNode[] {
+  const grouped: RichTextNode[] = [];
+  let run: RichTextNode[] = [];
+  let runFlavour: string | undefined;
+  const flush = () => {
+    if (run.length === 0) return;
+    grouped.push({ children: run, listType: runFlavour, type: "list" });
+    run = [];
+    runFlavour = undefined;
+  };
+  for (const child of children) {
+    if (child.type === "listitem") {
+      const flavour =
+        typeof child.checked === "boolean"
+          ? "check"
+          : listKind(child.listType, child.tag);
+      if (run.length > 0 && flavour !== runFlavour) flush();
+      runFlavour = flavour;
+      run.push(child);
+      continue;
+    }
+    flush();
+    grouped.push(child);
+  }
+  flush();
+  return grouped;
+}
+
 function renderNode(
   node: RichTextNode,
   key: string,
   options: RichTextRenderOptions,
 ): ReactNode {
-  const children = (node.children ?? []).map((child, index) =>
+  // A real `list` node already wraps its items; only sibling-level runs of flat
+  // `listitem` leaves (the flat-by-design export) need re-grouping.
+  const rawChildren =
+    node.type === "list"
+      ? (node.children ?? [])
+      : groupFlatListItems(node.children ?? []);
+  const children = rawChildren.map((child, index) =>
     renderNode(child, `${key}.${index}`, options),
   );
   if (node.type === "media" && options.resolveMedia) {

@@ -49,6 +49,21 @@ async function open(page: Page): Promise<void> {
     .waitFor({ state: "visible" });
 }
 
+/**
+ * Open a popover object's settings via its floating-chrome gear (docs/018 §2.11
+ * follow-up): media/embed render real content that swallows body clicks, so the
+ * gear — not a body click — is what activates their settings popover.
+ */
+async function openObjectSettings(
+  page: Page,
+  id: string,
+  gearLabel: string,
+): Promise<void> {
+  const block = page.locator(`[data-engine-block-id="${id}"]`);
+  await block.hover();
+  await block.getByRole("button", { name: gearLabel }).click();
+}
+
 function objectId(d: Diag, type: string): string {
   const id = Object.keys(d.objects).find(
     (key) => d.objects[key]!.type === type,
@@ -88,7 +103,10 @@ test("AC2 only one object is live at a time", async ({ page }) => {
   expect(await page.locator("[data-engine-object-editor]").count()).toBe(1);
 
   // Activating media commits + deactivates code first; still exactly one live.
-  await page.locator(`[data-engine-block-id="${mediaId}"]`).click();
+  // Media/embed are configured from the gear in the chrome (docs/018 §2.11
+  // follow-up) — a rendered <img>/<iframe> swallows body clicks — so open its
+  // settings via the gear, not a body click.
+  await openObjectSettings(page, mediaId, "Image settings");
   d = await diag(page);
   expect(d.activeObjectId).toBe(mediaId);
   expect(d.objects[codeId]!.state).toBe("resting");
@@ -156,7 +174,7 @@ test("AC4 editing an object re-bakes it; an unbakeable edit is recoverable", asy
 
   // Clearing the media source produces a recoverable invalid object, not a crash.
   const mediaId = objectId(afterEdit, "media");
-  await page.locator(`[data-engine-block-id="${mediaId}"]`).click();
+  await openObjectSettings(page, mediaId, "Image settings");
   // The media config field is an @idco/ui Input labelled "Source" (Phase 8 chrome).
   const sourceField = page.getByLabel("Source", { exact: true });
   await sourceField.waitFor({ state: "visible" });
@@ -245,4 +263,33 @@ test("the live code editor keeps a visible native caret and selection", async ({
     .first()
     .evaluate((el) => getComputedStyle(el).caretColor);
   expect(textCaret.replace(/\s/g, "")).toBe("rgba(0,0,0,0)");
+});
+
+test.describe("media settings popover keeps native clipboard (docs/018 §2.11)", () => {
+  // React portals bubble synthetic clipboard events through the React tree, so a
+  // paste in the config popover used to reach the editor root and be routed into
+  // the document. The root now ignores native <input>/<textarea> targets, so the
+  // field keeps its own clipboard. Clipboard permissions are chromium-only here.
+  test.use({ permissions: ["clipboard-read", "clipboard-write"] });
+
+  test("Ctrl+V pastes into the config input, not the document", async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(
+      browserName !== "chromium",
+      "clipboard permissions are granted only on chromium in this matrix",
+    );
+    await open(page);
+    const mediaId = objectId(await diag(page), "media");
+    await page.evaluate(() =>
+      navigator.clipboard.writeText("https://example.com/pasted.png"),
+    );
+    await openObjectSettings(page, mediaId, "Image settings");
+    const source = page.getByLabel("Source", { exact: true });
+    await source.click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect(source).toHaveValue("https://example.com/pasted.png");
+  });
 });
