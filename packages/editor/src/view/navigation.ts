@@ -442,5 +442,7 @@ export function activeSelectionNode(
 ): NodeId | null {
   if (!selection) return null;
   if (selection.type === "text") return selection.focus.node;
-  return selection.node;
+  if (selection.type === "node") return selection.node;
+  // A gap is between blocks, not on any one — no active leaf (docs/019 §4.3).
+  return null;
 }

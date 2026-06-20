@@ -136,11 +136,15 @@ export type {
 export { createEngineScheduler } from "./scheduler";
 export {
   compileCommand,
+  isDisposableEmpty,
   pendingFormatMarkSteps,
+  placeNodes,
+  resolveInsertionPoint,
   runQuery,
   type EditorCommand,
   type EditorCommandType,
   type EditorQuery,
+  type InsertionPoint,
 } from "./commands";
 export {
   createOwnedEditorHandle,

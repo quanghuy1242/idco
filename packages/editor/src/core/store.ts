@@ -1541,7 +1541,7 @@ function mapSelection(
           : fallbackSelection(store, step);
     } else if (current.type === "node" && removesNode(step, current.node)) {
       current = fallbackSelection(store, step);
-    } else if (current.type === "gap" && removesNode(step, current.node)) {
+    } else if (current.type === "gap" && removesNode(step, current.scope)) {
       current = fallbackSelection(store, step);
     }
   }
@@ -1638,7 +1638,8 @@ function fallbackSelection(
   if (previous) return selectionAtNodeEdge(store, previous, "after");
   const next = siblings[step.index];
   if (next) return selectionAtNodeEdge(store, next, "before");
-  return { node: step.parent, side: "after", type: "gap" };
+  // The scope is now empty: a gap at its only slot (docs/019 §4.3, §9).
+  return { index: 0, scope: step.parent, type: "gap" };
 }
 
 function selectionAtNodeEdge(
@@ -1652,7 +1653,14 @@ function selectionAtNodeEdge(
     const point = pointAtOffset(node.id, node.content, offset);
     return { anchor: point, focus: point, type: "text" };
   }
-  return { node: nodeId, side, type: "gap" };
+  // A gap beside an object, named scope-relative (docs/019 §5.1): the slot after
+  // a node is its index + 1, the slot before it is its index.
+  const entry = store.parentEntry(nodeId);
+  return {
+    index: entry ? (side === "after" ? entry.index + 1 : entry.index) : 0,
+    scope: entry ? entry.parent : store.bodyId,
+    type: "gap",
+  };
 }
 
 function bakedSnapshot(value: JsonValue | undefined) {

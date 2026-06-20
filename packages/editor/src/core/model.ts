@@ -99,8 +99,16 @@ export type NodeSelection = {
 
 export type GapSelection = {
   readonly type: "gap";
-  readonly node: NodeId;
-  readonly side: "before" | "after";
+  /**
+   * The container the gap is in (the body, a callout, a cell, …): a caret
+   * between this scope's children rather than inside any one of them (docs/019
+   * §4.3). Replaces the former `{ node, side }` shape so an empty scope and the
+   * doc/scope edges are expressible, and so a gap is the same coordinate as an
+   * insertion target (`InsertionPoint.at`, docs/019 §4.1/§5.1).
+   */
+  readonly scope: NodeId;
+  /** The slot between `children[index - 1]` and `children[index]` of `scope`. */
+  readonly index: number;
 };
 
 export type EditorSelection = TextSelection | NodeSelection | GapSelection;
@@ -150,7 +158,7 @@ export function selectionsEqual(
     return a.node === (b as NodeSelection).node;
   }
   const other = b as GapSelection;
-  return a.node === other.node && a.side === other.side;
+  return a.scope === other.scope && a.index === other.index;
 }
 
 export type TextMarkKind =

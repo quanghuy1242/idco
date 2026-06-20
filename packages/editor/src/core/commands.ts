@@ -1081,28 +1081,26 @@ function compileInsertObject(
     status: result.status,
     type: objectType,
   });
-  const insertIndex = insertionIndexAfterSelection(store);
   const tr = store.transaction();
-  tr.insertNode(store.bodyId, insertIndex, objectNode);
+  const point = insertionPointForInsert(tr, store);
+  placeNodes(tr, store, point, [objectNode]);
   return tr.setSelection({ node: id, type: "node" });
 }
 
 /**
- * Insert pre-built blocks after the current block (AC8 HTML paste). The view
- * builds the nodes from sanitized HTML through the compat importer with the
- * store's allocator, so their ids are unique; this just splices them into the
- * body order and lands the caret at the end of the last inserted leaf.
+ * Insert pre-built blocks at the caret (AC8 HTML paste). The view builds the
+ * nodes from sanitized HTML through the compat importer with the store's
+ * allocator, so their ids are unique; this resolves the positional insertion
+ * point (docs/019) and lands the caret at the end of the last inserted leaf.
  */
 function compileInsertBlocks(
   store: EditorStore,
   nodes: readonly EditorNode[],
 ): TransactionBuilder | null {
   if (nodes.length === 0) return null;
-  const insertIndex = insertionIndexAfterSelection(store);
   const tr = store.transaction();
-  nodes.forEach((node, i) =>
-    tr.insertNode(store.bodyId, insertIndex + i, node),
-  );
+  const point = insertionPointForInsert(tr, store);
+  placeNodes(tr, store, point, nodes);
   const last = nodes[nodes.length - 1]!;
   if (last.kind === "text") {
     const focus = pointAtOffset(
@@ -1117,18 +1115,149 @@ function compileInsertBlocks(
   return tr;
 }
 
-/** Body index just after the current selection's top-level block (or the end). */
-function insertionIndexAfterSelection(store: EditorStore): number {
+// ---------------------------------------------------------------------------
+// Positional insertion (docs/019 §4): resolve any selection to where a block
+// lands. Insertion is a caret operation — a block goes where the caret is, and
+// an empty paragraph the caret sits on is consumed by what is put on it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a block-level insert should land (docs/019 §4.5).
+ *
+ * `at` splices into a scope's child order; `replace` consumes a disposable-empty
+ * block (remove + insert at the same index). The `split` variant (mid-text
+ * break, docs/019 §5.5) is Phase 3; until it ships a mid-block caret degrades to
+ * `at` after the block (see `resolveTextCaretPoint`).
+ */
+export type InsertionPoint =
+  | { readonly kind: "at"; readonly scope: NodeId; readonly index: number }
+  | { readonly kind: "replace"; readonly node: NodeId };
+
+/**
+ * Whether an empty block is a placeholder the next insert should consume rather
+ * than push aside (docs/019 §4.7). An empty *paragraph* is the canonical "blank
+ * line waiting for content"; an empty heading/quote/list-item is explicit
+ * structure and is never consumed. Inline atoms occupy a U+FFFC character, so
+ * `content.text.length === 0` already excludes a leaf that still holds one.
+ */
+export function isDisposableEmpty(node: EditorNode): boolean {
+  return (
+    node.kind === "text" &&
+    node.type === "paragraph" &&
+    node.content.text.length === 0
+  );
+}
+
+/** Apply an `InsertionPoint` + a node run to a transaction (docs/019 §4.8). */
+export function placeNodes(
+  tr: TransactionBuilder,
+  store: EditorStore,
+  point: InsertionPoint,
+  nodes: readonly EditorNode[],
+): void {
+  if (point.kind === "replace") {
+    const entry = store.parentEntry(point.node);
+    const removed = store.getNode(point.node);
+    if (entry && removed) {
+      // Remove the placeholder, then insert at its vacated index. One
+      // TransactionBuilder = one invertible transaction (undo restores it).
+      tr.removeNode(entry.parent, entry.index, removed);
+      nodes.forEach((node, i) =>
+        tr.insertNode(entry.parent, entry.index + i, node),
+      );
+      return;
+    }
+    // Defensive: the target vanished mid-race; append at the body end.
+    nodes.forEach((node, i) =>
+      tr.insertNode(store.bodyId, store.order.length + i, node),
+    );
+    return;
+  }
+  nodes.forEach((node, i) => tr.insertNode(point.scope, point.index + i, node));
+}
+
+/**
+ * Resolve the current selection to an `InsertionPoint` (docs/019 §4.6).
+ *
+ * Pure and collapsed-only: a non-collapsed text range is collapsed by the
+ * compiler (`insertionPointForInsert`) before this is consulted, so the focus is
+ * a single caret here.
+ */
+export function resolveInsertionPoint(store: EditorStore): InsertionPoint {
   const sel = store.selection;
-  const anchorId =
-    sel?.type === "text"
-      ? sel.focus.node
-      : sel?.type === "node" || sel?.type === "gap"
-        ? sel.node
-        : null;
-  if (!anchorId) return store.order.length;
-  const index = store.order.indexOf(anchorId);
-  return index < 0 ? store.order.length : index + 1;
+  if (!sel)
+    return { index: store.order.length, kind: "at", scope: store.bodyId };
+  if (sel.type === "gap") {
+    return { index: sel.index, kind: "at", scope: sel.scope };
+  }
+  if (sel.type === "node") {
+    const entry = store.parentEntry(sel.node);
+    return entry
+      ? { index: entry.index + 1, kind: "at", scope: entry.parent }
+      : { index: store.order.length, kind: "at", scope: store.bodyId };
+  }
+  const leaf = store.getNode(sel.focus.node);
+  if (!leaf || leaf.kind !== "text") {
+    return { index: store.order.length, kind: "at", scope: store.bodyId };
+  }
+  return resolveTextCaretPoint(
+    store,
+    sel.focus.node,
+    sel.focus.offset,
+    isDisposableEmpty(leaf),
+  );
+}
+
+/**
+ * The `InsertionPoint` for a collapsed text caret (docs/019 §4.6, the `text`
+ * rows). Shared by `resolveInsertionPoint` and the range path, which both arrive
+ * at a single caret. A disposable-empty paragraph is replaced; offset 0 inserts
+ * before the block; end (or, until Phase 3, mid-block) inserts after it.
+ */
+function resolveTextCaretPoint(
+  store: EditorStore,
+  leafId: NodeId,
+  offset: number,
+  disposableEmpty: boolean,
+): InsertionPoint {
+  if (disposableEmpty) return { kind: "replace", node: leafId };
+  const entry = store.parentEntry(leafId);
+  if (!entry) {
+    return { index: store.order.length, kind: "at", scope: store.bodyId };
+  }
+  return {
+    index: offset === 0 ? entry.index : entry.index + 1,
+    kind: "at",
+    scope: entry.parent,
+  };
+}
+
+/**
+ * Resolve where an insert lands, first collapsing a non-collapsed text range
+ * (docs/019 §7.8): "replace my selection with a block." The range is deleted
+ * into `tr`, then the point is resolved from the resulting collapsed caret —
+ * `deleteRange` keeps `start.node`, so it is still addressable.
+ */
+function insertionPointForInsert(
+  tr: TransactionBuilder,
+  store: EditorStore,
+): InsertionPoint {
+  const range = textRange(store);
+  if (range && !pointsEqual(range.start, range.end)) {
+    const caret = deleteRange(tr, store, range.start, range.end);
+    const leaf = store.getNode(caret.node);
+    const disposableEmpty =
+      leaf?.kind === "text" &&
+      leaf.type === "paragraph" &&
+      caret.content.text.length === 0;
+    return resolveTextCaretPoint(
+      store,
+      caret.node,
+      caret.offset,
+      disposableEmpty,
+    );
+  }
+  return resolveInsertionPoint(store);
 }
 
 // ---------------------------------------------------------------------------
