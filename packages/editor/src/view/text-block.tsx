@@ -47,7 +47,7 @@ import {
   wordRangeAt,
 } from "./navigation";
 import { requestFrame } from "./raf";
-import { tabWithinTable } from "./table-operations";
+import { tabWithinTable } from "../core/table/operations";
 import { leafHasMarks, renderLeafMarks } from "./mark-render";
 import { ariaLabelForLeaf } from "./selection-overlay";
 import { blockStyleFor, listItemStyle, type ListItemMeta } from "./styles";

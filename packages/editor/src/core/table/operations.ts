@@ -13,9 +13,9 @@ import {
   makeTextNode,
   pointAtOffset,
   type EditorNode,
-  type EditorStore,
   type NodeId,
-} from "../core";
+} from "../model";
+import type { EditorStore } from "../store";
 
 function structuralChildren(store: EditorStore, id: NodeId): readonly NodeId[] {
   const node = store.getNode(id);

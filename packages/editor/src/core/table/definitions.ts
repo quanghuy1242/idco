@@ -29,12 +29,12 @@ import {
   type NodeId,
   type RichTextCompatNode,
   type StructuralNode,
-} from "./model";
+} from "../model";
 import type {
   StructuralDefinition,
   StructuralExportContext,
   StructuralSubtree,
-} from "./structural-registry";
+} from "../structural-registry";
 
 // Per-cell header bitfield (legacy `TableCellHeaderStates`): ROW=1, COLUMN=2.
 const HEADER_ROW = 1;

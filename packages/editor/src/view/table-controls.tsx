@@ -43,7 +43,7 @@ import {
   toggleHeaderColumn,
   toggleHeaderRow,
   toggleRowNumbers,
-} from "./table-operations";
+} from "../core/table/operations";
 
 const MIN_WIDTH = 48;
 const BAND_LEFT = 28;

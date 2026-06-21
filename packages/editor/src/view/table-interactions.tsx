@@ -25,7 +25,7 @@ import {
   setCellVerticalAlign,
   tableGrid,
   unmergeCell,
-} from "./table-operations";
+} from "../core/table/operations";
 
 type Coords = { readonly row: number; readonly col: number };
 

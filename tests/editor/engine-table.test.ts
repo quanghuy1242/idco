@@ -50,7 +50,7 @@ import {
   toggleHeaderRow,
   toggleRowNumbers,
   unmergeCell,
-} from "../../packages/editor/src/view/table-operations";
+} from "../../packages/editor/src/core/table/operations";
 
 function structural(store: EditorStore, id: NodeId): StructuralNode {
   const node = store.getNode(id);
@@ -1144,7 +1144,7 @@ describe("table — the SPI guardrail (docs/021 §10, docs/022 §12)", () => {
     // docs/021 §10 / docs/022 §12: grid semantics compose general primitives; no
     // `if (type === "tablecell"/"tablerow"/"editor-table")` welded into a core
     // command compiler or a compat branch. The table family lives only in the
-    // registered `core/table.ts` definition and the view/feature layer.
+    // registered `core/table/definitions.ts` and the view/feature layer.
     const coreDir = join(process.cwd(), "packages/editor/src/core");
     const guardedFiles = [
       "commands/objects.ts",
