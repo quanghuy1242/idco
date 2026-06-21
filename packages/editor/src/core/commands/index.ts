@@ -23,8 +23,8 @@ import {
 } from "./blocks";
 import {
   compileInsertBlocks,
-  compileInsertCallout,
   compileInsertObject,
+  compileInsertStructural,
   compileMoveBlock,
   compileRemoveBlock,
   compileSetObjectData,
@@ -93,7 +93,7 @@ export type EditorCommand =
       readonly type: "insert-blocks";
       readonly nodes: readonly EditorNode[];
     }
-  | { readonly type: "insert-callout" }
+  | { readonly type: "insert-structural"; readonly structuralType: string }
   | {
       readonly type: "set-object-data";
       readonly node: NodeId;
@@ -130,10 +130,13 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
     command.type === "insert-blocks"
       ? compileInsertBlocks(store, command.nodes)
       : null,
-  "insert-callout": (store) => compileInsertCallout(store),
   "insert-object": (store, command) =>
     command.type === "insert-object"
       ? compileInsertObject(store, command.objectType, command.data)
+      : null,
+  "insert-structural": (store, command) =>
+    command.type === "insert-structural"
+      ? compileInsertStructural(store, command.structuralType)
       : null,
   "insert-text": (store, command) =>
     command.type === "insert-text"

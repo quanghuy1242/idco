@@ -14,10 +14,14 @@ import { calloutTone } from "../resting-document";
 import { structuralContainerStyle } from "../styles";
 
 export const calloutStructuralView: StructuralNodeView = {
-  // The insert menu inserts a callout through its own structural command (docs/019);
-  // the callout is a scope holding one empty paragraph, not an atom.
+  // The insert menu inserts a callout through the generic structural command (note
+  // §7); its initial subtree (a scope holding one empty paragraph, not an atom)
+  // comes from the `callout` StructuralDefinition's `createSubtree`.
   insert: {
-    createCommand: () => ({ type: "insert-callout" }),
+    createCommand: () => ({
+      structuralType: "callout",
+      type: "insert-structural",
+    }),
     group: "Blocks",
     icon: "Info",
     keywords: ["callout", "note", "aside", "admonition"],

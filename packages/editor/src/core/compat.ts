@@ -57,6 +57,7 @@ import {
   type NodeId,
   type RichTextCompatDocument,
   type RichTextCompatNode,
+  type StructuralNodeType,
   type TextContent,
   type TextLeafNode,
   type TextLeafType,
@@ -67,6 +68,10 @@ import {
   type BlockRegistry,
   type UnknownObjectPolicy,
 } from "./registry";
+import {
+  getStructuralDefinition,
+  isStructuralDefinitionType,
+} from "./structural-registry";
 import { createEditorStore, type EditorStore } from "./store";
 import { safeHref } from "./url-safety";
 
@@ -310,21 +315,35 @@ function importCompatNode(
     );
     return [id];
   }
-  if (node.type === "callout") {
-    // A callout is a structural container holding block children (docs/019): it can
-    // nest paragraphs, lists, etc. A callout carrying block children imports them
-    // directly; one carrying only inline text wraps that text in a single paragraph
-    // so the legacy inline-content shape becomes the same container model.
-    const children = hasBlockChildren(node.children)
-      ? (node.children ?? []).flatMap((child) => importCompatNode(child, state))
-      : importInlineAsParagraph(node, state);
+  /*
+   * Registry-driven structural import (note §7). A structural type with a
+   * registered `StructuralDefinition` (callout today, the future table) imports
+   * through its own `fromCompatNode`, so core keeps no per-type branch — the
+   * structural twin of the object registry path below. `quote`/`list`/`listitem`
+   * remain hardcoded above until they are migrated (their list-flattening is a
+   * legitimate dialect concern, not a cheat — note §7).
+   */
+  const structuralDefinition = getStructuralDefinition(node.type);
+  if (structuralDefinition) {
+    const result = structuralDefinition.fromCompatNode(node, {
+      allocator: state.allocator,
+      hasBlockChildren,
+      importChildren: (children) =>
+        (children ?? []).flatMap((child) => importCompatNode(child, state)),
+      importInlineAsParagraph: (inlineNode) =>
+        importInlineAsParagraph(inlineNode, state),
+      pickAttrs,
+    });
     state.blocks.set(
       id,
       makeStructuralNode({
-        attrs: pickAttrs(node, ["tone"]),
-        children,
+        attrs: result.attrs,
+        children: result.children,
         id,
-        type: "callout",
+        // The closed union still types `makeStructuralNode`; only registered
+        // built-ins (callout) reach here today. The union opens with the table
+        // (note §7 step 3), which is when this cast goes away.
+        type: node.type as StructuralNodeType,
       }),
     );
     return [id];
@@ -822,9 +841,9 @@ function isBlockChild(node: RichTextCompatNode): boolean {
     node.type === "editor-heading" ||
     node.type === "quote" ||
     node.type === "editor-quote" ||
-    node.type === "callout" ||
     node.type === "list" ||
     node.type === "editor-list" ||
+    isStructuralDefinitionType(node.type) ||
     isBuiltInObjectCompatType(node.type)
   );
 }

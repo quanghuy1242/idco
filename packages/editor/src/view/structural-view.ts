@@ -10,18 +10,16 @@
  * each structural type registers a `StructuralNodeView` and the dispatcher keeps
  * no node-type knowledge (docs/016 §10).
  *
- * Scope: this is the **view half** only. A framework-free `StructuralDefinition`
- * (core) half is deliberately NOT built yet, because no current structural type
- * needs core behavior the closed `StructuralNodeType` union does not already
- * provide: scope membership is structural-by-kind (`childrenOf` in `commands.ts`
- * treats every `kind === "structural"` node as a scope — there is no per-type
- * `isScope`), compat import/export is the dialect boundary welded to the union
- * (`compat.ts`), and callout insertion is the `insert-callout` core command.
- * Per docs/020 §4.1, "a purely-visual structural node (callout) needs only the
- * view half"; the core half lands with the first structural type that needs core
- * behavior the union can't express — the faithful table (docs/020 §11), which
- * that document already defers. Adding an unread core registry now would be dead
- * code, so it is intentionally omitted, not deferred work for the current types.
+ * Scope: this is the **view half**. Its core twin — `StructuralDefinition`
+ * (`core/structural-registry.ts`) — owns a structural type's insert subtree and
+ * compat round-trip, so a registered type now inserts (generic `insert-structural`
+ * command) and survives save/load with no per-type core branch (note §7). Both
+ * halves register through the same `registerNode({ structuralView,
+ * structuralDefinition })` front. Scope membership is still structural-by-kind
+ * (`childrenOf` treats every `kind === "structural"` node as a scope — there is no
+ * per-type `isScope`). The closed `StructuralNodeType` union (`model.ts`) is not
+ * opened to external types yet; that lands with the docs/019 table (note §7 step
+ * 3). `quote`/`list`/`listitem` keep hardcoded compat branches until migrated.
  */
 import type { ReactNode } from "react";
 import type {
@@ -66,7 +64,11 @@ export type StructuralNodeViewInsert = {
   readonly keywords?: readonly string[];
   /** lucide icon name for the insert menu item (defaults to a generic block). */
   readonly icon?: string;
-  /** The command the insert menu dispatches (e.g. `{ type: "insert-callout" }`). */
+  /**
+   * The command the insert menu dispatches — the generic
+   * `{ type: "insert-structural", structuralType }` for a registered structural
+   * core (note §7).
+   */
   createCommand(): EditorCommand;
 };
 

@@ -67,6 +67,19 @@ export {
   registerGlobalNodeDefinition,
 } from "./registry";
 export type {
+  StructuralCompatContext,
+  StructuralCompatResult,
+  StructuralDefinition,
+  StructuralSubtree,
+} from "./structural-registry";
+export {
+  BUILT_IN_STRUCTURAL_DEFINITIONS,
+  getStructuralDefinition,
+  globalStructuralDefinitions,
+  isStructuralDefinitionType,
+  registerGlobalStructuralDefinition,
+} from "./structural-registry";
+export type {
   BakeObjectResult,
   BakeWorkerJob,
   BakeWorkerResult,

@@ -16,12 +16,14 @@
 import type { ReactNode, RefObject } from "react";
 import {
   registerGlobalNodeDefinition,
+  registerGlobalStructuralDefinition,
   type BakedSnapshot,
   type JsonValue,
   type NodeDefinition,
   type NodeId,
   type ObjectNode,
   type EditorStore,
+  type StructuralDefinition,
 } from "../core";
 import {
   registerStructuralView,
@@ -161,13 +163,15 @@ export function listInsertableNodes(): readonly (NodeView & {
 /**
  * The halves of a node, for the one-call registration in docs/016 §7 / docs/020
  * §4.2. An object node provides `view` (+ optional `definition`); a structural
- * container provides `structuralView`. Exactly one of `view`/`structuralView` is
- * expected per call.
+ * container provides `structuralView` (+ optional `structuralDefinition`, the core
+ * half that owns its insert subtree and compat round-trip, note §7). Exactly one
+ * of `view`/`structuralView` is expected per call.
  */
 export type RegisterNodeArgs = {
   readonly view?: NodeView;
   readonly definition?: NodeDefinition;
   readonly structuralView?: StructuralNodeView;
+  readonly structuralDefinition?: StructuralDefinition;
 };
 
 /**
@@ -198,7 +202,19 @@ export function registerNode(args: RegisterNodeArgs): void {
       `registerNode: definition.type "${args.definition.type}" !== view.type "${args.view.type}".`,
     );
   }
+  if (
+    args.structuralDefinition &&
+    args.structuralView &&
+    args.structuralDefinition.type !== args.structuralView.type
+  ) {
+    throw new Error(
+      `registerNode: structuralDefinition.type "${args.structuralDefinition.type}" !== structuralView.type "${args.structuralView.type}".`,
+    );
+  }
   if (args.definition) registerGlobalNodeDefinition(args.definition);
   if (args.view) registerNodeView(args.view);
   if (args.structuralView) registerStructuralView(args.structuralView);
+  if (args.structuralDefinition) {
+    registerGlobalStructuralDefinition(args.structuralDefinition);
+  }
 }

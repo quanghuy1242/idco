@@ -43,6 +43,11 @@ export {
   BUILT_IN_OBJECT_DEFINITIONS,
   bakeObjectData,
   buildDocumentIndex,
+  registerGlobalStructuralDefinition,
+  globalStructuralDefinitions,
+  getStructuralDefinition,
+  isStructuralDefinitionType,
+  BUILT_IN_STRUCTURAL_DEFINITIONS,
   type NodeDefinition,
   type BlockDefinition,
   type NodeAnchor,
@@ -52,6 +57,10 @@ export {
   type DocumentIndex,
   type TocEntry,
   type TextIndexEntry,
+  type StructuralDefinition,
+  type StructuralSubtree,
+  type StructuralCompatContext,
+  type StructuralCompatResult,
 } from "./core";
 
 // ============================================================================

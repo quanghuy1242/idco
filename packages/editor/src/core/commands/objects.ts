@@ -1,8 +1,6 @@
 /** Object/structural insert + mutation compilers (docs/020 §7.5). */
 import {
   makeObjectNode,
-  makeStructuralNode,
-  makeTextNode,
   pointAtOffset,
   type EditorNode,
   type EditorSelection,
@@ -10,6 +8,7 @@ import {
   type NodeId,
 } from "../model";
 import { bakeObjectData } from "../bake";
+import { getStructuralDefinition } from "../structural-registry";
 import type { EditorStore, TransactionBuilder } from "../store";
 import {
   insertionPointForInsert,
@@ -113,33 +112,35 @@ export function compileInsertBlocks(
 }
 
 /**
- * Insert a callout — a structural container holding one empty paragraph — at the
- * caret and land the caret inside that paragraph (docs/019 §4). A callout is a
- * scope, not an atom: it can later hold lists/paragraphs, and an arrow can walk
- * into and out of it. The container plus its inner paragraph are inserted as one
- * subtree (one invertible transaction).
+ * Insert a structural container at the caret (the generic structural insert, note
+ * §7). The container's initial subtree (root + descendants + caret target) comes
+ * from the type's `StructuralDefinition.createSubtree`, so no per-type command is
+ * needed — callout, the future table, and any registered structural type all
+ * insert through this one path. A structural node is a scope, not an atom: it can
+ * hold lists/paragraphs and an arrow can walk into and out of it. The container
+ * plus its descendants are inserted as one subtree (one invertible transaction);
+ * the caret lands in the definition's `caret` leaf when it has one.
  */
-export function compileInsertCallout(
+export function compileInsertStructural(
   store: EditorStore,
+  structuralType: string,
 ): TransactionBuilder | null {
-  const paragraphId = store.allocator.createNodeId();
-  const paragraph = makeTextNode({
-    content: store.allocator.createTextSlice(""),
-    id: paragraphId,
-    type: "paragraph",
-  });
-  const calloutId = store.allocator.createNodeId();
-  const callout = makeStructuralNode({
-    attrs: { tone: "info" },
-    children: [paragraphId],
-    id: calloutId,
-    type: "callout",
-  });
+  const definition = getStructuralDefinition(structuralType);
+  if (!definition) return null;
+  const subtree = definition.createSubtree(store.allocator);
   const tr = store.transaction();
   const point = insertionPointForInsert(tr, store);
-  placeSubtree(tr, store, point, callout, [paragraph]);
-  const focus = pointAtOffset(paragraphId, paragraph.content, 0);
-  return tr.setSelection({ anchor: focus, focus, type: "text" });
+  placeSubtree(tr, store, point, subtree.root, subtree.descendants);
+  if (subtree.caret) {
+    const caretNode =
+      subtree.descendants.find((node) => node.id === subtree.caret) ??
+      (subtree.root.id === subtree.caret ? subtree.root : undefined);
+    if (caretNode?.kind === "text") {
+      const focus = pointAtOffset(caretNode.id, caretNode.content, 0);
+      return tr.setSelection({ anchor: focus, focus, type: "text" });
+    }
+  }
+  return tr.setSelection({ node: subtree.root.id, type: "node" });
 }
 
 /**

@@ -6,7 +6,7 @@
  *
  * - the built-in `callout` and `list` structural views are registered with both
  *   halves (live `renderContainer` + resting `renderResting`), and callout offers
- *   an insert affordance whose command is `insert-callout`;
+ *   an insert affordance whose command is the generic `insert-structural`;
  * - a brand-new synthetic structural node registered once via `registerNode`
  *   ({ structuralView }) is known to the structural registry and renders its
  *   container around the engine-provided children — the whole point of the SPI;
@@ -40,7 +40,10 @@ describe("structural SPI — built-in callout + list (docs/020 §7.1)", () => {
     expect(view).toBeDefined();
     expect(typeof view!.renderContainer).toBe("function");
     expect(typeof view!.renderResting).toBe("function");
-    expect(view!.insert?.createCommand()).toEqual({ type: "insert-callout" });
+    expect(view!.insert?.createCommand()).toEqual({
+      structuralType: "callout",
+      type: "insert-structural",
+    });
   });
 
   it("registers the list view with both halves", () => {

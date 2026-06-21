@@ -4,7 +4,8 @@
  *
  * - Block `indent` persists through the compat round-trip and is applied by the
  *   resting render (it was editor-session-only before).
- * - `callout` is a structural container (docs/019): inserted via `insert-callout`,
+ * - `callout` is a structural container (docs/019): inserted via the generic
+ *   `insert-structural` command (note §7),
  *   it holds block children and renders as a styled `<aside role="note">` at rest,
  *   with its `tone` carried onto a data attribute.
  *
@@ -176,7 +177,7 @@ describe("§2.8 indent + callout in the resting render", () => {
 });
 
 describe("§2.8 callout is inserted as a structural container", () => {
-  it("insert-callout wraps an empty paragraph and lands the caret inside", () => {
+  it("insert-structural callout wraps an empty paragraph and lands the caret inside", () => {
     const allocator = createIdAllocator("idco_client_callout");
     const para = makeTextNode({
       content: allocator.createTextSlice("note me"),
@@ -202,7 +203,7 @@ describe("§2.8 callout is inserted as a structural container", () => {
       steps: [],
     });
 
-    store.command({ type: "insert-callout" });
+    store.command({ structuralType: "callout", type: "insert-structural" });
 
     const calloutId = store
       .toSnapshot()
