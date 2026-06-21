@@ -20,9 +20,11 @@
  * - `fromCompatNode` imports the legacy JSON shape into attrs + child ids
  *   (registry-driven import, mirroring the object `normalizeCompatObject` path).
  *
- * Export is already generic for any structural node (`compat.ts` spreads attrs +
- * recurses children), so there is no `toCompatNode` here yet (docs/021 §6.1; the
- * table adds that optional slot in docs/022 §4.3).
+ * Export is generic for any structural node (`compat.ts` spreads attrs + recurses
+ * children); the optional `toCompatNode` slot is for a container whose *runtime*
+ * child shape diverges from its *persisted* shape — a table cell holds a paragraph
+ * leaf at runtime but persists inline text directly (docs/022 §4.3). It is the one
+ * general slot the table adds; callout/quote omit it and export generically.
  *
  * Scope (docs/021): this is the core half, proven by migrating the built-in
  * callout off its hardcoded paths (§7). `StructuralNodeType` (`model.ts`) is the
@@ -40,6 +42,7 @@ import {
   type RichTextCompatNode,
   type StructuralNode,
 } from "./model";
+import { tableStructuralDefinitions } from "./table";
 
 /**
  * The initial subtree a structural insert builds: the container root plus its
@@ -85,8 +88,30 @@ export type StructuralCompatResult = {
 };
 
 /**
- * The core half of one structural type's contract (note §7). Paired by `type`
- * with the view-layer `StructuralNodeView`; `registerNode` registers both halves.
+ * The export machinery a `StructuralDefinition.toCompatNode` borrows from
+ * `compat.ts`, mirroring the import `StructuralCompatContext`. A container whose
+ * persisted child shape differs from its runtime shape (a table cell) uses this to
+ * project back — flatten a sole paragraph child to the cell's inline text.
+ */
+export type StructuralExportContext = {
+  /** The resolved node for an id, or undefined (a dangling child reference). */
+  getNode(id: NodeId): EditorNode | undefined;
+  /** Recurse the generic export over a run of child ids. */
+  exportChildren(ids: readonly NodeId[]): readonly RichTextCompatNode[];
+  /** A text leaf's legacy inline children (the compat split-text projection). */
+  inlineChildren(node: EditorNode): readonly RichTextCompatNode[];
+};
+
+/** What a structural export projects a node into (merged with id + type). */
+export type StructuralExportResult = {
+  readonly attrs?: JsonObject;
+  readonly children: readonly RichTextCompatNode[];
+};
+
+/**
+ * The core half of one structural type's contract (docs/021 §6.1). Paired by
+ * `type` with the view-layer `StructuralNodeView`; `registerNode` registers both
+ * halves.
  */
 export type StructuralDefinition = {
   readonly type: string;
@@ -97,6 +122,15 @@ export type StructuralDefinition = {
     node: RichTextCompatNode,
     ctx: StructuralCompatContext,
   ): StructuralCompatResult;
+  /**
+   * Project the node back to its persisted compat children (docs/022 §4.3).
+   * Optional: omit it and export is the generic "attrs + recursed children". Only
+   * a container whose persisted shape diverges from its runtime shape needs it.
+   */
+  toCompatNode?(
+    node: StructuralNode,
+    ctx: StructuralExportContext,
+  ): StructuralExportResult;
 };
 
 /**
@@ -136,9 +170,9 @@ function calloutStructuralDefinition(): StructuralDefinition {
   };
 }
 
-/** Built-in structural cores (note §7: only callout migrated so far). */
+/** Built-in structural cores: callout (docs/021 §7) + the table family (docs/022). */
 export const BUILT_IN_STRUCTURAL_DEFINITIONS: readonly StructuralDefinition[] =
-  [calloutStructuralDefinition()];
+  [calloutStructuralDefinition(), ...tableStructuralDefinitions()];
 
 const BUILT_IN_BY_TYPE = new Map(
   BUILT_IN_STRUCTURAL_DEFINITIONS.map((definition) => [

@@ -47,6 +47,7 @@ import {
   wordRangeAt,
 } from "./navigation";
 import { requestFrame } from "./raf";
+import { tabWithinTable } from "./table-operations";
 import { leafHasMarks, renderLeafMarks } from "./mark-render";
 import { ariaLabelForLeaf } from "./selection-overlay";
 import { blockStyleFor, listItemStyle, type ListItemMeta } from "./styles";
@@ -573,7 +574,12 @@ export function EngineTextBlock(props: {
       }
       if (event.key === "Tab") {
         event.preventDefault();
-        runEditCommand({ type: event.shiftKey ? "outdent" : "indent" });
+        // Inside a table cell, Tab walks to the next/previous cell (docs/022 §5);
+        // anywhere else it indents/outdents as before. `tabWithinTable` is a no-op
+        // returning false when the caret is not in a table.
+        if (!tabWithinTable(store, !event.shiftKey)) {
+          runEditCommand({ type: event.shiftKey ? "outdent" : "indent" });
+        }
         return;
       }
       if (event.key === "Backspace" || event.key === "Delete") {

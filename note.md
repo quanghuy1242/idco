@@ -1,5 +1,7 @@
 # Editor node-SPI notes (post docs/020 refactor)
 
+> **SUPERSEDED 2026-06-21 — throwaway draft.** The durable design now lives in two docs: the engine/SPI design in [docs/021](docs/021_structural_node_spi.md) (the structural Node SPI — symmetric core half + extension surface) and the table feature in [docs/022](docs/022_live_editable_table.md) (the live editable table). This file holds no information not captured there; keep it only as scratch.
+
 > Scratch notes captured after the docs/020 refactor + CI fix. Covers: the callout
 > node lifecycle, what the object SPI lets a user do (with a full worked example),
 > whether object and structural SPIs are "the same shape," whether a third party
@@ -8,20 +10,30 @@
 > Source of truth is still `docs/016` (object SPI), `docs/020` (this refactor),
 > `docs/019` (positional model / table fork). This file is a digest, not a spec.
 
+> **Update 2026-06-21:** the structural **core half is now built and proven by
+> callout** (steps 1–2 of §7 done). The "only half-pluggable / store half hardcoded"
+> framing below in §1, §3.1, §4 describes the *pre-step-1* state and is kept as the
+> historical baseline; the authoritative current state is §7.2. The one barrier that
+> remains is the closed `StructuralNodeType` union, which opens with the table (§7).
+
 ## TL;DR
 
 - **Object blocks** (atomic / heavy content) are **fully pluggable from outside the
   editor package today** — one `registerNode({ definition, view })` call, no core
   edits, including persistence, bake, search, live-edit, undo.
 - **Structural containers** (block children, nested carets, gap-nav — e.g. callout)
-  are **only half-pluggable today**: the *view* half is a registry (`StructuralNodeView`),
-  but the *store/persistence* half is still hardcoded in core. A brand-new
-  structural type cannot round-trip save/load or own its insert without core edits.
+  are now pluggable through a **symmetric core half** (`core/structural-registry.ts`'s
+  `StructuralDefinition` = `createSubtree` + `fromCompatNode`) registered via the same
+  `registerNode({ structuralView, structuralDefinition })` front. A registered
+  structural type owns its insert (generic `insert-structural`) and round-trips
+  save/load with **no per-type core branch**. The only remaining gap: the closed
+  `StructuralNodeType` union still types `makeStructuralNode`, so a *genuinely new*
+  type (not callout) needs the union opened — that lands with the table (§7).
 - **Object built-in vs object external = identical shape.** **Structural (callout)
   vs object = deliberately different shape** (different contract), but both register
   through the **same** `registerNode` front.
-- The structural core half is **sketched + scheduled to land with the 019 table**;
-  making it open to *third-party* authors is a further, explicitly-deferred change.
+- Making structural nodes open to *third-party* authors (the public union opening) is
+  the last deferred piece; the engine-internal core half is done.
 
 ---
 
@@ -303,81 +315,85 @@ includes globally-registered custom definitions, and `compat.ts` import/export i
 registry-driven for objects, so save/load + bake + the worker all see your node with no
 core change. The insert is the generic `insert-object` command. Fully external. (See §2.)
 
-### 4.2 Structural node: NO — not today (view-only). Four concrete barriers
+### 4.2 Structural node: the four barriers — three RESOLVED (steps 1–2), one remains
 
-1. **No core half exists.** `registerNode` accepts `{ view, definition, structuralView }`
-   — there is **no `structuralDefinition`**. Nowhere to declare core behavior.
-2. **Closed type union.** `StructuralNode.type: StructuralNodeType` =
-   `"body"|"list"|"listitem"|"quote"|"callout"`. `makeStructuralNode` is typed to it, so a
-   new `type:"admonition"` fails typecheck (runtime is permissive — `childrenOf` treats any
-   `kind:"structural"` as a scope — but you'd be casting past the type system).
-3. **No persistence round-trip hook (the real blocker).** In `core/compat.ts`, structural
-   types are **hardcoded branches** (`if (node.type === "callout")` etc.). There is **no**
-   registry equivalent of `isObjectNodeType`/`normalizeCompatObject` for structural nodes.
-   A custom structural node would be dropped on load and unknown on save. Can't fix without
-   editing `compat.ts`.
-4. **Insertion can only reuse existing commands.** `StructuralNodeView.insert.createCommand()`
-   must return an `EditorCommand`, and that union is **closed** (`insert-text`,
-   `insert-object`, `insert-blocks`, `insert-callout`). No generic `insert-structural`, and
-   `placeSubtree` (atomic container-with-children insert) isn't exported. So you can't
-   register a *new* insert command that builds your container's subtree.
+> Original framing kept for the record; ✅/❌ reflect the post-step-2 state (§7.2).
 
-### 4.3 What a third party *can* do for structural without core edits
+1. ✅ **Core half exists now.** `registerNode` accepts `structuralDefinition`;
+   `core/structural-registry.ts` declares core behavior (`createSubtree` +
+   `fromCompatNode`).
+2. ❌ **Closed type union — STILL the one open barrier.** `StructuralNode.type:
+   StructuralNodeType` = `"body"|"list"|"listitem"|"quote"|"callout"`. `makeStructuralNode`
+   is typed to it, so a new `type:"table"` needs the union opened (one `as StructuralNodeType`
+   cast bridges it today in the compat branch). **This is exactly what the table opens (§7
+   step 3).**
+3. ✅ **Persistence round-trip hook added.** `compat.ts` import is registry-driven via
+   `getStructuralDefinition`/`isStructuralDefinitionType` (the structural twin of
+   `isObjectNodeType`/`normalizeCompatObject`); export was already generic. No hardcoded
+   `if (node.type === "callout")` branch anymore.
+4. ✅ **Generic insert added.** `insert-structural` command + exported `placeSubtree`; a
+   structural view's `createCommand()` returns `{ type:"insert-structural", structuralType }`
+   and the definition's `createSubtree` builds the container subtree.
+
+### 4.3 What a third party *can* do for structural without core edits (post-step-2)
 
 - **Render** live + resting via `registerNode({ structuralView })` ✓
+- **Insert + save/load round-trip** via `registerNode({ structuralView,
+  structuralDefinition })` ✓ (was the gap; now closed for any type that fits the existing
+  union, e.g. re-skinning callout/quote behavior)
 - **Scope / gap-cursor / arrow-in-out / selection / deletion** — generic by
   `kind:"structural"`, free ✓
-- **Insertion** — reuse `insert-blocks` (flat) or hand-roll a transaction with exported
-  primitives (`makeStructuralNode`, `TransactionBuilder`, step types, `store.dispatch`) —
-  but that goes *around* the command layer, still casts past the closed union, and **still
-  won't persist** (barrier 3).
-
-So: render + interaction yes; a node that genuinely **survives save/load and owns its
-store lifecycle**, no.
+- **The only thing still requiring a core edit:** a *genuinely new* `type` string, because
+  `makeStructuralNode`'s `StructuralNodeType` union is closed (barrier 2). Opening it is the
+  table's job (§7 step 3); after that, fully-external structural nodes are the same one-call
+  story objects enjoy.
 
 ---
 
-## 5. Structural plan status: deferred-with-a-sketch, not "nothing but 019"
+## 5. Structural plan status (corrected 2026-06-21)
 
-Two different things, distinguished by docs/020:
+The pre-step-1 version of this section called the core half a "deferred sketch driven by
+the table." That is now stale. Current reality:
 
-### 5.1 Engine-internal structural core half — sketched + scheduled, driven by the table
+### 5.1 Engine-internal structural core half — BUILT (steps 1–2, §7.2)
 
-- docs/020 §4.1 **sketches the `StructuralDefinition` shape**
-  (`{ type, isScope?, normalizeChildren? }`); §10 R1 even lists a task "Add
-  `core/structural-registry.ts`" — but it was **deliberately not built** (it'd be dead code
-  today: scope-ness is structural-by-kind via `childrenOf`, no per-type `isScope`).
-- §11 names the **driver**: *"Table node as a structural container (docs/019 §5.2)…
-  Replaces the opaque `tableNodeView` with a `StructuralNodeView` + `StructuralDefinition`."*
-  So building the 019 table **forces** the core half (insert + compat + scope/normalization)
-  for the table.
-- §5.6 is explicit: *"The table is added as a new `StructuralNodeType` member **inside the
-  engine**."* → engine-internal capability, built by us for the table.
+`core/structural-registry.ts` exists: `StructuralDefinition` = `createSubtree` +
+`fromCompatNode`, wired into `registerNode`, with a registry-driven compat-import hook and
+the generic `insert-structural` command. Proven by migrating callout off its hardcoded
+paths (core has zero `callout` knowledge). It is **not** dead code — callout consumes it.
+docs/020 §4.1's sketch (`isScope?`, `normalizeChildren?`) was deliberately NOT added: those
+are still unneeded (scope-ness is structural-by-kind via `childrenOf`), and we add SPI slots
+only when a consumer demands them — the table is expected to add some, and that's healthy.
 
-### 5.2 Fully external, third-party structural nodes — intent acknowledged, out of scope
+### 5.2 The table is GREENFIELD, not a migration
 
-- §5.6 **rejects it for first release**: *"Opening the closed structural union to external
-  authors… a far deeper change books may need later, not blog parity now."*
-- §11 lists it as future: *"Open structural kinds to external authors… promote
-  `StructuralNodeType` from a closed union to a registry-driven open set — **a deeper
-  change explicitly out of this document's scope**."*
+Correction to earlier framing: there is **no rich owned table to migrate.** The owned
+`table`/`editor-table` is a **read-only baked object** (`view/nodes/table.tsx`,
+`configurable:false`, `renderResting` only) — it parses opaque legacy JSON and paints a
+static grid so old docs don't break. No cell carets, no resize, no add row/col, **below
+legacy-Lexical parity** (the real editing lives in `legacy/plugins/table-*-plugin.tsx`).
 
-### 5.3 Net
+So step 3 is building the **first real editable structural table** from scratch:
+- **opens** the closed `StructuralNodeType` union (barrier 2) for `table`/`row`/`cell`;
+- a `StructuralDefinition` whose `createSubtree` builds `table → rows → cells → paragraphs`
+  (deep subtree — the `insert-node` step already carries flat descendants of any depth,
+  `editor-store.ts` ~1219, so the plumbing holds);
+- a `fromCompatNode` that *imports* the legacy/baked table JSON into that structural tree
+  (parsing an opaque shape, not migrating internal state);
+- the docs/019 **2D positional model**: cells as nested scopes, arrow/caret geometry across
+  the grid, selection, add/remove row+col, resize, header toggle — the real, large work.
 
-It is **not** "nothing but 019," and **not** "fully planned." It is:
+This is the genuine "second consumer that validates the SPI": callout exercised the linear
+case, the table exercises nesting + 2D geometry. Expect it to *extend* `StructuralDefinition`
+(new optional slots) — that's the contract learning from a second shape, not a failure. The
+red flag to refuse: `if (type === "table")` branches creeping back into core.
 
-- a **documented sketch** (the `StructuralDefinition` shape, §4.1), +
-- a **concrete near-term driver** (the 019 table, which builds the core structural half for
-  *engine-internal* types, §11), +
-- an **explicit, unscheduled future item** for the part actually asked about — *external /
-  third-party* structural nodes — which needs opening the closed `StructuralNodeType` union
-  and adding a structural-compat registry hook, deliberately deferred as a deeper change.
+### 5.3 Fully external, third-party structural nodes — last deferred piece
 
-When that last item is picked up (the symmetric core half: `core/structural-registry.ts`
-`StructuralDefinition` wired into `registerNode`, a compat registry hook so structural
-import/export stops being a hardcoded switch, an opened/registry-driven type, and a
-registry-driven insert), a custom structural node becomes the same one-call, fully-external
-story objects already enjoy. docs/020 §13 calls this end state "one symmetric Node SPI."
+Opening the union *publicly* (promote `StructuralNodeType` from a closed union to a
+registry-driven open set as public API) is the only remaining deferral. The table opens it
+*internally*; exposing that to outside authors is the final, smaller follow-up — docs/020
+§13's "one symmetric Node SPI" end state.
 
 ---
 
@@ -436,9 +452,13 @@ Why this order:
    `insert-structural`. **Done when core has zero `callout` knowledge.** This is the proof
    the table would otherwise be (badly).
 
-3. **Land the table** (docs/019) as `StructuralNodeView` + `StructuralDefinition`, no core
-   edits. Two differently-shaped consumers (pure container + grid) now validate the
-   contract.
+3. **Build the table** (docs/019) as `StructuralNodeView` + `StructuralDefinition`.
+   ⚠️ *Corrected:* this is **greenfield, not a migration, and it DOES touch core** (see
+   §5.2). It opens the `StructuralNodeType` union for `table`/`row`/`cell`, adds the 2D
+   positional model, and imports the legacy baked-table JSON. Two differently-shaped
+   consumers (callout = linear container, table = nested 2D grid) then validate — and likely
+   *extend* — the contract. The guardrail: new optional `StructuralDefinition` slots = good;
+   `if (type==="table")` in core = the SPI failing, refuse it.
 
 4. **Opportunistic mop-up.** Migrate `quote`; decide about `list/listitem` — likely leave
    their flattening in core as a legitimate dialect concern. Defer the public third-party
@@ -461,5 +481,28 @@ Why this order:
   logic live in its `StructuralDefinition`. **Core has zero `callout`-specific knowledge**
   (no `insert-callout` command, no `if (type==="callout")` compat branch). Proof green:
   typecheck clean, all 768 vitest pass, format clean.
-- [ ] Step 3 — table (opens the union; second consumer of the SPI)
+- [ ] Step 3 — table (greenfield editable structural table; opens the union; second
+  consumer of the SPI; touches core — §5.2)
 - [ ] Step 4 — quote/list mop-up + public opening (deferred)
+
+### 7.3 Node-kind taxonomy — which kind is each "placeholder"?
+
+Two built-ins render as placeholders today, but for **opposite** reasons — only one is
+miscategorized:
+
+- **`table` → belongs STRUCTURAL, currently a stand-in object.** A table owns
+  engine-navigable block children (cells with carets). It is an object today only because
+  the structural editing was never built. → step 3 moves it to its correct kind.
+- **`table-of-contents` → correctly an OBJECT, stays an object.** A TOC owns **no**
+  navigable children: its entries are *derived* from the document's headings at publish time
+  (`buildDocumentIndex`), and its only editable data is settings (title/levels/placement),
+  edited via the config popover (`configFields`). It renders a marker in the editor *by
+  design* (the per-node view doesn't have the whole document), not because it's unfinished.
+  Making it structural would be miscategorization — there are no children to navigate. It is
+  already complete as an object (insert + config + bake + reader-side derivation all work).
+
+The dividing line, restated: **structural = owns block children the engine renders
+recursively with carets/scopes** (callout, list, quote, table). **object = atomic, opaque
+internals, no navigable children** (media, embed, divider, code-block, math, TOC). "Renders
+a placeholder" is orthogonal to kind — TOC is a finished object that shows a marker; table is
+an unfinished feature wearing an object costume.

@@ -135,16 +135,16 @@ describe("parity checklist (AC4)", () => {
     expect(store.requireTextNode(id).type).toBe("listitem");
   });
 
-  it("tables: an inserted table object round-trips compat without throwing", () => {
+  it("tables: an inserted structural table round-trips compat without throwing", () => {
+    // The table is a structural container now (docs/022): it inserts via the
+    // generic `insert-structural` command and exports through its `toCompatNode`.
     const { store, id } = single("intro");
     select(store, id, 5, 5);
-    store.command({
-      data: { rows: [] },
-      objectType: "table",
-      type: "insert-object",
-    });
+    store.command({ structuralType: "table", type: "insert-structural" });
     expect(() => compatFromEditorStore(store)).not.toThrow();
     expect(store.order.length).toBe(2);
+    const table = store.getNode(store.order[1]!);
+    expect(table?.kind === "structural" && table.type).toBe("table");
   });
 
   it("glossary + comments: range marks are indexed by the document index", () => {

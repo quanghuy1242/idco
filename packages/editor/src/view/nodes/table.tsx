@@ -1,110 +1,168 @@
 /**
- * The built-in `table` node view (docs/016 §10, docs/020 §7.2).
+ * The built-in table structural views (docs/022 §4.4).
  *
- * The owned `table` is an opaque object that round-trips and renders read-only
- * (docs/018 §2.13/§2.14): cell-by-cell editing is the deferred structural-table
- * workstream (docs/020 §11). It still renders its real grid (not a placeholder)
- * and is insertable. New tables serialize as `editor-table`; both render the same.
+ * A table is a faithful grid of structural nodes — `table → tablerow → tablecell
+ * → blocks` — so it renders through the recursive `EngineBlock`/resting dispatch
+ * the same way a callout does (docs/020 §3.7): the `table` view wraps its rendered
+ * rows, the `tablerow` view wraps its cells, the `tablecell` view wraps its block
+ * children. A cell holds normal block children, so editing inside a cell is normal
+ * block editing on a scope (docs/019 §4.2) — these views own only the grid chrome.
+ *
+ * Live and resting are co-located per type so the editor surface and the published
+ * page cannot drift. Resting reuses the shared reader components
+ * (`RichTextTable`/`Row`/`Cell`); live wraps the same frame but renders raw cells
+ * carrying the engine's block hooks (`data-engine-block-id`, `registerBlock`) the
+ * shared components do not expose. `editor-table` is the legacy serialization alias
+ * (docs/022 §3); it renders identically.
  */
 import {
   RichTextTable,
   RichTextTableCell,
   RichTextTableRow,
 } from "@quanghuy1242/idco-ui";
-import { type JsonValue } from "../../core";
-import { type NodeView } from "../node-view";
-import { asRecord, stringField } from "../object-data";
+import { type JsonValue, type StructuralNode } from "../../core";
+import { type StructuralNodeView } from "../structural-view";
 
-/** Flatten a baked node's nested text into a plain string (cell/inline content). */
-function inlineText(node: JsonValue): string {
-  const record = asRecord(node);
-  const text = stringField(record, "text");
-  if (text) return text;
-  const children = Array.isArray(record.children) ? record.children : [];
-  return children.map(inlineText).join("");
-}
+/** Cell classes copied from the reader `RichTextTableCell` so live matches rest. */
+const CELL_CLASS =
+  "border-b border-r border-base-300 px-5 py-2.5 align-top text-base-content";
+const HEADER_CLASS = "bg-base-200 text-left font-semibold";
 
-/** Render a baked table read-only via the shared reader table primitives. */
-function renderBakedTable(payload: Record<string, JsonValue>) {
-  const rows = Array.isArray(payload.children) ? payload.children : [];
-  const colWidths = Array.isArray(payload.colWidths)
-    ? payload.colWidths.filter((w): w is number => typeof w === "number")
+function numberArray(
+  value: JsonValue | undefined,
+): readonly number[] | undefined {
+  return Array.isArray(value) && value.every((n) => typeof n === "number")
+    ? (value as readonly number[])
     : undefined;
-  return (
-    <div data-engine-object-baked="table">
-      <RichTextTable
-        colWidths={colWidths}
-        layout={stringField(payload, "layout") || undefined}
-        numbered={payload.showRowNumbers === true}
-      >
-        {rows.map((row, ri) => {
-          const cells = Array.isArray(asRecord(row).children)
-            ? (asRecord(row).children as JsonValue[])
-            : [];
-          return (
-            <RichTextTableRow key={`r${ri}`}>
-              {cells.map((cell, ci) => {
-                const cellRecord = asRecord(cell);
-                const header =
-                  (typeof cellRecord.headerState === "number"
-                    ? cellRecord.headerState
-                    : 0) > 0;
-                return (
-                  <RichTextTableCell header={header} key={`c${ri}-${ci}`}>
-                    {inlineText(cell)}
-                  </RichTextTableCell>
-                );
-              })}
-            </RichTextTableRow>
-          );
-        })}
-      </RichTextTable>
-    </div>
-  );
 }
 
-/** A default table row of text cells (the Insert-menu seed). */
-function defaultTableRow(texts: readonly string[], header: boolean): JsonValue {
+function isHeaderCell(node: StructuralNode): boolean {
+  const state = node.attrs?.headerState;
+  return typeof state === "number" && state > 0;
+}
+
+function numberAttr(value: JsonValue | undefined): number | undefined {
+  return typeof value === "number" && value > 1 ? value : undefined;
+}
+
+function stringAttr(value: JsonValue | undefined): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+/** A `table`/`editor-table` view; both render identically (docs/022 §3). */
+function makeTableView(type: string): StructuralNodeView {
   return {
-    children: texts.map((text) => ({
-      children: text ? [{ text, type: "text" }] : [],
-      headerState: header ? 3 : 0,
-      type: "tablecell",
-    })),
-    type: "tablerow",
+    insert:
+      type === "table"
+        ? {
+            createCommand: () => ({
+              structuralType: "table",
+              type: "insert-structural",
+            }),
+            group: "Blocks",
+            icon: "Table",
+            keywords: ["table", "grid", "rows", "columns"],
+            label: "Table",
+          }
+        : undefined,
+    renderContainer: ({ node, registerBlock, children }) => {
+      const colWidths = numberArray(node.attrs?.colWidths);
+      const layout =
+        typeof node.attrs?.layout === "string" ? node.attrs.layout : undefined;
+      const numbered = node.attrs?.showRowNumbers === true;
+      // The whole-table chrome + the live insert/delete/resize affordances are a
+      // single hover overlay (`TableControls`, mounted once in the view), so the
+      // table itself only renders the measured grid with the engine block hooks.
+      return (
+        <div
+          data-engine-block-id={node.id}
+          data-engine-structural={type}
+          ref={(element) => registerBlock(node.id, element)}
+        >
+          <RichTextTable
+            colWidths={colWidths}
+            layout={layout}
+            numbered={numbered}
+          >
+            {children}
+          </RichTextTable>
+        </div>
+      );
+    },
+    renderResting: ({ node, children, renderSequence }) => {
+      const colWidths = numberArray(node.attrs?.colWidths);
+      const layout =
+        typeof node.attrs?.layout === "string" ? node.attrs.layout : undefined;
+      const numbered = node.attrs?.showRowNumbers === true;
+      return (
+        <div data-engine-resting-block={node.id} key={node.id}>
+          <RichTextTable
+            colWidths={colWidths}
+            layout={layout}
+            numbered={numbered}
+          >
+            {renderSequence(children)}
+          </RichTextTable>
+        </div>
+      );
+    },
+    type,
   };
 }
 
-const renderRestingTable = ({ baked }: { baked: { payload: JsonValue } }) =>
-  renderBakedTable(asRecord(baked.payload));
+export const tableStructuralView = makeTableView("table");
+export const editorTableStructuralView = makeTableView("editor-table");
 
-export const tableView: NodeView = {
-  ariaLabel: "Table",
-  chromeMeta: { icon: "Table", label: "Table" },
-  // Cell-by-cell editing is the deferred structural-table workstream, so the table
-  // has no inline config (docs/018 §2.13/§2.14, docs/020 §11).
-  configurable: false,
-  insert: {
-    createData: () => ({
-      children: [
-        defaultTableRow(["Column 1", "Column 2"], true),
-        defaultTableRow(["", ""], false),
-      ],
-    }),
-    group: "Blocks",
-    icon: "Table",
-    keywords: ["table", "grid", "rows", "columns"],
-    label: "Table",
-  },
-  renderResting: renderRestingTable,
-  type: "table",
+export const tableRowStructuralView: StructuralNodeView = {
+  renderContainer: ({ node, registerBlock, children }) => (
+    <tr
+      data-engine-block-id={node.id}
+      data-engine-structural="tablerow"
+      ref={(element) => registerBlock(node.id, element)}
+    >
+      {children}
+    </tr>
+  ),
+  renderResting: ({ children, renderSequence }) => (
+    <RichTextTableRow>{renderSequence(children)}</RichTextTableRow>
+  ),
+  type: "tablerow",
 };
 
-// New tables serialize as `editor-table`; render it identically. It carries no
-// ariaLabel/chromeMeta so it falls back to the generic labels (parity with the
-// pre-split behavior), and is not configurable.
-export const editorTableView: NodeView = {
-  configurable: false,
-  renderResting: renderRestingTable,
-  type: "editor-table",
+export const tableCellStructuralView: StructuralNodeView = {
+  renderContainer: ({ node, registerBlock, children }) => {
+    const header = isHeaderCell(node);
+    const className = header ? `${CELL_CLASS} ${HEADER_CLASS}` : CELL_CLASS;
+    const colSpan = numberAttr(node.attrs?.colSpan);
+    const rowSpan = numberAttr(node.attrs?.rowSpan);
+    const background = stringAttr(node.attrs?.backgroundColor);
+    const Tag = header ? "th" : "td";
+    return (
+      <Tag
+        className={className}
+        colSpan={colSpan}
+        data-engine-block-id={node.id}
+        data-engine-structural="tablecell"
+        ref={(element: HTMLTableCellElement | null) =>
+          registerBlock(node.id, element)
+        }
+        rowSpan={rowSpan}
+        style={background ? { background } : undefined}
+      >
+        {children}
+      </Tag>
+    );
+  },
+  renderResting: ({ node, children, renderSequence }) => (
+    <RichTextTableCell
+      backgroundColor={stringAttr(node.attrs?.backgroundColor)}
+      colSpan={numberAttr(node.attrs?.colSpan)}
+      header={isHeaderCell(node)}
+      key={node.id}
+      rowSpan={numberAttr(node.attrs?.rowSpan)}
+    >
+      {renderSequence(children)}
+    </RichTextTableCell>
+  ),
+  type: "tablecell",
 };

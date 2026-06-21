@@ -416,19 +416,38 @@ export function RichTextTableRow({ children }: RichTextChildrenProps) {
 export function RichTextTableCell({
   header,
   children,
+  colSpan,
+  rowSpan,
+  backgroundColor,
 }: RichTextChildrenProps & {
   readonly header?: boolean;
+  readonly colSpan?: number;
+  readonly rowSpan?: number;
+  readonly backgroundColor?: string;
 }) {
   const className =
     "border-b border-r border-base-300 px-5 py-2.5 align-top text-base-content";
+  // Merged cells span columns/rows; a cell background overrides the surface.
+  const span = {
+    ...(colSpan && colSpan > 1 ? { colSpan } : {}),
+    ...(rowSpan && rowSpan > 1 ? { rowSpan } : {}),
+    ...(backgroundColor ? { style: { background: backgroundColor } } : {}),
+  };
   if (header) {
     return (
-      <th className={`${className} bg-base-200 text-left font-semibold`}>
+      <th
+        {...span}
+        className={`${className} bg-base-200 text-left font-semibold`}
+      >
         {children}
       </th>
     );
   }
-  return <td className={className}>{children}</td>;
+  return (
+    <td {...span} className={className}>
+      {children}
+    </td>
+  );
 }
 
 // Margin (not padding): see the call site — `menu` owns the anchor's

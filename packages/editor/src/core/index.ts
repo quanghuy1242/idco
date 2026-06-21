@@ -70,6 +70,8 @@ export type {
   StructuralCompatContext,
   StructuralCompatResult,
   StructuralDefinition,
+  StructuralExportContext,
+  StructuralExportResult,
   StructuralSubtree,
 } from "./structural-registry";
 export {

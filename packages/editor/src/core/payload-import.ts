@@ -93,7 +93,13 @@ function youtubeToEmbed(node: PayloadNode): RichTextCompatNode {
   return { title: str(node.title), type: "embed", url };
 }
 
-/** Map a Lexical/Payload table to an opaque `table` object (round-trips). */
+/**
+ * Map a Lexical/Payload table to the `table` compat shape. The table is a
+ * structural container now (docs/022): its `tablerow`/`tablecell` children import
+ * recursively through the structural registry (`core/table.ts`), with cell
+ * paragraphs becoming the cell's block children — so a Payload table is edited, not
+ * an opaque blob. Extra Lexical keys are ignored by the table definition.
+ */
 function toTableObject(node: PayloadNode): RichTextCompatNode {
   return {
     type: "table",

@@ -46,6 +46,7 @@ import { TouchSelectionLayer } from "./touch-selection";
 import { baseViewStyle, computeWindowListMeta } from "./styles";
 import { cancelFrame } from "./raf";
 import { EngineBlock } from "./block-dispatch";
+import { TableControls } from "./table-controls";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_VIEWPORT_HEIGHT,
@@ -336,6 +337,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scheduler={scheduler}
           store={store}
         />
+        <TableControls rootRef={rootRef} store={store} />
         {isTouchDevice && (
           <TouchSelectionLayer
             actions={touchActions}
@@ -393,6 +395,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scheduler={scheduler}
           store={store}
         />
+        <TableControls rootRef={contentRef} store={store} />
         {isTouchDevice && (
           <TouchSelectionLayer
             actions={touchActions}

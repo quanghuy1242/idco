@@ -59,6 +59,7 @@ await import("./editor/engine-objects.test");
 await import("./editor/engine-node-spi.test");
 await import("./editor/engine-structural-spi.test");
 await import("./editor/engine-structural-child-commands.test");
+await import("./editor/engine-table.test");
 await import("./editor/engine-compat-links.test");
 await import("./editor/engine-mark-render.test");
 await import("./editor/engine-commands-phase8.test");

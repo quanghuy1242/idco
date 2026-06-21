@@ -438,6 +438,30 @@ function exportCompatNode(
     return [exportTextNode(node)];
   }
   if (node.kind === "structural") {
+    // A registered type whose persisted child shape diverges from its runtime
+    // shape projects through its `toCompatNode` (the table cell's paragraph →
+    // inline text, docs/021 §6.1 / docs/022 §4.3); everything else exports
+    // generically (attrs + recursed children).
+    const definition = getStructuralDefinition(node.type);
+    if (definition?.toCompatNode) {
+      const result = definition.toCompatNode(node, {
+        exportChildren: (ids) =>
+          ids.flatMap((id) =>
+            exportCompatNode(snapshot.body.blocks[id], snapshot, registry),
+          ),
+        getNode: (id) => snapshot.body.blocks[id],
+        inlineChildren: (child) =>
+          child.kind === "text" ? compatInlineChildren(child) : [],
+      });
+      return [
+        {
+          ...result.attrs,
+          children: result.children,
+          id: node.id,
+          type: node.type,
+        },
+      ];
+    }
     return [
       {
         ...node.attrs,
@@ -879,14 +903,14 @@ function isObjectNodeType(type: string, registry: BlockRegistry): boolean {
 }
 
 function isBuiltInObjectCompatType(type: string): boolean {
+  // `table`/`editor-table` are structural now (docs/022); they count as block
+  // children through `isStructuralDefinitionType` in `isBlockChild`, not here.
   return (
     type === "code-block" ||
     type === "media" ||
     type === "post-ref" ||
     type === "embed" ||
-    type === "table-of-contents" ||
-    type === "table" ||
-    type === "editor-table"
+    type === "table-of-contents"
   );
 }
 

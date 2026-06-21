@@ -284,22 +284,6 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
     // `buildDocumentIndex` (bake.ts), since they depend on the surrounding headings.
     (data) => ({ kind: "toc", payload: isJsonObject(data) ? data : {} }),
   ),
-  simpleObjectDefinition(
-    "table",
-    (node) => ({
-      data: jsonObjectFromRecord(node),
-      status: statusValue(node.status) ?? "ready",
-    }),
-    (data) => ({ kind: "table", payload: data }),
-  ),
-  simpleObjectDefinition(
-    "editor-table",
-    (node) => ({
-      data: jsonObjectFromRecord(node),
-      status: statusValue(node.status) ?? "ready",
-    }),
-    (data) => ({ kind: "table", payload: data }),
-  ),
   dividerDefinition(),
 ];
 
@@ -551,16 +535,6 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value)
     ? value
     : undefined;
-}
-
-function jsonObjectFromRecord(record: Record<string, unknown>): JsonValue {
-  const entries = Object.entries(record).filter(
-    ([key]) =>
-      key !== "id" && key !== "type" && key !== "baked" && key !== "status",
-  );
-  return Object.fromEntries(
-    entries.map(([key, value]) => [key, toJsonValue(value)]),
-  ) as JsonValue;
 }
 
 function toJsonValue(value: unknown): JsonValue {
