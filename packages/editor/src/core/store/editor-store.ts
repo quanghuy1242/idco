@@ -27,14 +27,11 @@
  * There is intentionally no React, DOM, Lexical, or rendering code here.
  */
 import {
-  boundaryAtOffset,
   freezeNode,
   makeObjectNode,
   makeStructuralNode,
   makeTextNode,
-  pointAtOffset,
   replaceTextContent,
-  resolveBoundaryOffset,
   resolvePointOffset,
   selectionsEqual,
   sliceTextContent,
@@ -43,8 +40,6 @@ import {
   type EditorNode,
   type EditorSelection,
   type IdAllocator,
-  type JsonObject,
-  type JsonValue,
   type NodeId,
   type ParentEntry,
   type StructuralNode,
@@ -54,22 +49,21 @@ import {
   type TextMarkKind,
   type TextPoint,
   type TextSlice,
-} from "./model";
-import { safeHref } from "./url-safety";
+} from "../model";
+import { safeHref } from "../url-safety";
 import {
   compileCommand,
   runQuery,
   type EditorCommand,
   type EditorQuery,
-} from "./commands";
+} from "../commands";
 import {
   Mapping,
-  mapTextOffset,
   type MapBias,
   type MapPos,
   type PointRedirect,
-} from "./mapping";
-import { createDefaultBlockRegistry, type BlockRegistry } from "./registry";
+} from "../mapping";
+import { createDefaultBlockRegistry, type BlockRegistry } from "../registry";
 import {
   cloneAttrsWithValue,
   type AddMarkStep,
@@ -86,7 +80,27 @@ import {
   type Step,
   type StoreDirty,
   type TransactionDraft,
-} from "./steps";
+} from "../steps";
+import {
+  TYPING_COALESCE_MS,
+  canCoalesceTyping,
+  marksCoveringCaret,
+  mergeTypingEntries,
+  nowMs,
+} from "./history";
+import {
+  bakedSnapshot,
+  canSkipActiveTextNotify,
+  collectSubtree,
+  compareNumberArrays,
+  mapSelection,
+  marksIntersectingRange,
+  mergeMarksById,
+  normalizeMarks,
+  remapMarksForReplace,
+  sign,
+  withAttrs,
+} from "./mapping-helpers";
 
 export const ROOT_NODE_ID = "idco_node_root" as NodeId;
 
@@ -1405,387 +1419,4 @@ export class EditorStore {
 
 export function createEditorStore(options: EditorStoreOptions): EditorStore {
   return new EditorStore(options);
-}
-
-function remapMarksForReplace(
-  before: TextLeafNode["content"],
-  after: TextLeafNode["content"],
-  marks: readonly TextMark[],
-  at: number,
-  removedLength: number,
-  insertedLength: number,
-): readonly TextMark[] {
-  /*
-   * Phase 3 keeps the mark mapping intentionally local: a text replacement can
-   * only affect marks on the same leaf. Marks wholly before the edit stay put,
-   * marks after the edit shift by delta, and marks crossing the removed region
-   * clamp around the inserted text.
-   */
-  const delta = insertedLength - removedLength;
-  return normalizeMarks(
-    marks.flatMap((mark) => {
-      const from = mapOffset(resolveBoundaryOffset(before, mark.from));
-      const to = mapOffset(resolveBoundaryOffset(before, mark.to));
-      if (to <= from) return [];
-      return [
-        {
-          ...mark,
-          from: boundaryAtOffset(after, from, "before"),
-          to: boundaryAtOffset(after, to, "after"),
-        },
-      ];
-    }),
-  );
-
-  function mapOffset(offset: number): number {
-    if (offset <= at) return offset;
-    if (offset >= at + removedLength) return offset + delta;
-    return at + insertedLength;
-  }
-}
-
-function marksIntersectingRange(
-  content: TextLeafNode["content"],
-  marks: readonly TextMark[],
-  from: number,
-  to: number,
-): readonly TextMark[] {
-  /*
-   * A mark is destroyed or clamped only if it truly overlaps the removed span.
-   * Marks that merely abut an edge (mark.to === from or mark.from === to) keep
-   * their shape under the remap, so they do not need carrying in the inverse.
-   */
-  return marks.filter((mark) => {
-    const markFrom = resolveBoundaryOffset(content, mark.from);
-    const markTo = resolveBoundaryOffset(content, mark.to);
-    return markFrom < to && markTo > from;
-  });
-}
-
-function mergeMarksById(
-  base: readonly TextMark[],
-  overrides: readonly TextMark[],
-): readonly TextMark[] {
-  /*
-   * Restore by id: an override re-installs the pre-edit mark over its clamped
-   * survivor (same id) or re-adds one the deletion dropped entirely.
-   */
-  const byId = new Map(base.map((mark) => [mark.id, mark]));
-  for (const mark of overrides) byId.set(mark.id, mark);
-  return normalizeMarks([...byId.values()]);
-}
-
-function normalizeMarks(marks: readonly TextMark[]): readonly TextMark[] {
-  /*
-   * docs/011 §4.4: a leaf's marks are sorted by `from`. The resolved boundary
-   * offset is the sort key, with `to` and then `id` breaking ties so the order
-   * is deterministic for round-trip and snapshot equality.
-   */
-  return [...marks].sort(
-    (a, b) =>
-      a.from.offset - b.from.offset ||
-      a.to.offset - b.to.offset ||
-      a.id.localeCompare(b.id),
-  );
-}
-
-function withAttrs(
-  node: EditorNode,
-  attrs: JsonObject | undefined,
-): EditorNode {
-  if (node.kind === "text") return makeTextNode({ ...node, attrs });
-  if (node.kind === "structural") return makeStructuralNode({ ...node, attrs });
-  return makeObjectNode({ ...node, attrs });
-}
-
-function collectSubtree(
-  nodes: ReadonlyMap<NodeId, EditorNode>,
-  id: NodeId,
-): EditorNode[] {
-  const node = nodes.get(id);
-  if (!node) throw new Error(`Unknown node: ${id}`);
-  const descendants =
-    node.kind === "structural"
-      ? node.children.flatMap((childId) => collectSubtree(nodes, childId))
-      : [];
-  return [node, ...descendants];
-}
-
-function mapSelection(
-  store: EditorStore,
-  selection: EditorSelection | null,
-  steps: readonly Step[],
-  forward: boolean,
-): EditorSelection | null {
-  /*
-   * Selection remap is part of the dispatch chokepoint. The common typing case
-   * touches one text leaf and only adjusts offsets in that leaf; structural
-   * removal falls back to a nearby valid text/gap selection.
-   *
-   * Anchor and focus take opposite bias when collapsing into a deleted range so
-   * the selection does not invert (§8.8: focus toward the edit, anchor away).
-   * That assignment mirrors for a backward selection.
-   */
-  if (!selection) return null;
-  const anchorBias: -1 | 1 = forward ? -1 : 1;
-  const focusBias: -1 | 1 = forward ? 1 : -1;
-  let current: EditorSelection | null = selection;
-  for (const step of steps) {
-    if (!current) return null;
-    if (current.type === "text") {
-      const anchor = mapPoint(store, current.anchor, step, anchorBias);
-      const focus = mapPoint(store, current.focus, step, focusBias);
-      current =
-        anchor && focus
-          ? { anchor, focus, type: "text" }
-          : fallbackSelection(store, step);
-    } else if (current.type === "node" && removesNode(step, current.node)) {
-      current = fallbackSelection(store, step);
-    } else if (current.type === "gap" && removesNode(step, current.scope)) {
-      current = fallbackSelection(store, step);
-    }
-  }
-  return current;
-}
-
-function mapPoint(
-  store: EditorStore,
-  point: TextPoint,
-  step: Step,
-  bias: -1 | 1,
-): TextPoint | null {
-  if (step.type === "replace-text" && step.node === point.node) {
-    const node = store.requireTextNode(point.node);
-    const offset = mapTextOffset(
-      point.offset,
-      step.at,
-      step.removed.text.length,
-      step.inserted.text.length,
-      bias,
-    );
-    return pointAtOffset(point.node, node.content, offset, point.assoc ?? bias);
-  }
-  if (removesNode(step, point.node)) return null;
-  return point;
-}
-
-function removesNode(step: Step, node: NodeId): boolean {
-  if (step.type !== "remove-node") return false;
-  if (step.node.id === node) return true;
-  return (step.descendants ?? []).some((descendant) => descendant.id === node);
-}
-
-function canSkipActiveTextNotify(
-  steps: readonly Step[],
-  active: NodeId,
-): boolean {
-  /*
-   * Text replacement on the active leaf is the one mutation React should not see
-   * immediately: the input controller patches the rendered text node in the same
-   * event. Other active-leaf mutations, such as mark toggles or node-type changes,
-   * change structure/formatting and must refresh the React snapshot.
-   */
-  return (
-    steps.some((step) => stepTouchesNode(step, active)) &&
-    steps.every(
-      (step) =>
-        !stepTouchesNode(step, active) ||
-        (step.type === "replace-text" && step.node === active),
-    )
-  );
-}
-
-function stepTouchesNode(step: Step, node: NodeId): boolean {
-  switch (step.type) {
-    case "replace-text":
-    case "add-mark":
-    case "remove-mark":
-    case "set-node-type":
-    case "set-node-attr":
-    case "set-object-data":
-      return step.node === node;
-    case "insert-node":
-      return (
-        step.node.id === node ||
-        step.parent === node ||
-        (step.descendants ?? []).some((descendant) => descendant.id === node)
-      );
-    case "remove-node":
-      return (
-        step.node.id === node ||
-        step.parent === node ||
-        (step.descendants ?? []).some((descendant) => descendant.id === node)
-      );
-    case "move-node":
-      return (
-        step.node === node ||
-        step.from.parent === node ||
-        step.to.parent === node
-      );
-    case "set-settings":
-      return false;
-  }
-}
-
-function fallbackSelection(
-  store: EditorStore,
-  step: Step,
-): EditorSelection | null {
-  if (step.type !== "remove-node") return store.selection;
-  const parent = store.requireNode(step.parent);
-  const siblings = parent.kind === "structural" ? parent.children : [];
-  const previous = siblings[step.index - 1];
-  if (previous) return selectionAtNodeEdge(store, previous, "after");
-  const next = siblings[step.index];
-  if (next) return selectionAtNodeEdge(store, next, "before");
-  // The scope is now empty: a gap at its only slot (docs/019 §4.3, §9).
-  return { index: 0, scope: step.parent, type: "gap" };
-}
-
-function selectionAtNodeEdge(
-  store: EditorStore,
-  nodeId: NodeId,
-  side: "before" | "after",
-): EditorSelection {
-  const node = store.requireNode(nodeId);
-  if (node.kind === "text") {
-    const offset = side === "before" ? 0 : node.content.text.length;
-    const point = pointAtOffset(node.id, node.content, offset);
-    return { anchor: point, focus: point, type: "text" };
-  }
-  // A gap beside an object, named scope-relative (docs/019 §5.1): the slot after
-  // a node is its index + 1, the slot before it is its index.
-  const entry = store.parentEntry(nodeId);
-  return {
-    index: entry ? (side === "after" ? entry.index + 1 : entry.index) : 0,
-    scope: entry ? entry.parent : store.bodyId,
-    type: "gap",
-  };
-}
-
-function bakedSnapshot(value: JsonValue | undefined) {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    "kind" in value &&
-    typeof value.kind === "string"
-  ) {
-    return {
-      kind: value.kind,
-      payload: "payload" in value ? value.payload : null,
-    };
-  }
-  return undefined;
-}
-
-function compareNumberArrays(
-  a: readonly number[],
-  b: readonly number[],
-): -1 | 0 | 1 {
-  const length = Math.min(a.length, b.length);
-  for (let index = 0; index < length; index += 1) {
-    const difference = a[index]! - b[index]!;
-    if (difference !== 0) return sign(difference);
-  }
-  return sign(a.length - b.length);
-}
-
-function sign(value: number): -1 | 0 | 1 {
-  if (value < 0) return -1;
-  if (value > 0) return 1;
-  return 0;
-}
-
-// A typing run within this idle gap coalesces into one undo entry; a longer
-// pause opens a fresh group (docs/011 §7.5: "a ~500 ms idle gap").
-const TYPING_COALESCE_MS = 500;
-
-function nowMs(): number {
-  return typeof performance !== "undefined" && performance.now
-    ? performance.now()
-    : Date.now();
-}
-
-/** The format-mark kinds whose range covers a collapsed caret at `offset`. */
-function marksCoveringCaret(
-  node: TextLeafNode,
-  offset: number,
-): ReadonlySet<TextMarkKind> {
-  const covering = new Set<TextMarkKind>();
-  for (const mark of node.marks) {
-    if (mark.kind === "link") continue;
-    const from = resolveBoundaryOffset(node.content, mark.from);
-    const to = resolveBoundaryOffset(node.content, mark.to);
-    if (from <= offset && offset <= to) covering.add(mark.kind);
-  }
-  return covering;
-}
-
-/**
- * The single text leaf a coalescible typing entry edits, or null when the entry
- * is not a text run on one leaf. Inline mark steps on the same leaf are allowed
- * (sticky pending format marks each typed run, docs/018 §2.0), so formatted
- * typing still coalesces; a node-type/attr/structural step ends the run.
- */
-function typingRunNode(entry: CommittedTransaction): NodeId | null {
-  if (entry.steps.length === 0) return null;
-  let node: NodeId | null = null;
-  let hasText = false;
-  for (const step of entry.steps) {
-    if (step.type === "replace-text") hasText = true;
-    else if (step.type !== "add-mark" && step.type !== "remove-mark") {
-      return null;
-    }
-    if (node === null) node = step.node;
-    else if (node !== step.node) return null;
-  }
-  return hasText ? node : null;
-}
-
-/** Net character delta of a text-only entry (positive = inserting). */
-function typingRunDelta(entry: CommittedTransaction): number {
-  let delta = 0;
-  for (const step of entry.steps) {
-    if (step.type === "replace-text") {
-      delta += step.inserted.text.length - step.removed.text.length;
-    }
-  }
-  return delta;
-}
-
-/**
- * Whether `next` continues `previous` as one typing run: both pure text edits on
- * the same leaf, the same direction (both inserting or both deleting), and with
- * the caret unmoved between them (`previous.selectionAfter === next.selectionBefore`).
- * Same-direction + continuity is what splits "type, then backspace" into two
- * groups and keeps an IME composition's per-update edits in one (docs/018 §2.2).
- */
-function canCoalesceTyping(
-  previous: CommittedTransaction,
-  next: CommittedTransaction,
-): boolean {
-  const node = typingRunNode(previous);
-  if (node === null || node !== typingRunNode(next)) return false;
-  if (!selectionsEqual(previous.selectionAfter, next.selectionBefore)) {
-    return false;
-  }
-  return typingRunDelta(previous) >= 0 === typingRunDelta(next) >= 0;
-}
-
-/** Fold `next` into `previous` as one history entry (steps forward, inverse reversed). */
-function mergeTypingEntries(
-  previous: CommittedTransaction,
-  next: CommittedTransaction,
-): CommittedTransaction {
-  return {
-    inverse: [...next.inverse, ...previous.inverse],
-    origin: previous.origin,
-    selectionAfter: next.selectionAfter,
-    selectionBefore: previous.selectionBefore,
-    settingsChanged: previous.settingsChanged || next.settingsChanged,
-    steps: [...previous.steps, ...next.steps],
-    structureChanged: previous.structureChanged || next.structureChanged,
-    touched: new Set([...previous.touched, ...next.touched]),
-  };
 }
