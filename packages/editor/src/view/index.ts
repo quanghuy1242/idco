@@ -25,11 +25,22 @@ export {
   registerNode,
   registerNodeView,
   type NodeView,
+  type NodeViewChromeArgs,
+  type NodeViewConfigField,
   type NodeViewInsert,
   type NodeViewLiveArgs,
   type NodeViewRestingArgs,
   type RegisterNodeArgs,
 } from "./node-view";
+export {
+  getStructuralView,
+  listInsertableStructuralNodes,
+  registerStructuralView,
+  type StructuralContainerArgs,
+  type StructuralNodeView,
+  type StructuralNodeViewInsert,
+  type StructuralRestingArgs,
+} from "./structural-view";
 export {
   OwnedModelEditor,
   type OwnedModelEditorHandle,

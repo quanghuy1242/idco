@@ -47,11 +47,9 @@ import {
   SelectionAnnouncer,
   SelectionOverlay,
 } from "./selection-overlay";
-import { AlertGlyph } from "@quanghuy1242/idco-ui";
-import { CalloutChrome } from "./callout-chrome";
 import { registerBuiltInNodeViews } from "./nodes";
 import { EngineObjectBlock } from "./object-block";
-import { calloutTone } from "./resting-document";
+import { getStructuralView } from "./structural-view";
 import { sanitizeHtmlToCompat } from "./paste-html";
 import { cancelFrame, requestFrame } from "./raf";
 import { useEditorNode, useEditorOrder } from "./store-hooks";
@@ -66,7 +64,6 @@ import {
   baseViewStyle,
   computeWindowListMeta,
   structuralContainerStyle,
-  structuralListStyle,
   type ListItemMeta,
 } from "./styles";
 
@@ -1803,13 +1800,11 @@ function EngineBlock(props: {
   // "Rendering is separable from virtualizing" — mapping a container's `children`
   // through the same block dispatch *is* the render, and block-level
   // virtualization already mounts/unmounts the whole small subtree as one
-  // top-level block). The two producers today are a `list` over `listitem`
-  // children and the genuine future use — a multi-block container (a quote/callout
-  // holding block children). Everything under a structural node renders: nested
-  // lists, paragraphs, objects (media/code), the lot — the same `EngineBlock`
-  // dispatch recurses. A `list` numbers its items with the same render-time
-  // ordinal pass the flat top-level lists use (a CSS counter would misnumber a
-  // virtualized run); other containers just stack their children.
+  // top-level block). Everything under a structural node renders: nested lists,
+  // paragraphs, objects (media/code), the lot — the same `EngineBlock` dispatch
+  // recurses. A `list` numbers its items with the same render-time ordinal pass
+  // the flat top-level lists use (a CSS counter would misnumber a virtualized
+  // run); other containers just stack their children.
   //
   // Large containers (a single subtree big enough that mounting it whole hurts)
   // are the *separate* recursive-windowing tier (docs/018 §2.11), built against
@@ -1820,60 +1815,48 @@ function EngineBlock(props: {
   // `N.`, not bullets. Containers with no list items get an empty map (paragraphs
   // are unaffected). Without this, nested items fell back to the bullet default.
   const childListMeta = computeWindowListMeta(store, node.children, 0);
-  // A callout is a tinted box (the `[data-engine-callout-tone]` CSS) carrying
-  // floating block chrome (badge + tone + delete) and the tone glyph in the left
-  // gutter — the same `AlertGlyph` the resting render uses, so the two surfaces
-  // read alike. Its tone rides the `tone` attr and defaults to info. Other
-  // containers (a `list`, a future quote-with-blocks) just stack their children.
-  const isCallout = node.type === "callout";
-  const tone = calloutTone(node.attrs?.tone);
-  const container = (
+  const children = node.children.map((childId) => (
+    <EngineBlock
+      beginDrag={beginDrag}
+      focusRoot={focusRoot}
+      forcePolyfill={forcePolyfill}
+      goalColumnRef={goalColumnRef}
+      id={childId}
+      key={childId}
+      listMeta={childListMeta?.get(childId)}
+      onRender={onRender}
+      pageCaret={pageCaret}
+      registerBlock={registerBlock}
+      registerInputBackend={registerInputBackend}
+      registerObjectEditor={registerObjectEditor}
+      requestFocus={requestFocus}
+      revealBlock={revealBlock}
+      store={store}
+    />
+  ));
+  // The structural type's container render is registry-driven (docs/020 §4.2): a
+  // registered `StructuralNodeView` (callout, list) owns its wrapper, styling, and
+  // chrome; everything else (quote, structural list-item, body) falls back to the
+  // default stacking container.
+  const structuralView = getStructuralView(node.type);
+  if (structuralView) {
+    return structuralView.renderContainer({
+      children,
+      node,
+      registerBlock,
+      store,
+    });
+  }
+  return (
     <div
       data-engine-block-id={node.id}
-      data-engine-callout-tone={isCallout ? tone : undefined}
       data-engine-structural={node.type}
       ref={(element) => registerBlock(node.id, element)}
-      style={
-        node.type === "list" ? structuralListStyle : structuralContainerStyle
-      }
+      style={structuralContainerStyle}
     >
-      {isCallout ? (
-        <span aria-hidden="true" data-engine-callout-glyph="">
-          <AlertGlyph tone={tone} />
-        </span>
-      ) : null}
-      {node.children.map((childId) => (
-        <EngineBlock
-          beginDrag={beginDrag}
-          focusRoot={focusRoot}
-          forcePolyfill={forcePolyfill}
-          goalColumnRef={goalColumnRef}
-          id={childId}
-          key={childId}
-          listMeta={childListMeta?.get(childId)}
-          onRender={onRender}
-          pageCaret={pageCaret}
-          registerBlock={registerBlock}
-          registerInputBackend={registerInputBackend}
-          registerObjectEditor={registerObjectEditor}
-          requestFocus={requestFocus}
-          revealBlock={revealBlock}
-          store={store}
-        />
-      ))}
+      {children}
     </div>
   );
-  // The chrome is a sibling overlay in a `group/block relative` wrapper (never
-  // inside the measured container box), mirroring the object blocks' chrome.
-  if (isCallout) {
-    return (
-      <div className="group/block relative">
-        <CalloutChrome node={node} store={store} />
-        {container}
-      </div>
-    );
-  }
-  return container;
 }
 
 /**

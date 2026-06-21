@@ -14,11 +14,7 @@
  * shared resting primitive the editor uses.
  */
 import { Fragment, type ReactNode } from "react";
-import {
-  AlertGlyph,
-  alertToneClass,
-  type AlertTone,
-} from "@quanghuy1242/idco-ui";
+import { type AlertTone } from "@quanghuy1242/idco-ui";
 import {
   bakeObjectData,
   createDefaultBlockRegistry,
@@ -30,6 +26,7 @@ import {
   type TextLeafNode,
 } from "../core";
 import { getNodeView } from "./node-view";
+import { getStructuralView } from "./structural-view";
 import { renderLeafMarks } from "./mark-render";
 import { ENGINE_RESTING_TYPOGRAPHY_CSS, indentMarginStyle } from "./styles";
 
@@ -153,7 +150,14 @@ function renderBlock(
   return renderRestingStructural(node, snapshot, registry);
 }
 
-/** Render a structural container and everything beneath it (docs/018 §2.11). */
+/**
+ * Render a structural container and everything beneath it (docs/018 §2.11),
+ * dispatched through the structural SPI (docs/020 §4.2): a registered
+ * `StructuralNodeView` (callout, list) owns its resting element; everything else
+ * (quote, structural list-item, body) falls back to the default stacking
+ * container. The recursion engine (`renderBlockSequence` / `renderRestingListItem`)
+ * stays here and is injected so a view composes children without importing it.
+ */
 function renderRestingStructural(
   node: Extract<EditorNode, { kind: "structural" }>,
   snapshot: EditorDocumentSnapshot,
@@ -162,47 +166,15 @@ function renderRestingStructural(
   const children = node.children
     .map((id) => snapshot.body.blocks[id as NodeId])
     .filter((child): child is EditorNode => Boolean(child));
-  if (node.type === "callout") {
-    // The published callout is the real DaisyUI alert (the legacy look), now a
-    // container that stacks its block children so the page matches the editor
-    // surface and the theme (docs/018 §2.8, docs/019).
-    const tone = calloutTone(node.attrs?.tone);
-    return (
-      <aside
-        className={`alert ${alertToneClass[tone]} items-start`}
-        data-engine-callout-tone={tone}
-        data-engine-resting-block={node.id}
-        key={node.id}
-        role="note"
-      >
-        <AlertGlyph tone={tone} />
-        <div className="w-full">
-          {renderBlockSequence(children, snapshot, registry)}
-        </div>
-      </aside>
-    );
-  }
-  if (node.type === "list") {
-    const items = children.map((child) =>
-      renderRestingListItem(child, snapshot, registry),
-    );
-    return node.attrs?.listType === "number" ? (
-      <ol
-        data-engine-resting-block={node.id}
-        data-engine-resting-list="number"
-        key={node.id}
-      >
-        {items}
-      </ol>
-    ) : (
-      <ul
-        data-engine-resting-block={node.id}
-        data-engine-resting-list="bullet"
-        key={node.id}
-      >
-        {items}
-      </ul>
-    );
+  const view = getStructuralView(node.type);
+  if (view) {
+    return view.renderResting({
+      children,
+      node,
+      renderListItems: (nodes) =>
+        nodes.map((child) => renderRestingListItem(child, snapshot, registry)),
+      renderSequence: (nodes) => renderBlockSequence(nodes, snapshot, registry),
+    });
   }
   return (
     <div data-engine-resting-block={node.id} key={node.id}>

@@ -23,6 +23,10 @@ import {
   type ObjectNode,
   type EditorStore,
 } from "../core";
+import {
+  registerStructuralView,
+  type StructuralNodeView,
+} from "./structural-view";
 
 /** Arguments to a node's resting (baked) render. `baked` is always non-null. */
 export type NodeViewRestingArgs = {
@@ -154,19 +158,28 @@ export function listInsertableNodes(): readonly (NodeView & {
   return out;
 }
 
-/** Both halves of a node, for the one-call registration in docs/016 §7. */
+/**
+ * The halves of a node, for the one-call registration in docs/016 §7 / docs/020
+ * §4.2. An object node provides `view` (+ optional `definition`); a structural
+ * container provides `structuralView`. Exactly one of `view`/`structuralView` is
+ * expected per call.
+ */
 export type RegisterNodeArgs = {
-  readonly view: NodeView;
+  readonly view?: NodeView;
   readonly definition?: NodeDefinition;
+  readonly structuralView?: StructuralNodeView;
 };
 
 /**
- * Register a custom node end to end (docs/016 §7): its `NodeView` into the view
- * registry and, when given, its `NodeDefinition` into the global core registry so
- * compat import/export and the bake service see it. This is the single public
- * call a feature author makes to add a node without editing engine internals.
+ * Register a custom node end to end (docs/016 §7, docs/020 §4.2): its `NodeView`
+ * into the view registry and, when given, its `NodeDefinition` into the global
+ * core registry so compat import/export and the bake service see it; or a
+ * structural container's `StructuralNodeView` into the structural registry. This
+ * is the single public call a feature author makes to add a node without editing
+ * engine internals.
  */
 export function registerNode(args: RegisterNodeArgs): void {
   if (args.definition) registerGlobalNodeDefinition(args.definition);
-  registerNodeView(args.view);
+  if (args.view) registerNodeView(args.view);
+  if (args.structuralView) registerStructuralView(args.structuralView);
 }

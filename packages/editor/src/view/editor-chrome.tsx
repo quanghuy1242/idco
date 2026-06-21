@@ -31,6 +31,7 @@ import {
 } from "@quanghuy1242/idco-ui";
 import type { EditorStore, TextLeafType, TextMarkKind } from "../core";
 import { listInsertableNodes } from "./node-view";
+import { listInsertableStructuralNodes } from "./structural-view";
 
 /** A format toggle's mark kind, lucide icon name, and accessible label. */
 const FORMAT_BUTTONS: readonly {
@@ -100,9 +101,6 @@ const BLOCK_TYPES: readonly {
 function blockTypeKey(choice: { blockType: string; tag?: string }): string {
   return `${choice.blockType}:${choice.tag ?? ""}`;
 }
-
-/** Menu key for the structural callout insert (not a registered object node). */
-const CALLOUT_INSERT_KEY = "callout";
 
 /**
  * Subscribe a component to selection + commit so toolbar query state stays live.
@@ -175,7 +173,36 @@ export function EditorToolbar(props: {
     else store.command({ type: "clear-link" });
   }, [linkValue, store]);
 
-  const inserts = listInsertableNodes();
+  // The insert menu unifies structural inserts (callout) and object inserts
+  // (code/media/…) into one enumeration (docs/020 §7.1): structural first (so the
+  // callout stays first as before), then object nodes in registration order. Each
+  // entry carries its own dispatch so the menu keeps no per-type knowledge.
+  const insertEntries: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly icon: string;
+    readonly run: () => void;
+  }[] = [
+    ...listInsertableStructuralNodes().map((view) => ({
+      icon: view.insert.icon ?? "Plus",
+      id: view.type,
+      label: view.insert.label,
+      run: () => run(() => store.command(view.insert.createCommand())),
+    })),
+    ...listInsertableNodes().map((view) => ({
+      icon: view.insert.icon ?? "Plus",
+      id: view.type,
+      label: view.insert.label,
+      run: () =>
+        run(() =>
+          store.command({
+            data: view.insert.createData(),
+            objectType: view.type,
+            type: "insert-object",
+          }),
+        ),
+    })),
+  ];
   const linkActive =
     typeof store.query({ type: "active-link-href" }) === "string";
   // The list control is a toggle: pressing it on a non-list block makes it a
@@ -446,8 +473,8 @@ export function EditorToolbar(props: {
         </PopoverTrigger>
       </span>
 
-      {/* The insert menu always carries the structural callout, plus any
-          registered object nodes (code/media/embed/…). */}
+      {/* The insert menu carries structural inserts (callout) and registered
+          object nodes (code/media/embed/…) from one unified enumeration. */}
       <Sep />
       <span data-engine-insert-menu="">
         <MenuTrigger>
@@ -461,40 +488,13 @@ export function EditorToolbar(props: {
           />
           <Menu
             onAction={(key) => {
-              // A callout is a structural container, not a registered object
-              // node, so it inserts through its own command (docs/019).
-              if (key === CALLOUT_INSERT_KEY) {
-                run(() => store.command({ type: "insert-callout" }));
-                return;
-              }
-              const view = inserts.find((entry) => entry.type === key);
-              if (view) {
-                run(() =>
-                  store.command({
-                    data: view.insert.createData(),
-                    objectType: view.type,
-                    type: "insert-object",
-                  }),
-                );
-              }
+              insertEntries.find((entry) => entry.id === key)?.run();
             }}
           >
-            <MenuItem
-              id={CALLOUT_INSERT_KEY}
-              key={CALLOUT_INSERT_KEY}
-              textValue="Callout"
-            >
-              <NavIcon name="Info" />
-              Callout
-            </MenuItem>
-            {inserts.map((entry) => (
-              <MenuItem
-                id={entry.type}
-                key={entry.type}
-                textValue={entry.insert.label}
-              >
-                <NavIcon name={entry.insert.icon ?? "Plus"} />
-                {entry.insert.label}
+            {insertEntries.map((entry) => (
+              <MenuItem id={entry.id} key={entry.id} textValue={entry.label}>
+                <NavIcon name={entry.icon} />
+                {entry.label}
               </MenuItem>
             ))}
           </Menu>
