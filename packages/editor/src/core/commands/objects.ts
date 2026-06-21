@@ -11,6 +11,7 @@ import { bakeObjectData } from "../bake";
 import { getStructuralDefinition } from "../structural-registry";
 import type { EditorStore, TransactionBuilder } from "../store";
 import {
+  childrenOf,
   insertionPointForInsert,
   placeNodes,
   splitLeafAt,
@@ -141,6 +142,52 @@ export function compileInsertStructural(
     }
   }
   return tr.setSelection({ node: subtree.root.id, type: "node" });
+}
+
+/**
+ * Insert a pre-built child subtree into a structural scope at `index` (docs/021
+ * §8.2). The generic structural-child insert: a container feature (the table's
+ * "insert row", "insert column") composes this rather than registering a bespoke
+ * command, so core gains no grid knowledge. `node` is the child root; its
+ * `descendants` (a row's cells and their paragraphs) ride the one `insert-node`
+ * step so the whole subtree registers atomically and one undo reverses it. The
+ * selection is left to `mapSelection` so the caller decides where the caret goes.
+ */
+export function compileInsertStructuralChild(
+  store: EditorStore,
+  scope: NodeId,
+  index: number,
+  node: EditorNode,
+  descendants: readonly EditorNode[] = [],
+): TransactionBuilder | null {
+  const parent = store.getNode(scope);
+  if (!parent || parent.kind !== "structural") return null;
+  if (index < 0 || index > childrenOf(store, scope).length) return null;
+  const tr = store.transaction();
+  tr.push({ descendants, index, node, parent: scope, type: "insert-node" });
+  return tr;
+}
+
+/**
+ * Remove the child at `index` of a structural scope (docs/021 §8.2), the generic
+ * structural-child remove the table's "delete row"/"delete column" compose. The
+ * removed subtree is captured for undo by the `remove-node` step; the selection is
+ * relocated off the removed node by `mapSelection`.
+ */
+export function compileRemoveStructuralChild(
+  store: EditorStore,
+  scope: NodeId,
+  index: number,
+): TransactionBuilder | null {
+  const parent = store.getNode(scope);
+  if (!parent || parent.kind !== "structural") return null;
+  const children = childrenOf(store, scope);
+  if (index < 0 || index >= children.length) return null;
+  const child = store.getNode(children[index]!);
+  if (!child) return null;
+  const tr = store.transaction();
+  tr.removeNode(scope, index, child);
+  return tr;
 }
 
 /**

@@ -57,7 +57,6 @@ import {
   type NodeId,
   type RichTextCompatDocument,
   type RichTextCompatNode,
-  type StructuralNodeType,
   type TextContent,
   type TextLeafNode,
   type TextLeafType,
@@ -340,10 +339,9 @@ function importCompatNode(
         attrs: result.attrs,
         children: result.children,
         id,
-        // The closed union still types `makeStructuralNode`; only registered
-        // built-ins (callout) reach here today. The union opens with the table
-        // (note §7 step 3), which is when this cast goes away.
-        type: node.type as StructuralNodeType,
+        // `StructuralNodeType` is the registry-driven open set (docs/021 §8.1), so
+        // a registered type's string flows in without a cast.
+        type: node.type,
       }),
     );
     return [id];

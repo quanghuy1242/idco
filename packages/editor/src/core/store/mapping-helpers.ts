@@ -138,6 +138,7 @@ export function mapSelection(
   selection: EditorSelection | null,
   steps: readonly Step[],
   forward: boolean,
+  removedByStep: ReadonlyMap<Step, ReadonlySet<NodeId>> = new Map(),
 ): EditorSelection | null {
   /*
    * Selection remap is part of the dispatch chokepoint. The common typing case
@@ -154,16 +155,26 @@ export function mapSelection(
   let current: EditorSelection | null = selection;
   for (const step of steps) {
     if (!current) return null;
+    // The full subtree this step removed (empty for non-remove steps), so a deep
+    // descendant of a removed container is detected even though the store no
+    // longer holds it (docs/021 §8.2).
+    const removed = removedByStep.get(step);
     if (current.type === "text") {
-      const anchor = mapPoint(store, current.anchor, step, anchorBias);
-      const focus = mapPoint(store, current.focus, step, focusBias);
+      const anchor = mapPoint(store, current.anchor, step, anchorBias, removed);
+      const focus = mapPoint(store, current.focus, step, focusBias, removed);
       current =
         anchor && focus
           ? { anchor, focus, type: "text" }
           : fallbackSelection(store, step);
-    } else if (current.type === "node" && removesNode(step, current.node)) {
+    } else if (
+      current.type === "node" &&
+      removesNode(step, current.node, removed)
+    ) {
       current = fallbackSelection(store, step);
-    } else if (current.type === "gap" && removesNode(step, current.scope)) {
+    } else if (
+      current.type === "gap" &&
+      removesNode(step, current.scope, removed)
+    ) {
       current = fallbackSelection(store, step);
     }
   }
@@ -175,6 +186,7 @@ function mapPoint(
   point: TextPoint,
   step: Step,
   bias: -1 | 1,
+  removed: ReadonlySet<NodeId> | undefined,
 ): TextPoint | null {
   if (step.type === "replace-text" && step.node === point.node) {
     const node = store.requireTextNode(point.node);
@@ -187,12 +199,22 @@ function mapPoint(
     );
     return pointAtOffset(point.node, node.content, offset, point.assoc ?? bias);
   }
-  if (removesNode(step, point.node)) return null;
+  if (removesNode(step, point.node, removed)) return null;
   return point;
 }
 
-function removesNode(step: Step, node: NodeId): boolean {
+/**
+ * Whether `step` removed `node`. Prefers the dispatch-supplied set of every id
+ * the step removed (the full subtree, so a deep descendant counts); falls back to
+ * the step's own `node`/`descendants` for callers that pass no set (docs/021 §8.2).
+ */
+function removesNode(
+  step: Step,
+  node: NodeId,
+  removed: ReadonlySet<NodeId> | undefined,
+): boolean {
   if (step.type !== "remove-node") return false;
+  if (removed) return removed.has(node);
   if (step.node.id === node) return true;
   return (step.descendants ?? []).some((descendant) => descendant.id === node);
 }

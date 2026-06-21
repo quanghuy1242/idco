@@ -190,12 +190,21 @@ export type TextMark = {
 
 export type TextLeafType = "paragraph" | "heading" | "listitem" | "quote";
 
+/**
+ * The structural container kinds. The built-in literals keep autocomplete and
+ * exhaustiveness for the engine's own types; the `(string & {})` arm opens the
+ * set to registry-driven types (a `StructuralDefinition`, the table's
+ * `table`/`tablerow`/`tablecell`) without dropping the literals (docs/021 §8.1).
+ * Scope membership stays by `kind === "structural"`, not by this union, so a
+ * registered type is a scope without being named here.
+ */
 export type StructuralNodeType =
   | "body"
   | "list"
   | "listitem"
   | "quote"
-  | "callout";
+  | "callout"
+  | (string & {});
 
 export type ObjectNodeStatus = "ready" | "dirty" | "invalid" | "unresolved";
 

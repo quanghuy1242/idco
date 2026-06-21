@@ -150,6 +150,16 @@ type HistoryState = {
 
 type MutableDispatchState = {
   readonly touched: Set<NodeId>;
+  /**
+   * For each applied `remove-node` step, the full set of node ids it removed
+   * (the subtree, not just the top node). `mapSelection` runs after the steps
+   * mutate the store, so a removed subtree is gone and cannot be walked; this is
+   * how the remap learns a caret/selection landed deep inside a removed container
+   * (e.g. a table cell whose row is deleted) and relocates it (docs/021 §8.2).
+   * Keyed per step so a multi-remove transaction (a table column delete) relocates
+   * each caret against the step that removed *its* ancestor.
+   */
+  readonly removedByStep: Map<Step, ReadonlySet<NodeId>>;
   settingsChanged: boolean;
   structureChanged: boolean;
 };
@@ -851,6 +861,7 @@ export class EditorStore {
   ): CommittedTransaction {
     const inverses: Step[] = [];
     const state: MutableDispatchState = {
+      removedByStep: new Map<Step, ReadonlySet<NodeId>>(),
       settingsChanged: false,
       structureChanged: false,
       touched: new Set<NodeId>(),
@@ -869,6 +880,7 @@ export class EditorStore {
       // This preserves the "dispatch is atomic" contract without snapshots.
       for (const inverse of inverses.toReversed()) {
         this.#applyAndInvert(inverse, {
+          removedByStep: new Map<Step, ReadonlySet<NodeId>>(),
           settingsChanged: false,
           structureChanged: false,
           touched: new Set<NodeId>(),
@@ -878,7 +890,13 @@ export class EditorStore {
     }
     const mappedSelection =
       draft.selectionAfter ??
-      mapSelection(this, selectionBefore, draft.steps, selectionForward);
+      mapSelection(
+        this,
+        selectionBefore,
+        draft.steps,
+        selectionForward,
+        state.removedByStep,
+      );
     this.#selection = mappedSelection;
     // Field compare, not `JSON.stringify` !== `JSON.stringify`: the old form
     // serialized both selections on every keystroke and every drag-extend frame.
@@ -1249,6 +1267,10 @@ export class EditorStore {
       throw new Error("RemoveNode index does not point to node");
     }
     const removed = collectSubtree(this.#nodes, step.node.id);
+    // Record the full removed subtree so selection remap (which runs after the
+    // store mutates, when the subtree is gone) can detect a caret/selection that
+    // sat deep inside it and relocate it (docs/021 §8.2; mapping-helpers).
+    state.removedByStep.set(step, new Set(removed.map((node) => node.id)));
     const children = parent.children.filter((id) => id !== step.node.id);
     this.#nodes.set(parent.id, makeStructuralNode({ ...parent, children }));
     for (const node of removed) this.#nodes.delete(node.id);

@@ -21,12 +21,14 @@
  *   (registry-driven import, mirroring the object `normalizeCompatObject` path).
  *
  * Export is already generic for any structural node (`compat.ts` spreads attrs +
- * recurses children), so there is no `toCompatNode` here yet.
+ * recurses children), so there is no `toCompatNode` here yet (docs/021 §6.1; the
+ * table adds that optional slot in docs/022 §4.3).
  *
- * Scope (note §7): this is the minimal core half, proven by migrating the
- * built-in callout off its hardcoded paths. The closed `StructuralNodeType` union
- * (`model.ts`) is deliberately NOT opened yet — that lands with the first
- * genuinely-new structural type (the docs/019 table), per the plan's step 3.
+ * Scope (docs/021): this is the core half, proven by migrating the built-in
+ * callout off its hardcoded paths (§7). `StructuralNodeType` (`model.ts`) is the
+ * registry-driven open set (§8.1), so a genuinely-new type (the docs/022 table)
+ * constructs without a cast; this registry is how such a type declares its insert
+ * subtree and compat import.
  */
 import {
   makeStructuralNode,

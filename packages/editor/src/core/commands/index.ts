@@ -25,8 +25,10 @@ import {
   compileInsertBlocks,
   compileInsertObject,
   compileInsertStructural,
+  compileInsertStructuralChild,
   compileMoveBlock,
   compileRemoveBlock,
+  compileRemoveStructuralChild,
   compileSetObjectData,
 } from "./objects";
 import {
@@ -95,6 +97,20 @@ export type EditorCommand =
     }
   | { readonly type: "insert-structural"; readonly structuralType: string }
   | {
+      readonly type: "insert-structural-child";
+      readonly scope: NodeId;
+      readonly index: number;
+      /** The child root to insert. */
+      readonly node: EditorNode;
+      /** The child's descendants (a row's cells/paragraphs), inserted atomically. */
+      readonly descendants?: readonly EditorNode[];
+    }
+  | {
+      readonly type: "remove-structural-child";
+      readonly scope: NodeId;
+      readonly index: number;
+    }
+  | {
       readonly type: "set-object-data";
       readonly node: NodeId;
       readonly data: JsonValue;
@@ -137,6 +153,20 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
   "insert-structural": (store, command) =>
     command.type === "insert-structural"
       ? compileInsertStructural(store, command.structuralType)
+      : null,
+  "insert-structural-child": (store, command) =>
+    command.type === "insert-structural-child"
+      ? compileInsertStructuralChild(
+          store,
+          command.scope,
+          command.index,
+          command.node,
+          command.descendants,
+        )
+      : null,
+  "remove-structural-child": (store, command) =>
+    command.type === "remove-structural-child"
+      ? compileRemoveStructuralChild(store, command.scope, command.index)
       : null,
   "insert-text": (store, command) =>
     command.type === "insert-text"

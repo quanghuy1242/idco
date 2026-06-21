@@ -15,11 +15,11 @@
  * compat round-trip, so a registered type now inserts (generic `insert-structural`
  * command) and survives save/load with no per-type core branch (note §7). Both
  * halves register through the same `registerNode({ structuralView,
- * structuralDefinition })` front. Scope membership is still structural-by-kind
+ * structuralDefinition })` front. Scope membership is structural-by-kind
  * (`childrenOf` treats every `kind === "structural"` node as a scope — there is no
- * per-type `isScope`). The closed `StructuralNodeType` union (`model.ts`) is not
- * opened to external types yet; that lands with the docs/019 table (note §7 step
- * 3). `quote`/`list`/`listitem` keep hardcoded compat branches until migrated.
+ * per-type `isScope`). `StructuralNodeType` (`model.ts`) is the registry-driven
+ * open set (docs/021 §8.1), so a registered type need not be a built-in literal.
+ * `quote`/`list`/`listitem` keep hardcoded compat branches until migrated.
  */
 import type { ReactNode } from "react";
 import type {
