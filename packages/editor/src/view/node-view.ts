@@ -13,7 +13,7 @@
  * `registerNode` once and renders without any edit to the view internals — that
  * is the whole point of the SPI (docs/016 §10).
  */
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   registerGlobalNodeDefinition,
   type BakedSnapshot,
@@ -30,6 +30,28 @@ export type NodeViewRestingArgs = {
   readonly baked: BakedSnapshot;
 };
 
+/**
+ * Arguments to a node's custom chrome control (docs/020 §7.2). A node that needs
+ * an inline chrome affordance other than the default settings gear — the code
+ * block's language selector — implements `renderChromeControl`; the dispatcher
+ * passes the same handles it uses for the default gear so the custom control can
+ * open menus (`menuOpenRef`), refocus the in-place surface (`focusInPlace`), and
+ * anchor a popover (`gearRef`).
+ */
+export type NodeViewChromeArgs = {
+  readonly node: ObjectNode;
+  readonly store: EditorStore;
+  readonly menuOpenRef: { current: boolean };
+  readonly gearRef: RefObject<HTMLSpanElement | null>;
+  readonly focusInPlace: () => void;
+};
+
+/** One field in a node's default config popover (docs/006 chrome popover). */
+export type NodeViewConfigField = {
+  readonly key: string;
+  readonly label: string;
+};
+
 /** Arguments to a node's live-edit surface (mounted when it is the active object). */
 export type NodeViewLiveArgs = {
   readonly node: ObjectNode;
@@ -44,6 +66,8 @@ export type NodeViewInsert = {
   readonly label: string;
   readonly group?: string;
   readonly keywords?: readonly string[];
+  /** lucide icon name for the insert menu item (defaults to a generic block). */
+  readonly icon?: string;
   createData(): JsonValue;
 };
 
@@ -77,6 +101,30 @@ export type NodeView = {
    */
   readonly liveMode?: "in-place" | "popover";
   readonly insert?: NodeViewInsert;
+  /**
+   * Per-type metadata the dispatcher reads generically so it keeps no node-type
+   * knowledge (docs/016 §10, docs/020 §5.4). Before the split these lived in
+   * central maps in `object-block.tsx`; now each node carries its own.
+   */
+  /** Accessible base name for the block (screen readers, docs/018 §2.3). */
+  readonly ariaLabel?: string;
+  /** ARIA role for the block; defaults to `"group"` when omitted. */
+  readonly ariaRole?: string;
+  /** Floating-chrome badge icon + label. */
+  readonly chromeMeta?: { readonly icon: string; readonly label: string };
+  /**
+   * Whether the block exposes settings chrome; defaults to `true`. A `false`
+   * value hides the settings gear (divider/table have no inline config).
+   */
+  readonly configurable?: boolean;
+  /** Fields rendered by the default config popover when `renderLive` is absent. */
+  readonly configFields?: readonly NodeViewConfigField[];
+  /**
+   * Custom inline chrome control (the code block's language selector). When
+   * present it replaces the default settings gear; when absent the dispatcher
+   * renders the gear (unless `configurable` is `false`).
+   */
+  renderChromeControl?(args: NodeViewChromeArgs): ReactNode;
 };
 
 const NODE_VIEWS = new Map<string, NodeView>();

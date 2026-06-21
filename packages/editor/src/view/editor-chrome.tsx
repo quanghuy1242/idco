@@ -104,17 +104,6 @@ function blockTypeKey(choice: { blockType: string; tag?: string }): string {
 /** Menu key for the structural callout insert (not a registered object node). */
 const CALLOUT_INSERT_KEY = "callout";
 
-/** Insert-menu icon per node type (falls back to a generic block icon). */
-const INSERT_ICONS: Record<string, string> = {
-  "code-block": "Code",
-  divider: "Minus",
-  embed: "ExternalLink",
-  media: "Image",
-  "post-ref": "FileText",
-  table: "Table",
-  "table-of-contents": "List",
-};
-
 /**
  * Subscribe a component to selection + commit so toolbar query state stays live.
  * A hook-local counter is the snapshot: the store has no global revision and the
@@ -462,55 +451,55 @@ export function EditorToolbar(props: {
       <Sep />
       <span data-engine-insert-menu="">
         <MenuTrigger>
-              <Button
-                ariaLabel="Insert block"
-                iconName="Plus"
-                size="sm"
-                square
-                tooltip="Insert"
-                variant="ghost"
-              />
-              <Menu
-                onAction={(key) => {
-                  // A callout is a structural container, not a registered object
-                  // node, so it inserts through its own command (docs/019).
-                  if (key === CALLOUT_INSERT_KEY) {
-                    run(() => store.command({ type: "insert-callout" }));
-                    return;
-                  }
-                  const view = inserts.find((entry) => entry.type === key);
-                  if (view) {
-                    run(() =>
-                      store.command({
-                        data: view.insert.createData(),
-                        objectType: view.type,
-                        type: "insert-object",
-                      }),
-                    );
-                  }
-                }}
+          <Button
+            ariaLabel="Insert block"
+            iconName="Plus"
+            size="sm"
+            square
+            tooltip="Insert"
+            variant="ghost"
+          />
+          <Menu
+            onAction={(key) => {
+              // A callout is a structural container, not a registered object
+              // node, so it inserts through its own command (docs/019).
+              if (key === CALLOUT_INSERT_KEY) {
+                run(() => store.command({ type: "insert-callout" }));
+                return;
+              }
+              const view = inserts.find((entry) => entry.type === key);
+              if (view) {
+                run(() =>
+                  store.command({
+                    data: view.insert.createData(),
+                    objectType: view.type,
+                    type: "insert-object",
+                  }),
+                );
+              }
+            }}
+          >
+            <MenuItem
+              id={CALLOUT_INSERT_KEY}
+              key={CALLOUT_INSERT_KEY}
+              textValue="Callout"
+            >
+              <NavIcon name="Info" />
+              Callout
+            </MenuItem>
+            {inserts.map((entry) => (
+              <MenuItem
+                id={entry.type}
+                key={entry.type}
+                textValue={entry.insert.label}
               >
-                <MenuItem
-                  id={CALLOUT_INSERT_KEY}
-                  key={CALLOUT_INSERT_KEY}
-                  textValue="Callout"
-                >
-                  <NavIcon name="Info" />
-                  Callout
-                </MenuItem>
-                {inserts.map((entry) => (
-                  <MenuItem
-                    id={entry.type}
-                    key={entry.type}
-                    textValue={entry.insert.label}
-                  >
-                    <NavIcon name={INSERT_ICONS[entry.type] ?? "Plus"} />
-                    {entry.insert.label}
-                  </MenuItem>
-                ))}
-              </Menu>
-            </MenuTrigger>
-          </span>
+                <NavIcon name={entry.insert.icon ?? "Plus"} />
+                {entry.insert.label}
+              </MenuItem>
+            ))}
+          </Menu>
+        </MenuTrigger>
+      </span>
 
       {onFind ? (
         <>

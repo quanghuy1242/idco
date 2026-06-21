@@ -49,6 +49,7 @@ import {
 } from "./selection-overlay";
 import { AlertGlyph } from "@quanghuy1242/idco-ui";
 import { CalloutChrome } from "./callout-chrome";
+import { registerBuiltInNodeViews } from "./nodes";
 import { EngineObjectBlock } from "./object-block";
 import { calloutTone } from "./resting-document";
 import { sanitizeHtmlToCompat } from "./paste-html";
@@ -68,6 +69,10 @@ import {
   structuralListStyle,
   type ListItemMeta,
 } from "./styles";
+
+// Register the built-in object node views once when the editor module loads
+// (docs/020 §4.4); the call is idempotent so repeated module loads are safe.
+registerBuiltInNodeViews();
 
 /**
  * React binding for the owned-model engine.
