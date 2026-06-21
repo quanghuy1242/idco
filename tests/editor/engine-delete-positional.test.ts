@@ -129,15 +129,22 @@ describe("docs/019 §4.11 — removing an empty placeholder paragraph", () => {
     expect(store.order).toEqual([empty.id]);
   });
 
-  it("an empty paragraph after a divider Backspaces by removing the divider first", () => {
+  it("an empty paragraph after an atom Backspaces by removing the empty line, not the atom", () => {
     const allocator = createIdAllocator("idco_client_del_emptyafteratom");
     const d = divider(allocator);
     const empty = para(allocator, "");
     const store = storeOf([d, empty], allocator);
     setCaret(store, empty, 0);
-    // The caret sits right after the divider, so Backspace eats the divider
-    // (the immediate backward neighbour) before the empty paragraph.
+    // The disposable empty *line* is what Backspace removes — never the object
+    // above it. Deleting the node above an empty line (the previous behaviour)
+    // was surprising: an empty paragraph under an in-cell code block deleted the
+    // code block. The caret rests on the gap the line vacated, beside the atom.
     store.command({ type: "delete-backward" });
-    expect(store.order).toEqual([empty.id]);
+    expect(store.order).toEqual([d.id]);
+    expect(store.selection).toEqual({
+      index: 1,
+      scope: store.bodyId,
+      type: "gap",
+    });
   });
 });

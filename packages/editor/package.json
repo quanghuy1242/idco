@@ -33,7 +33,8 @@
     "@lexical/selection": "0.45.0",
     "@lexical/table": "0.45.0",
     "@lexical/utils": "0.45.0",
-    "lexical": "0.45.0"
+    "lexical": "0.45.0",
+    "react-aria-components": "1.17.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",

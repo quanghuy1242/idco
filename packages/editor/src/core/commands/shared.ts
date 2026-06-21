@@ -572,6 +572,20 @@ export function previousTextLeaf(
   store: EditorStore,
   id: NodeId,
 ): TextLeafNode | null {
+  const entry = store.parentEntry(id);
+  // Inside a container scope (a table cell, a callout), find the previous text leaf
+  // among earlier siblings, descending structural siblings to their last leaf, and
+  // confined to the scope — so Backspace at the start of one cell paragraph folds
+  // it into the previous paragraph *of the same cell*, but never merges across the
+  // cell boundary (at the scope's first child there is no neighbor).
+  if (entry && entry.parent !== store.bodyId) {
+    const siblings = childrenOf(store, entry.parent);
+    for (let i = entry.index - 1; i >= 0; i -= 1) {
+      const leaf = lastTextLeafUnder(store, siblings[i]!);
+      if (leaf) return leaf;
+    }
+    return null;
+  }
   const index = store.order.indexOf(id);
   for (let i = index - 1; i >= 0; i -= 1) {
     const node = store.getNode(store.order[i]!);
@@ -584,11 +598,58 @@ export function nextTextLeaf(
   store: EditorStore,
   id: NodeId,
 ): TextLeafNode | null {
+  const entry = store.parentEntry(id);
+  // Inside a container scope (a table cell, a callout), find the next text leaf
+  // among later siblings, descending structural siblings to their first leaf, and
+  // confined to the scope — so Delete at the end of one cell paragraph merges the
+  // next paragraph *of the same cell*, but never reaches across the cell boundary.
+  if (entry && entry.parent !== store.bodyId) {
+    const siblings = childrenOf(store, entry.parent);
+    for (let i = entry.index + 1; i < siblings.length; i += 1) {
+      const leaf = firstTextLeafUnder(store, siblings[i]!);
+      if (leaf) return leaf;
+    }
+    return null;
+  }
   const index = store.order.indexOf(id);
   if (index < 0) return null;
   for (let i = index + 1; i < store.order.length; i += 1) {
     const node = store.getNode(store.order[i]!);
     if (node && node.kind === "text") return node;
+  }
+  return null;
+}
+
+/** The first text leaf at or under `id` (descending structural children). */
+function firstTextLeafUnder(
+  store: EditorStore,
+  id: NodeId,
+): TextLeafNode | null {
+  const node = store.getNode(id);
+  if (!node) return null;
+  if (node.kind === "text") return node;
+  if (node.kind === "structural") {
+    for (const child of node.children) {
+      const leaf = firstTextLeafUnder(store, child);
+      if (leaf) return leaf;
+    }
+  }
+  return null;
+}
+
+/** The last text leaf at or under `id` (descending structural children). */
+function lastTextLeafUnder(
+  store: EditorStore,
+  id: NodeId,
+): TextLeafNode | null {
+  const node = store.getNode(id);
+  if (!node) return null;
+  if (node.kind === "text") return node;
+  if (node.kind === "structural") {
+    for (let i = node.children.length - 1; i >= 0; i -= 1) {
+      const leaf = lastTextLeafUnder(store, node.children[i]!);
+      if (leaf) return leaf;
+    }
   }
   return null;
 }
@@ -899,6 +960,26 @@ export function deleteRange(
     return { content, node: start.node, offset: start.offset };
   }
   const endNode = store.requireTextNode(end.node);
+  // A cross-scope range (endpoints in different containers — two table cells, a
+  // cell and the body, a list item and a paragraph) is not a deletable text run:
+  // merging tails across the boundary would strand the far block (empty a cell,
+  // leave intermediate siblings untouched). The owned model has no cross-container
+  // text range — that gesture is the table cell-range overlay, or block-atomic —
+  // so deletion collapses to a no-op at `start` rather than corrupting the grid.
+  // Same-parent multi-block ranges (body paragraphs, cells of one row) are the
+  // supported case and fall through. Selection confinement at the creation sites
+  // (drag, vertical extend, select-all) keeps such a range from forming; this is
+  // the central safety net if one still reaches an editing command.
+  if (
+    store.parentEntry(start.node)?.parent !==
+    store.parentEntry(end.node)?.parent
+  ) {
+    return {
+      content: startNode.content,
+      node: start.node,
+      offset: start.offset,
+    };
+  }
   // Clip the start node's tail, then append the end node's tail, then remove the
   // fully covered blocks between them plus the end node.
   tr.replaceText({

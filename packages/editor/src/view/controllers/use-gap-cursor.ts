@@ -48,22 +48,27 @@ export function useGapCursor(args: {
   } = args;
   const { rootRef, registryRef } = refs;
 
-  // Hit-test a pointer against the body's inter-block gaps; returns a gap
+  // Hit-test a pointer against a scope's inter-block gaps; returns a gap
   // selection only when the slot is adjacent to an atom (an object) or a
-  // structural container (a callout) — the body-level position a text caret
-  // cannot occupy, since a caret there would land *inside* the container or its
-  // sibling, never between them (docs/019 §4.9/§5.8). Elsewhere the caller falls
-  // back to the nearest-text-leaf caret.
+  // structural container (a callout) — the position a text caret cannot occupy,
+  // since a caret there would land *inside* the container or its sibling, never
+  // between them (docs/019 §4.9/§5.8). Elsewhere the caller falls back to the
+  // nearest-text-leaf caret. The scope is the body for a click in empty space,
+  // or a structural container (a table cell) for a click in its own box — so a
+  // click beside an in-cell object places the gap cursor there, not only in the
+  // body. `scopeEl` supplies the scope's content box for the edge slots.
   const gapAtPointer = useCallback(
-    (clientX: number, clientY: number): GapSelection | null => {
+    (
+      clientX: number,
+      clientY: number,
+      scope: NodeId,
+      scopeEl: HTMLElement,
+    ): GapSelection | null => {
       void clientX;
-      const root = rootRef.current;
-      if (!root) return null;
-      const scope = store.bodyId;
       const children = childrenOf(store, scope);
       const rects: RectLike[] = [];
       const atomicFlags: boolean[] = [];
-      const bodyIndex: number[] = [];
+      const childIndex: number[] = [];
       for (let i = 0; i < children.length; i += 1) {
         const element = registryRef.current.blockRefs.get(children[i]!);
         if (!element) continue;
@@ -76,27 +81,27 @@ export function useGapCursor(args: {
         });
         const kind = store.getNode(children[i]!)?.kind;
         atomicFlags.push(kind === "object" || kind === "structural");
-        bodyIndex.push(i);
+        childIndex.push(i);
       }
       if (rects.length === 0) return null;
-      const rootRect = root.getBoundingClientRect();
+      const scopeRect = scopeEl.getBoundingClientRect();
       const hit = gapAtY(
         gapCandidates({
           atomicFlags,
           rects,
-          scopeBottom: rootRect.bottom,
-          scopeTop: rootRect.top,
+          scopeBottom: scopeRect.bottom,
+          scopeTop: scopeRect.top,
         }),
         clientY,
       );
       if (!hit || !hit.atomic) return null;
       const index =
         hit.index < rects.length
-          ? bodyIndex[hit.index]!
-          : bodyIndex[rects.length - 1]! + 1;
+          ? childIndex[hit.index]!
+          : childIndex[rects.length - 1]! + 1;
       return { index, scope, type: "gap" };
     },
-    [store, rootRef, registryRef],
+    [store, registryRef],
   );
 
   // Insert a real paragraph at the gap and land a text caret in it (docs/019
@@ -249,13 +254,28 @@ export function useGapCursor(args: {
       // selection (it opens the context menu instead, mirrors the per-block rule).
       if (event.button !== 0) return;
       const target = event.target as Element;
-      if (target.closest("[data-engine-block-id]")) return;
       const root = rootRef.current;
       if (!root) return;
+      // Resolve which scope a click in empty space belongs to. A click that
+      // missed every block resolves in the body. A click on a structural
+      // container's own box — a table cell's padding, the inter-child gap inside
+      // a callout — resolves in that container's scope, so a gap cursor can land
+      // beside an in-cell object (docs/019 §4.9). A click on a leaf block
+      // (text/object) is owned by that block's own handler: bail.
+      const block = target.closest<HTMLElement>("[data-engine-block-id]");
+      let scope: NodeId = store.bodyId;
+      let scopeEl: HTMLElement = root;
+      if (block) {
+        const id = block.getAttribute("data-engine-block-id") as NodeId | null;
+        const node = id ? store.getNode(id) : null;
+        if (!id || node?.kind !== "structural") return;
+        scope = id;
+        scopeEl = block;
+      }
       // A click in the inter-block whitespace adjacent to an atom places a gap
       // cursor there (docs/019 §4.9, legacy Part C), the position a text caret
       // cannot represent. Elsewhere the click maps to the nearest text leaf.
-      const gap = gapAtPointer(event.clientX, event.clientY);
+      const gap = gapAtPointer(event.clientX, event.clientY, scope, scopeEl);
       if (gap) {
         store.dispatch({ origin: "local", selectionAfter: gap, steps: [] });
         focusRoot();

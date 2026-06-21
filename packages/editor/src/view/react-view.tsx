@@ -47,6 +47,7 @@ import { baseViewStyle, computeWindowListMeta } from "./styles";
 import { cancelFrame } from "./raf";
 import { EngineBlock } from "./block-dispatch";
 import { TableControls } from "./table-controls";
+import { TableInteractions } from "./table-interactions";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_VIEWPORT_HEIGHT,
@@ -338,6 +339,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           store={store}
         />
         <TableControls rootRef={rootRef} store={store} />
+        <TableInteractions store={store} />
         {isTouchDevice && (
           <TouchSelectionLayer
             actions={touchActions}
@@ -396,6 +398,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           store={store}
         />
         <TableControls rootRef={contentRef} store={store} />
+        <TableInteractions store={store} />
         {isTouchDevice && (
           <TouchSelectionLayer
             actions={touchActions}

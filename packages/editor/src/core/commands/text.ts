@@ -87,7 +87,19 @@ export function compileDelete(
     // whole — the caret rests beside it, so Backspace removes it rather than
     // skipping past it to merge across (docs/019 §4.12.6: atoms have no interior).
     const prevAtom = adjacentSiblingAtom(store, node.id, -1);
-    if (prevAtom) return deleteAdjacentAtom(store, node, prevAtom, offset);
+    if (prevAtom) {
+      // ...unless the caret block is an empty placeholder paragraph below the
+      // atom: the disposable empty *line* is what Backspace removes (landing a
+      // gap beside the atom), never the object above it. Without this, an empty
+      // line under an in-cell code block deletes the code block (docs/019 §4.11).
+      // `removeEmptyBlock` returns null for the only block in a scope, so the
+      // atom delete still applies then. A non-empty block keeps the atom-delete.
+      if (node.type === "paragraph" && length === 0) {
+        const removed = removeEmptyBlock(store, node);
+        if (removed) return removed;
+      }
+      return deleteAdjacentAtom(store, node, prevAtom, offset);
+    }
     const merged = mergeWithNeighbor(store, node, "backward");
     if (merged) return merged;
     // No previous text leaf to merge into (the block is first, or only atoms
@@ -267,8 +279,13 @@ export function mergeWithNeighbor(
   // them, `previousTextLeaf` reached across it, so keep the old merge-into-
   // previous to leave the merged content on the same side of that node as before
   // — a rare case where we accept removing the focused leaf to preserve order.
+  const nEntry = store.parentEntry(neighbor.id);
+  const tEntry = store.parentEntry(node.id);
   const adjacent =
-    store.order.indexOf(neighbor.id) === store.order.indexOf(node.id) - 1;
+    !!nEntry &&
+    !!tEntry &&
+    nEntry.parent === tEntry.parent &&
+    nEntry.index === tEntry.index - 1;
   const joinOffset = neighbor.content.text.length;
   if (!adjacent) {
     mergeLeafInto(tr, store, neighbor, node, 0);

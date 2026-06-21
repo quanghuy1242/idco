@@ -32,6 +32,7 @@ import type { EditorStore, NodeId, StructuralNode } from "../core";
 import {
   deleteColumn,
   deleteRow,
+  headerRowHasColSpan,
   headerState,
   insertColumn,
   insertRow,
@@ -138,6 +139,15 @@ function tableNode(store: EditorStore, id: NodeId): StructuralNode | null {
   const node = store.getNode(id);
   return node?.kind === "structural" ? node : null;
 }
+
+// Responsive / full-width tables reflow to their container natively: the shared
+// `RichTextTable` (live and resting) emits a `%`-based `<colgroup>` derived from
+// the `colWidths` ratios (docs/022 §10.4), so the live editor table — like the
+// published page — resizes with its container via CSS, with no model write. The
+// legacy `useResponsiveColumnWidths` `ResizeObserver` existed only because
+// Lexical's stock `TableNode` rendered absolute px and had to be rewritten on
+// every reflow; the owned ratio renderer makes that churn (and the undo/redo
+// pollution it caused) unnecessary, so it is intentionally not ported.
 
 const overlayButtonClass =
   "pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 hover:scale-110";
@@ -255,10 +265,16 @@ export function TableControls(props: {
     }
   }
 
+  // The column "+/−" and resize handles read their boundaries from the header
+  // row's cells, so a colSpan in row 0 desyncs them — suppress the column controls
+  // (and resize) only then. Row controls read row boundaries (always correct) and
+  // stay on. Body merges are handled by the now merge-aware insert/delete ops, so
+  // the affordances no longer hide on every merged table (docs/022 §7).
+  const headerRowMerged = headerRowHasColSpan(store, geom.tableId);
   // Reveal only the single nearest insert button, by the matching edge. The
   // header-edge guard suppresses "insert before the header" (boundary 0) so a
   // header row/column stays the table's boundary (legacy §controls).
-  const nearTop = geom.mouseY <= geom.top + NEAR;
+  const nearTop = !headerRowMerged && geom.mouseY <= geom.top + NEAR;
   const nearLeft = geom.mouseX <= geom.left + NEAR;
   const rawCol = nearTop ? nearestIndex(geom.cols, geom.mouseX) : -1;
   const rawRow = nearLeft ? nearestIndex(geom.rows, geom.mouseY) : -1;
@@ -278,18 +294,24 @@ export function TableControls(props: {
       data-engine-table-controls=""
       className="pointer-events-none fixed inset-0 z-40"
     >
-      {geom.cols.map((x, index) =>
-        index > 0 && index < geom.cols.length - 1 ? (
-          <div
-            key={`resize-${index}`}
-            role="separator"
-            aria-label="Resize column"
-            onPointerDown={(event) => startResize(event, index)}
-            className="pointer-events-auto absolute w-2 -translate-x-1/2 cursor-col-resize bg-primary/0 transition-colors hover:bg-primary/40"
-            style={{ height: geom.bottom - geom.top, left: x, top: geom.top }}
-          />
-        ) : null,
-      )}
+      {headerRowMerged
+        ? null
+        : geom.cols.map((x, index) =>
+            index > 0 && index < geom.cols.length - 1 ? (
+              <div
+                key={`resize-${index}`}
+                role="separator"
+                aria-label="Resize column"
+                onPointerDown={(event) => startResize(event, index)}
+                className="pointer-events-auto absolute w-2 -translate-x-1/2 cursor-col-resize bg-primary/0 transition-colors hover:bg-primary/40"
+                style={{
+                  height: geom.bottom - geom.top,
+                  left: x,
+                  top: geom.top,
+                }}
+              />
+            ) : null,
+          )}
 
       {activeCol >= 0 ? (
         <ChromeButton

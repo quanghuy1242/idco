@@ -413,25 +413,69 @@ export function RichTextTableRow({ children }: RichTextChildrenProps) {
   return <tr>{children}</tr>;
 }
 
+/** Map a cell's `verticalAlign` attr to its Tailwind vertical-align class. */
+export function verticalAlignClass(verticalAlign?: string): string {
+  if (verticalAlign === "middle") return "align-middle";
+  if (verticalAlign === "bottom") return "align-bottom";
+  return "align-top";
+}
+
+/**
+ * A readable text color (near-black or near-white) for a cell's explicit
+ * background, by perceived luminance. A user-set cell fill is theme-independent,
+ * so the cell's `text-base-content` (which follows the theme) can collapse into
+ * the fill — a dark fill in a light theme, or vice versa. Picking the contrast
+ * color from the fill keeps the text legible regardless of theme. Returns
+ * `undefined` for an unset/unparseable color, leaving the themed default.
+ */
+export function readableTextColor(background?: string): string | undefined {
+  if (!background) return undefined;
+  const hex = background.trim().replace(/^#/, "");
+  const full =
+    hex.length === 3
+      ? hex
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : hex;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return undefined;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.55 ? "#111827" : "#f9fafb";
+}
+
 export function RichTextTableCell({
   header,
   children,
   colSpan,
   rowSpan,
   backgroundColor,
+  verticalAlign,
 }: RichTextChildrenProps & {
   readonly header?: boolean;
   readonly colSpan?: number;
   readonly rowSpan?: number;
   readonly backgroundColor?: string;
+  readonly verticalAlign?: string;
 }) {
-  const className =
-    "border-b border-r border-base-300 px-5 py-2.5 align-top text-base-content";
-  // Merged cells span columns/rows; a cell background overrides the surface.
+  const className = `border-b border-r border-base-300 px-5 py-2.5 ${verticalAlignClass(
+    verticalAlign,
+  )} text-base-content`;
+  // Merged cells span columns/rows; a cell background overrides the surface, and
+  // the text color flips to stay legible against the chosen fill (any theme).
   const span = {
     ...(colSpan && colSpan > 1 ? { colSpan } : {}),
     ...(rowSpan && rowSpan > 1 ? { rowSpan } : {}),
-    ...(backgroundColor ? { style: { background: backgroundColor } } : {}),
+    ...(backgroundColor
+      ? {
+          style: {
+            background: backgroundColor,
+            color: readableTextColor(backgroundColor),
+          },
+        }
+      : {}),
   };
   if (header) {
     return (

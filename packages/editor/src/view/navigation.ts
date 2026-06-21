@@ -304,13 +304,23 @@ function stepGap(
 }
 
 /**
- * Vertical caret movement by visual line, using browser geometry.
+ * Vertical caret movement by visual line, using browser geometry — a
+ * document-level iterative probe (docs/019 §4.10, docs/022 §5).
  *
- * docs/011 §8.3 reuses `caretPositionFromPoint`: drop a probe one line above or
- * below the caret's current pixel position and ask the browser which model
- * offset sits there. This moves by the rendered line, so it works inside a
- * wrapped multi-line block, not only block-to-block. A persistent goal column
- * across several presses is the Phase 7 refinement and is not tracked here.
+ * docs/011 §8.3 reuses `caretPositionFromPoint`: drop a probe above/below the
+ * caret's pixel position and ask the browser which model offset sits there, so a
+ * move tracks the rendered line, not just block order. A *single* line-step probe
+ * is not enough across a structural boundary: stepping down out of a table cell
+ * lands the probe in the cell's padding/border (or the inter-block gap), where
+ * `caretPositionFromPoint` resolves to a non-text element and the move stalls.
+ *
+ * The fix is general: step the probe point progressively further in the travel
+ * direction at the goal column until it resolves to a *different* text position —
+ * the cell visually below in the same column, the next paragraph, whatever pixel
+ * is there — or until it exits the viewport (the probe API only resolves visible
+ * points; off-screen targets are the pager's job, docs/018 §2.4). This is the
+ * ProseMirror/Word behaviour and is correct for all vertical motion, including
+ * across mixed-width body blocks, not only tables (docs/022 §10.3).
  */
 export function verticalNavigation(
   store: EditorStore,
@@ -323,29 +333,67 @@ export function verticalNavigation(
   if (!host) return null;
   const rect = caretClientRect(host, selection.focus.offset);
   if (!rect) return null;
+  const doc = host.ownerDocument;
+  const viewportHeight =
+    doc.defaultView?.innerHeight || doc.documentElement?.clientHeight || 0;
+  const maxY = viewportHeight > 0 ? viewportHeight : 10_000;
   const lineStep = Math.max(8, rect.height || 16);
-  const probeY =
-    direction < 0 ? rect.top - lineStep * 0.5 : rect.bottom + lineStep * 0.5;
-  const probe = (x: number): EditorSelection | null => {
-    const hit = pointToModelPosition(host.ownerDocument, x, probeY);
-    if (!hit) return null;
-    const target = store.getNode(hit.id);
-    if (!target || target.kind !== "text") return null;
-    const focus = pointAtOffset(
-      hit.id,
-      target.content,
-      clampOffset(hit.offset, target.content.text.length),
-    );
-    return { anchor: extend ? selection.anchor : focus, focus, type: "text" };
-  };
+  // Step ~half a line so a thin target line is never skipped, but cap the number
+  // of probes (each is a `caretPositionFromPoint` hit-test) so a press at a doc
+  // boundary — where nothing resolves below — can't fan out into hundreds of DOM
+  // queries and stall input. ~64 probes crosses several lines / a cell boundary.
+  const step = Math.max(4, Math.round(lineStep * 0.5));
+  const maxProbes = 64;
   // Prefer the remembered goal column (docs/010 Phase 7 AC7) so a run of vertical
-  // moves tracks the original X through ragged lines. But if the goal-column
-  // probe yields nothing or does not move the caret, fall back to the live caret
-  // X — that keeps the per-line reveal step (and avoids degrading to a whole-block
-  // jump) exactly as before the goal column existed.
-  const byGoal = goalColumn === null ? null : probe(goalColumn);
-  if (byGoal && !samePoint(byGoal, selection)) return byGoal;
-  return probe(rect.left);
+  // moves tracks the original X through ragged lines; the live caret X is the
+  // fallback when there is no goal column or it resolves nothing.
+  const xs = goalColumn === null ? [rect.left] : [goalColumn, rect.left];
+  const baseY = direction < 0 ? rect.top : rect.bottom;
+  const anchorScope = store.parentEntry(selection.anchor.node)?.parent;
+  let probes = 0;
+  for (let distance = Math.round(lineStep * 0.5); ; distance += step) {
+    const probeY = baseY + direction * distance;
+    if (probeY < 0 || probeY > maxY || (probes += 1) > maxProbes) break;
+    for (const x of xs) {
+      const hit = pointToModelPosition(doc, x, probeY);
+      if (!hit) continue;
+      const target = store.getNode(hit.id);
+      if (!target) continue;
+      // The next visual line is an atom (an image, a divider, a code block
+      // inside a cell). An atom has no caret offset — its caret stop is the
+      // horizontal gap cursor beside it, which the block-order vertical step
+      // (`verticalCross`, reached via the caller's fallback to
+      // `selectionForNavigation`) computes. Defer to it instead of stepping the
+      // probe *over* the atom to the next text line, which would skip that stop
+      // — the regression where ArrowUp/Down no longer walked onto the gap
+      // cursor beside an in-cell object (docs/019 §4.9, docs/022 §5). Only an
+      // *object* defers; a structural hit (a cell/row/table border the probe
+      // merely passes through on its way to the cell below) keeps stepping so
+      // text-to-text cross-cell movement still resolves.
+      if (target.kind === "object") return null;
+      if (target.kind !== "text") continue;
+      const focus = pointAtOffset(
+        hit.id,
+        target.content,
+        clampOffset(hit.offset, target.content.text.length),
+      );
+      if (
+        focus.node === selection.focus.node &&
+        focus.offset === selection.focus.offset
+      ) {
+        continue;
+      }
+      // A shift-extend must stay in one scope: extending into the cell below (a
+      // different container) would form a cross-scope text range that is not
+      // editable (deleteRange collapses it). Stop at the boundary. A plain
+      // collapsed move across the boundary is fine and falls through.
+      if (extend && store.parentEntry(focus.node)?.parent !== anchorScope) {
+        return null;
+      }
+      return { anchor: extend ? selection.anchor : focus, focus, type: "text" };
+    }
+  }
+  return null;
 }
 
 /** Whether a text selection is a collapsed caret (anchor === focus). */

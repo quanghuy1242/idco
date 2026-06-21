@@ -131,6 +131,14 @@ export type NodeView = {
    * renders the gear (unless `configurable` is `false`).
    */
   renderChromeControl?(args: NodeViewChromeArgs): ReactNode;
+  /**
+   * The caret/gap ink to use when the caret sits inside this node, or undefined
+   * to defer to an ancestor / the theme default (docs/022 §7) — the object twin
+   * of `StructuralNodeView.caretInk`. The engine paints its own caret, so CSS
+   * `caret-color` cannot reach it; a node that renders a colored surface returns
+   * the auto-contrast ink here. Consulted generically by the selection overlay.
+   */
+  caretInk?(node: ObjectNode): string | undefined;
 };
 
 const NODE_VIEWS = new Map<string, NodeView>();

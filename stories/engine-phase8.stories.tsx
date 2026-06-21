@@ -15,8 +15,9 @@ export default {
 
 /**
  * A Payload-Lexical sample document (docs/017 §3.4): paragraphs with an inline
- * link, a heading, a youtube embed, an upload (image), a horizontal rule, a list,
- * and a Payload Block that the adapter drops-with-report (AC7).
+ * link, a heading, a complex live table (merged cells, header row+column, cell
+ * background, vertical-align, numbered gutter — docs/022), an upload (image), a
+ * horizontal rule, a list, and a Payload Block that the adapter drops-with-report.
  */
 const PAYLOAD_SAMPLE = {
   root: {
@@ -42,7 +43,117 @@ const PAYLOAD_SAMPLE = {
         ],
         type: "paragraph",
       },
-      { fields: { videoID: "jNQXAC9IVRw" }, type: "youtube" },
+      // A deliberately complex table to exercise the live-table feature (docs/022):
+      // a header row AND header column, a vertical row-span merge, a horizontal
+      // col-span merge, per-cell background + vertical-align, a numbered gutter, and
+      // responsive layout. Right-click a cell for the menu; drag across cells to
+      // select a range, then merge; hover the edges to insert/delete; drag a column
+      // boundary to resize. Spanned rows are intentionally short (covered cells have
+      // no node), the way the legacy Lexical table serializes.
+      {
+        children: [
+          {
+            children: [
+              {
+                children: [{ text: "Quarter", type: "text" }],
+                headerState: 3,
+                type: "tablecell",
+              },
+              {
+                children: [{ text: "Product", type: "text" }],
+                headerState: 1,
+                type: "tablecell",
+              },
+              {
+                children: [{ text: "Revenue", type: "text" }],
+                headerState: 1,
+                type: "tablecell",
+              },
+              {
+                children: [{ text: "Status", type: "text" }],
+                headerState: 1,
+                type: "tablecell",
+              },
+            ],
+            type: "tablerow",
+          },
+          {
+            children: [
+              {
+                children: [{ text: "Q1", type: "text" }],
+                headerState: 2,
+                type: "tablecell",
+              },
+              {
+                children: [{ text: "Widgets", type: "text" }],
+                type: "tablecell",
+              },
+              {
+                children: [{ text: "$12,400", type: "text" }],
+                type: "tablecell",
+              },
+              {
+                backgroundColor: "#14532d",
+                children: [{ text: "On track ✓", type: "text" }],
+                rowSpan: 2,
+                type: "tablecell",
+                verticalAlign: "middle",
+              },
+            ],
+            type: "tablerow",
+          },
+          {
+            // The Status column here is covered by the row-span above → 3 cells.
+            children: [
+              {
+                children: [{ text: "Q2", type: "text" }],
+                headerState: 2,
+                type: "tablecell",
+              },
+              {
+                children: [{ text: "Gadgets", type: "text" }],
+                type: "tablecell",
+              },
+              {
+                children: [{ text: "$18,900", type: "text" }],
+                type: "tablecell",
+              },
+            ],
+            type: "tablerow",
+          },
+          {
+            // A col-span merge over Product+Revenue → 3 cells.
+            children: [
+              {
+                children: [{ text: "Q3", type: "text" }],
+                headerState: 2,
+                type: "tablecell",
+              },
+              {
+                backgroundColor: "#7c2d12",
+                children: [
+                  {
+                    text: "Combined launch — Widgets + Gadgets bundle",
+                    type: "text",
+                  },
+                ],
+                colSpan: 2,
+                type: "tablecell",
+                verticalAlign: "middle",
+              },
+              {
+                children: [{ text: "Planning", type: "text" }],
+                type: "tablecell",
+              },
+            ],
+            type: "tablerow",
+          },
+        ],
+        colWidths: [150, 220, 150, 180],
+        layout: "responsive",
+        showRowNumbers: true,
+        type: "table",
+      },
       {
         type: "upload",
         value: {
@@ -112,9 +223,12 @@ export const FullEditor: Story = () => {
         virtualize={false}
       />
       <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
-        Try: select text and use the toolbar (icons), type <code># </code> or{" "}
-        <code>- </code> at a line start, press <kbd>Ctrl/Cmd+F</kbd> to find,
-        click the image to edit/upload, use Insert to add a divider/image.
+        Try the table: hover it, then use the chrome's cell button (paint
+        bucket) to merge a dragged cell range, fill a cell color, or set
+        vertical align; hover an edge to insert/delete a row/column; drag a
+        column boundary to resize; the gear toggles header row/column. Also:
+        toolbar marks, <code># </code>/<code>- </code> shortcuts,{" "}
+        <kbd>Ctrl/Cmd+F</kbd> to find, click the image to edit/upload.
       </p>
       <p
         style={{

@@ -79,6 +79,17 @@ export function useDragSelection(args: {
     if (!hit) return;
     const target = store.getNode(hit.node);
     if (!target || target.kind !== "text") return;
+    // Confine the text drag to the anchor's scope. A drag that wanders into
+    // another container (a different table cell, a callout) must not form a
+    // cross-scope text selection — that range is not editable and would corrupt
+    // on delete (deleteRange's cross-scope guard). The cross-cell case is the
+    // table cell-range overlay's job (`TableInteractions`), not a text range.
+    if (
+      store.parentEntry(hit.node)?.parent !==
+      store.parentEntry(anchor.node)?.parent
+    ) {
+      return;
+    }
     const focus = pointAtOffset(
       hit.node,
       target.content,

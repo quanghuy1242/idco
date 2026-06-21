@@ -19,13 +19,15 @@ import {
   RichTextTable,
   RichTextTableCell,
   RichTextTableRow,
+  readableTextColor,
+  verticalAlignClass,
 } from "@quanghuy1242/idco-ui";
 import { type JsonValue, type StructuralNode } from "../../core";
 import { type StructuralNodeView } from "../structural-view";
 
 /** Cell classes copied from the reader `RichTextTableCell` so live matches rest. */
 const CELL_CLASS =
-  "border-b border-r border-base-300 px-5 py-2.5 align-top text-base-content";
+  "border-b border-r border-base-300 px-5 py-2.5 text-base-content";
 const HEADER_CLASS = "bg-base-200 text-left font-semibold";
 
 function numberArray(
@@ -132,7 +134,9 @@ export const tableRowStructuralView: StructuralNodeView = {
 export const tableCellStructuralView: StructuralNodeView = {
   renderContainer: ({ node, registerBlock, children }) => {
     const header = isHeaderCell(node);
-    const className = header ? `${CELL_CLASS} ${HEADER_CLASS}` : CELL_CLASS;
+    const valign = verticalAlignClass(stringAttr(node.attrs?.verticalAlign));
+    const base = `${CELL_CLASS} ${valign}`;
+    const className = header ? `${base} ${HEADER_CLASS}` : base;
     const colSpan = numberAttr(node.attrs?.colSpan);
     const rowSpan = numberAttr(node.attrs?.rowSpan);
     const background = stringAttr(node.attrs?.backgroundColor);
@@ -147,7 +151,11 @@ export const tableCellStructuralView: StructuralNodeView = {
           registerBlock(node.id, element)
         }
         rowSpan={rowSpan}
-        style={background ? { background } : undefined}
+        style={
+          background
+            ? { background, color: readableTextColor(background) }
+            : undefined
+        }
       >
         {children}
       </Tag>
@@ -160,9 +168,18 @@ export const tableCellStructuralView: StructuralNodeView = {
       header={isHeaderCell(node)}
       key={node.id}
       rowSpan={numberAttr(node.attrs?.rowSpan)}
+      verticalAlign={stringAttr(node.attrs?.verticalAlign)}
     >
       {renderSequence(children)}
     </RichTextTableCell>
   ),
+  // A colored cell paints its text with `readableTextColor(background)` (above);
+  // the engine's painted caret/gap cursor matches that same auto-contrast ink so
+  // it stays legible on a dark fill — CSS `caret-color` cannot reach a painted
+  // caret. The selection overlay walks ancestors and asks for this (docs/022 §7).
+  caretInk: (node) => {
+    const background = stringAttr(node.attrs?.backgroundColor);
+    return background ? readableTextColor(background) : undefined;
+  },
   type: "tablecell",
 };

@@ -22,6 +22,7 @@ import {
 import {
   selectionForGapNavigation,
   selectionForNavigation,
+  verticalNavigation,
 } from "../../packages/editor/src/view/navigation";
 
 function storeOf(
@@ -326,3 +327,33 @@ describe("docs/019 §4.4 — scopePath enumerates enclosing containers", () => {
     ]);
   });
 });
+
+describe("docs/022 §5 — verticalNavigation iterative probe terminates", () => {
+  it("returns null without hanging when no layout resolves a point (jsdom)", () => {
+    // The document-level probe steps the goal column further each iteration until
+    // it resolves a text position or exits the viewport. jsdom has no layout, so
+    // every probe misses; the loop must terminate (viewport-bound break), not spin.
+    const allocator = createIdAllocator("idco_client_vertnav");
+    const p0 = para(allocator, "first line");
+    const p1 = para(allocator, "second line");
+    const store = storeOf([p0, p1], [p0.id, p1.id], allocator);
+    const selection = textSel(store, p0, 2);
+    const host = host0();
+    expect(
+      verticalNavigation(store, selection, host, 1, false, null),
+    ).toBeNull();
+    expect(
+      verticalNavigation(store, selection, host, -1, false, 40),
+    ).toBeNull();
+    // A null host short-circuits.
+    expect(
+      verticalNavigation(store, selection, null, 1, false, null),
+    ).toBeNull();
+  });
+});
+
+function host0(): HTMLElement {
+  const el = document.createElement("div");
+  el.setAttribute("data-engine-block-id", "x");
+  return el;
+}

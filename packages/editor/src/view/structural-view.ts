@@ -84,6 +84,15 @@ export type StructuralNodeView = {
   renderContainer(args: StructuralContainerArgs): ReactNode;
   renderResting(args: StructuralRestingArgs): ReactNode;
   readonly insert?: StructuralNodeViewInsert;
+  /**
+   * The caret/gap ink to use when the caret sits inside this node, or undefined
+   * to defer to an ancestor / the theme default (docs/022 §7). The engine paints
+   * its own caret, so CSS `caret-color` cannot reach it; a container that paints
+   * a surface (a cell's `backgroundColor`) returns the auto-contrast ink here so
+   * the caret stays legible on it. Generic: the overlay walks ancestors and asks
+   * each registered view, keeping no per-type knowledge of its own.
+   */
+  caretInk?(node: StructuralNode): string | undefined;
 };
 
 const STRUCTURAL_VIEWS = new Map<string, StructuralNodeView>();

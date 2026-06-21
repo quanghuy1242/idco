@@ -1,508 +1,111 @@
-# Editor node-SPI notes (post docs/020 refactor)
-
-> **SUPERSEDED 2026-06-21 — throwaway draft.** The durable design now lives in two docs: the engine/SPI design in [docs/021](docs/021_structural_node_spi.md) (the structural Node SPI — symmetric core half + extension surface) and the table feature in [docs/022](docs/022_live_editable_table.md) (the live editable table). This file holds no information not captured there; keep it only as scratch.
-
-> Scratch notes captured after the docs/020 refactor + CI fix. Covers: the callout
-> node lifecycle, what the object SPI lets a user do (with a full worked example),
-> whether object and structural SPIs are "the same shape," whether a third party
-> can add nodes without editing core, and the real status of the structural plan.
->
-> Source of truth is still `docs/016` (object SPI), `docs/020` (this refactor),
-> `docs/019` (positional model / table fork). This file is a digest, not a spec.
-
-> **Update 2026-06-21:** the structural **core half is now built and proven by
-> callout** (steps 1–2 of §7 done). The "only half-pluggable / store half hardcoded"
-> framing below in §1, §3.1, §4 describes the *pre-step-1* state and is kept as the
-> historical baseline; the authoritative current state is §7.2. The one barrier that
-> remains is the closed `StructuralNodeType` union, which opens with the table (§7).
-
-## TL;DR
-
-- **Object blocks** (atomic / heavy content) are **fully pluggable from outside the
-  editor package today** — one `registerNode({ definition, view })` call, no core
-  edits, including persistence, bake, search, live-edit, undo.
-- **Structural containers** (block children, nested carets, gap-nav — e.g. callout)
-  are now pluggable through a **symmetric core half** (`core/structural-registry.ts`'s
-  `StructuralDefinition` = `createSubtree` + `fromCompatNode`) registered via the same
-  `registerNode({ structuralView, structuralDefinition })` front. A registered
-  structural type owns its insert (generic `insert-structural`) and round-trips
-  save/load with **no per-type core branch**. The only remaining gap: the closed
-  `StructuralNodeType` union still types `makeStructuralNode`, so a *genuinely new*
-  type (not callout) needs the union opened — that lands with the table (§7).
-- **Object built-in vs object external = identical shape.** **Structural (callout)
-  vs object = deliberately different shape** (different contract), but both register
-  through the **same** `registerNode` front.
-- Making structural nodes open to *third-party* authors (the public union opening) is
-  the last deferred piece; the engine-internal core half is done.
-
----
-
-## 1. Lifecycle of `packages/editor/src/view/nodes/callout.tsx`
-
-Key framing: **callout.tsx is the *view half* only.** It owns rendering + the insert
-affordance. The data shape, the insert command, and the compat round-trip live in
-`core/` (welded to the closed `StructuralNodeType` union). The built-in callout
-"cheats" by leaning on core's hardcoded `insert-callout` command + `callout` compat
-branch — a third-party structural type would not have those (see §4).
-
-### 1.1 Registration (once, at module load)
-
-`react-view.tsx` calls `registerBuiltInNodeViews()` (`view/nodes/index.ts`), which runs
-`registerStructuralView(calloutStructuralView)` → `view/structural-view.ts`'s registry
-now maps `"callout" → calloutStructuralView`. After this, nothing in the engine has
-hardcoded knowledge of callout — the dispatcher, insert menu, and resting renderer all
-resolve it by `getStructuralView("callout")` / `listInsertableStructuralNodes()`.
-
-### 1.2 Insertion — how it reaches the store
-
-`callout.tsx`'s `insert` is the *affordance*, not the logic:
-
-```ts
-insert: { createCommand: () => ({ type: "insert-callout" }), label: "Callout", icon: "Info", ... }
-```
-
-Flow when "Callout" is picked from the toolbar **+** menu:
-
-1. `editor-chrome.tsx` builds the insert menu from `listInsertableStructuralNodes()` +
-   `listInsertableNodes()`. The callout entry's action is
-   `store.command(view.insert.createCommand())` → `store.command({ type: "insert-callout" })`.
-2. `store.command` → `compileCommand` (`core/commands/index.ts`) → the `compilers` table
-   routes `"insert-callout"` → `compileInsertCallout(store)`.
-3. **Model is built here** — `compileInsertCallout` (`core/commands/objects.ts`):
-   allocates a paragraph id + callout id, builds `makeTextNode({type:"paragraph"})` and
-   `makeStructuralNode({ type:"callout", attrs:{tone:"info"}, children:[paragraphId] })`,
-   resolves the positional `InsertionPoint` (docs/019), calls
-   `placeSubtree(tr, store, point, callout, [paragraph])` (one `insert-node` step carrying
-   the paragraph as a descendant so the subtree registers atomically), and sets the caret
-   inside the child paragraph. Returns the `TransactionBuilder`.
-4. `store.command` dispatches through the single chokepoint `EditorStore.dispatch`
-   (`core/store/editor-store.ts`): applies steps to the mutable `Map<NodeId, EditorNode>`,
-   captures the **inverse** (undo), remaps selection, updates `parentOf`, records history,
-   notifies subscribers (order changed → structural).
-
-callout.tsx never inserts anything itself; it only declares *which command to dispatch*.
-
-### 1.3 Live render (editing surface)
-
-The structural notify re-renders the windowed block list. `EngineBlock`
-(`view/block-dispatch.tsx`) sees `node.kind === "structural"`, renders the children
-recursively (with list-numbering meta), then:
-
-```ts
-const structuralView = getStructuralView(node.type);          // "callout"
-return structuralView.renderContainer({ node, store, registerBlock, children });
-```
-
-`calloutStructuralView.renderContainer`:
-
-- reads tone from the **store-backed node**: `calloutTone(node.attrs?.tone)` (default `info`),
-- `group/block relative` wrapper,
-- mounts `<CalloutChrome node store/>` as a sibling overlay,
-- the measured box: `data-engine-block-id`, `data-engine-callout-tone={tone}`,
-  `data-engine-structural="callout"`, and `ref={(el) => registerBlock(node.id, el)}`
-  (registers the DOM element so the engine can measure height for virtualization,
-  hit-test, and resolve the gap cursor around it),
-- `AlertGlyph` in the gutter, then `{children}`.
-
-`children` are the callout's own blocks rendered by the same recursive `EngineBlock`, so
-editing *inside* a callout is normal text editing on those child leaves; arrows walk
-in/out because a callout is a **scope** (`childrenOf` treats any `kind:"structural"` node
-as one).
-
-### 1.4 Editing the callout itself (chrome → store)
-
-`view/callout-chrome.tsx` is the only place the callout *container* is mutated, all via
-the command layer:
-
-- **Tone change** → `store.command({ type:"set-block-attr", node:id, key:"tone", value })`
-  → `compileSetBlockAttr` → `set-node-attr` step → dispatch → `attrs.tone` updates (the
-  immutable node is replaced) → that node's subscriber notifies → re-render with new glyph
-  color + `data-engine-callout-tone`.
-- **Delete** → `store.command({ type:"remove-block", node:id })` → `compileRemoveBlock`
-  → `remove-node` step → dispatch removes the subtree, remaps selection.
-
-`display:contents` wrapper + `stopPropagation` on the chrome's mousedown keep a chrome
-click from re-placing the caret.
-
-### 1.5 Resting render (publish / reader)
-
-`resting-document.tsx`'s `renderRestingStructural` dispatches the same way →
-`calloutStructuralView.renderResting({ node, children, renderSequence, renderListItems })`
-→ emits the real DaisyUI `<aside class="alert alert-{tone} items-start" role="note">` +
-`AlertGlyph` + `renderSequence(children)` (wraps consecutive flat list items into real
-`<ul>`/`<ol>`). No chrome, semantic HTML. Live and resting are co-located in callout.tsx
-so the editor surface and published page cannot drift (docs/020 §3.7).
-
-### 1.6 Persistence / round-trip (core, not callout.tsx)
-
-The callout *node* exists in the model independently of callout.tsx. `core/compat.ts`
-has a **hardcoded** `if (node.type === "callout")` branch for import and a matching export
-path. That is core, welded to the closed `StructuralNodeType` union — which is exactly why
-there is *no* core `StructuralDefinition` for callout, and why a third-party structural
-type cannot persist (see §4).
-
-### 1.7 One-line mental model
-
-```
-register (view) ─┐
-                 ▼
-insert menu → store.command({type:"insert-callout"}) → compileInsertCallout → dispatch → model subtree
-                 ▼ (notify)
-EngineBlock → getStructuralView("callout").renderContainer  ← reads node.attrs.tone
-                 ▲
-CalloutChrome → store.command(set-block-attr / remove-block) → dispatch → re-render
-                 │
-resting:  renderRestingStructural → renderResting → <aside class="alert">
-persist:  core/compat.ts  ⇄  { type:"callout", children }   (hardcoded, core)
-```
-
-callout.tsx contributes only `renderContainer` + `renderResting` + `insert`. Everything
-that *touches the store* flows through `store.command(...)` → core compilers → the
-`EditorStore.dispatch` chokepoint.
-
----
-
-## 2. What a user can do with an OBJECT block (the fully-pluggable path)
-
-An object block is the **fully externalizable** case: a single
-`registerNode({ definition, view })` from a third-party package, no core edits. Object =
-*atomic, heavy, self-contained content with opaque internals* (it cannot hold
-engine-navigable block children or nested carets — that's the structural case).
-
-### 2.1 Worked example — a custom `math` (KaTeX) block, shipped externally
-
-```tsx
-import { registerNode, type NodeDefinition, type NodeView } from "@quanghuy1242/idco-editor";
-import katex from "katex";
-
-// ── core half (framework-free, worker-safe) ────────────────────────────────
-const mathDefinition: NodeDefinition = {
-  type: "math",
-
-  // born / normalized: coerce arbitrary input into a JSON-safe, consistent shape
-  normalizeData: (value) => {
-    const r = (typeof value === "object" && value) || {};
-    const latex = typeof (r as any).latex === "string" ? (r as any).latex : "";
-    return { data: { latex }, status: latex ? "ready" : "invalid" };
-  },
-
-  // persistence round-trip — registry-driven, so save/load "just works"
-  fromCompatNode: (node) => ({ data: { latex: String(node.latex ?? "") }, status: "ready" }),
-  toCompatNode: (value) => ({ latex: (value.data as any).latex }),  // emits { type:"math", latex }
-  isExportComplete: (value) => Boolean((value.data as any).latex),
-
-  // baked snapshot: pure compute, no DOM — runs off-thread for built-ins
-  bake: (data) => {
-    const latex = (data as any).latex ?? "";
-    if (!latex) return null;                       // null → recoverable "invalid"
-    return { kind: "math", payload: { latex } };
-  },
-
-  // document services
-  plainText: (data) => (data as any).latex ?? "", // search/index sees the formula
-};
-
-// ── view half (React) ──────────────────────────────────────────────────────
-const mathView: NodeView = {
-  type: "math",
-  ariaLabel: "Math formula",
-  chromeMeta: { icon: "Sigma", label: "Math" },
-  configFields: [{ key: "latex", label: "LaTeX" }],   // free config popover, OR use renderLive
-
-  // resting / published render of the baked snapshot
-  renderResting: ({ baked }) => {
-    const html = katex.renderToString(String((baked.payload as any).latex), { throwOnError: false });
-    return <div data-engine-object-baked="math" dangerouslySetInnerHTML={{ __html: html }} />;
-  },
-
-  // optional richer live editor (instead of configFields)
-  renderLive: ({ node, store, registerObjectEditor }) => (
-    <MathEditor node={node} store={store} registerObjectEditor={registerObjectEditor} />
-  ),
-  liveMode: "popover",
-
-  // slash/insert menu entry
-  insert: { label: "Math", group: "Blocks", icon: "Sigma", keywords: ["latex","formula","katex"],
-            createData: () => ({ latex: "" }) },
-};
-
-registerNode({ definition: mathDefinition, view: mathView });   // ← one call, done
-```
-
-### 2.2 Each slot → store lifecycle stage, all free without touching core
-
-| Lifecycle stage | Your slot | What the engine does for free |
-|---|---|---|
-| Insert | `insert.createData()` | the **generic `insert-object` command** builds + bakes + places the node and lands selection on it. **No custom command needed** (unlike structural). |
-| Born → normalized | `normalizeData` | runs on insert and on import |
-| Baked | `bake` | off-thread in the worker for built-ins; on the main thread for custom — same `bakeObjectData` call; `null` → recoverable `invalid` |
-| Rest render | `renderResting(baked)` | dispatcher resolves you by `type`; editor at-rest **and** reader `RestingDocument` call the same fn (can't drift) |
-| Activate / live edit | `renderLive` + `registerObjectEditor` | one-live-object-at-a-time slot, popover/in-place mounting, caret suspends, focus mgmt |
-| Edit → re-bake | host: `store.command({ type:"set-object-data", node, data })` | dispatch chokepoint applies it, captures **inverse for undo**, re-bakes, notifies |
-| Queried (search) | `plainText` (+ optional `anchors`) | wired into find/index |
-| Exported / persisted | `fromCompatNode` / `toCompatNode` | **registry-driven** (`compat.ts` consults the registry for objects, line ~384 `isObjectNodeType` → `registry.normalizeCompatObject`) so save/load round-trips with zero core edits |
-| Fine-grained invertible edit | `applyEdit` / `invertPatch` (optional) | for large objects, edits invert without a wholesale data swap |
-| Chrome | `ariaLabel` / `ariaRole` / `chromeMeta` / `configurable` / `configFields` / `renderChromeControl` | floating badge + delete + settings popover, all read from your contract |
-
-Also free: undo/redo coalescing, block-atomic selection, virtualization/measurement,
-copy/paste, a11y.
-
-The **only** real constraint is what an object *is*: atomic, with sequestered internals.
-Good fits: math, Mermaid diagram, tweet/Spotify/Figma embed, chart, poll widget,
-code-sandbox, a "definition card," any heavy self-contained chunk.
-
----
-
-## 3. Is the object SPI "different" from callout.tsx, or the same shape?
-
-This was the nagging question. Precise answer:
-
-- **callout.tsx is a STRUCTURAL node** (`StructuralNodeView`). The math block above is an
-  **OBJECT node** (`NodeView` + `NodeDefinition`). These are **two different contracts** —
-  deliberately different shapes — because the two node kinds do different things:
-  - an **object** paints a *baked snapshot* and sequesters opaque internals;
-  - a **structural** container wraps *engine-managed block children* and participates in
-    caret geometry / scope navigation.
-- **But both register through the SAME front:** `registerNode({ ... })`. One call,
-  internally routed by which halves you pass (`view`/`definition` = object;
-  `structuralView` = structural). `registerNode` now asserts you pass exactly one kind and
-  that paired halves agree on `type`.
-- **Within a kind, internal and external are identical shape:**
-  - the built-in `media`/`code`/`divider` object views use the **same** `NodeView`/
-    `NodeDefinition` an external `math` block uses;
-  - the built-in `callout`/`list` structural views use the **same** `StructuralNodeView`
-    an external structural type would use (for the *view* half).
-
-So: callout.tsx ≠ math block in shape *because one is structural and one is object*, not
-because internal/external differ. Internal vs external is the same shape; object vs
-structural is two parallel SPIs under one `registerNode`.
-
-### 3.1 Contract shapes side by side
-
-```
-OBJECT node                              STRUCTURAL node
-─────────────────────────────────────   ─────────────────────────────────────
-NodeDefinition (core/registry.ts)        StructuralDefinition  (NOT BUILT YET)
-  type                                      (sketched in docs/020 §4.1)
-  normalizeData                          StructuralNodeView (view/structural-view.ts)
-  fromCompatNode / toCompatNode            type
-  bake                                     renderContainer({node,store,
-  plainText / anchors                                      registerBlock,children})
-  applyEdit / invertPatch                  renderResting({node,children,
-NodeView (view/node-view.ts)                              renderSequence,renderListItems})
-  type                                      insert?.createCommand(): EditorCommand
-  renderResting({node,baked})            ── insertion: reuse an existing core command
-  renderLive?({node,store,...})          ── persistence: hardcoded in core/compat.ts
-  insert?.createData(): JsonValue        ── data shape: closed StructuralNodeType union
-  ariaLabel/ariaRole/chromeMeta/...
-  insert command: generic `insert-object`
-  persistence: registry-driven (compat.ts)
-```
-
-The asymmetry is the point: the object column is complete end-to-end; the structural
-column has a real *view* registry but no *core* registry yet, so its store/persistence
-behavior still comes from hardcoded core paths.
-
----
-
-## 4. Can a third party add a node entirely outside core (no core edits)?
-
-### 4.1 Object node: YES — fully externalizable today
-
-The object SPI has a symmetric core half (`NodeDefinition`) registered globally
-(`registerGlobalNodeDefinition`, via `registerNode`). `createDefaultBlockRegistry()`
-includes globally-registered custom definitions, and `compat.ts` import/export is
-registry-driven for objects, so save/load + bake + the worker all see your node with no
-core change. The insert is the generic `insert-object` command. Fully external. (See §2.)
-
-### 4.2 Structural node: the four barriers — three RESOLVED (steps 1–2), one remains
-
-> Original framing kept for the record; ✅/❌ reflect the post-step-2 state (§7.2).
-
-1. ✅ **Core half exists now.** `registerNode` accepts `structuralDefinition`;
-   `core/structural-registry.ts` declares core behavior (`createSubtree` +
-   `fromCompatNode`).
-2. ❌ **Closed type union — STILL the one open barrier.** `StructuralNode.type:
-   StructuralNodeType` = `"body"|"list"|"listitem"|"quote"|"callout"`. `makeStructuralNode`
-   is typed to it, so a new `type:"table"` needs the union opened (one `as StructuralNodeType`
-   cast bridges it today in the compat branch). **This is exactly what the table opens (§7
-   step 3).**
-3. ✅ **Persistence round-trip hook added.** `compat.ts` import is registry-driven via
-   `getStructuralDefinition`/`isStructuralDefinitionType` (the structural twin of
-   `isObjectNodeType`/`normalizeCompatObject`); export was already generic. No hardcoded
-   `if (node.type === "callout")` branch anymore.
-4. ✅ **Generic insert added.** `insert-structural` command + exported `placeSubtree`; a
-   structural view's `createCommand()` returns `{ type:"insert-structural", structuralType }`
-   and the definition's `createSubtree` builds the container subtree.
-
-### 4.3 What a third party *can* do for structural without core edits (post-step-2)
-
-- **Render** live + resting via `registerNode({ structuralView })` ✓
-- **Insert + save/load round-trip** via `registerNode({ structuralView,
-  structuralDefinition })` ✓ (was the gap; now closed for any type that fits the existing
-  union, e.g. re-skinning callout/quote behavior)
-- **Scope / gap-cursor / arrow-in-out / selection / deletion** — generic by
-  `kind:"structural"`, free ✓
-- **The only thing still requiring a core edit:** a *genuinely new* `type` string, because
-  `makeStructuralNode`'s `StructuralNodeType` union is closed (barrier 2). Opening it is the
-  table's job (§7 step 3); after that, fully-external structural nodes are the same one-call
-  story objects enjoy.
-
----
-
-## 5. Structural plan status (corrected 2026-06-21)
-
-The pre-step-1 version of this section called the core half a "deferred sketch driven by
-the table." That is now stale. Current reality:
-
-### 5.1 Engine-internal structural core half — BUILT (steps 1–2, §7.2)
-
-`core/structural-registry.ts` exists: `StructuralDefinition` = `createSubtree` +
-`fromCompatNode`, wired into `registerNode`, with a registry-driven compat-import hook and
-the generic `insert-structural` command. Proven by migrating callout off its hardcoded
-paths (core has zero `callout` knowledge). It is **not** dead code — callout consumes it.
-docs/020 §4.1's sketch (`isScope?`, `normalizeChildren?`) was deliberately NOT added: those
-are still unneeded (scope-ness is structural-by-kind via `childrenOf`), and we add SPI slots
-only when a consumer demands them — the table is expected to add some, and that's healthy.
-
-### 5.2 The table is GREENFIELD, not a migration
-
-Correction to earlier framing: there is **no rich owned table to migrate.** The owned
-`table`/`editor-table` is a **read-only baked object** (`view/nodes/table.tsx`,
-`configurable:false`, `renderResting` only) — it parses opaque legacy JSON and paints a
-static grid so old docs don't break. No cell carets, no resize, no add row/col, **below
-legacy-Lexical parity** (the real editing lives in `legacy/plugins/table-*-plugin.tsx`).
-
-So step 3 is building the **first real editable structural table** from scratch:
-- **opens** the closed `StructuralNodeType` union (barrier 2) for `table`/`row`/`cell`;
-- a `StructuralDefinition` whose `createSubtree` builds `table → rows → cells → paragraphs`
-  (deep subtree — the `insert-node` step already carries flat descendants of any depth,
-  `editor-store.ts` ~1219, so the plumbing holds);
-- a `fromCompatNode` that *imports* the legacy/baked table JSON into that structural tree
-  (parsing an opaque shape, not migrating internal state);
-- the docs/019 **2D positional model**: cells as nested scopes, arrow/caret geometry across
-  the grid, selection, add/remove row+col, resize, header toggle — the real, large work.
-
-This is the genuine "second consumer that validates the SPI": callout exercised the linear
-case, the table exercises nesting + 2D geometry. Expect it to *extend* `StructuralDefinition`
-(new optional slots) — that's the contract learning from a second shape, not a failure. The
-red flag to refuse: `if (type === "table")` branches creeping back into core.
-
-### 5.3 Fully external, third-party structural nodes — last deferred piece
-
-Opening the union *publicly* (promote `StructuralNodeType` from a closed union to a
-registry-driven open set as public API) is the only remaining deferral. The table opens it
-*internally*; exposing that to outside authors is the final, smaller follow-up — docs/020
-§13's "one symmetric Node SPI" end state.
-
----
-
-## 6. Quick reference — where things live
-
-- Object view contract + `registerNode`: `packages/editor/src/view/node-view.ts`
-- Object core contract (`NodeDefinition`) + registry: `packages/editor/src/core/registry.ts`
-- Structural view contract + registry: `packages/editor/src/view/structural-view.ts`
-- Built-in object views (one file each): `packages/editor/src/view/nodes/{code-block,media,embed,post-ref,divider,table,table-of-contents}.tsx`
-- Built-in structural views: `packages/editor/src/view/nodes/{callout,list}.tsx`
-- Object dispatcher: `packages/editor/src/view/object-block.tsx`
-- Block dispatcher (kind → object/structural/text): `packages/editor/src/view/block-dispatch.tsx`
-- Command compilers (incl. `insert-callout`, `insert-object`): `packages/editor/src/core/commands/`
-- Store + dispatch chokepoint: `packages/editor/src/core/store/editor-store.ts`
-- Compat round-trip (object = registry-driven; structural = hardcoded): `packages/editor/src/core/compat.ts`
-- Public surface: `packages/editor/src/index.ts` (owned engine) + `/legacy` subpath
-
----
-
-## 7. The plan — symmetric structural core half, proven by callout, before the table
-
-Decision (2026-06-21): **not** table-first, **not** "migrate every structural node
-first." The SPI core half and the callout migration are the *same* first step (callout
-can't migrate onto an SPI that doesn't exist); the table is the second consumer that
-proves generality; lists are last and may legitimately stay in core.
-
-Why this order:
-- **Table-first warps the SPI** around one example and pays for the table twice (build
-  hardcoded, then retrofit). The table must be the *second* consumer, not the first.
-- **"Migrate every structural node first" over-scopes and distorts.** The built-ins are
-  not equivalent: callout genuinely *cheats* (hardcoded `insert-callout` + clean
-  `if (type==="callout")` compat branch) and is worth removing; **list/listitem** compat
-  does deliberate *flattening* (`compat.ts` ~750) that keeps `compileIndentItem`'s
-  structural branch unreachable-by-design — a **dialect boundary, not a cheat**. Forcing
-  lists through the registry early warps the contract around a concern that belongs in
-  core. `body` is the root; `quote` is a simple container.
-
-### 7.1 Sequence
-
-1. **Build the minimal core structural half.**
-   - `core/structural-registry.ts` — `StructuralDefinition`
-     (`{ type, isScope?, normalizeChildren?, fromCompatNode, toCompatNode }`), registered
-     via `registerNode({ structuralDefinition })`; a `registerGlobalStructuralDefinition`
-     mirroring the object path; included in `createDefaultBlockRegistry()`.
-   - Structural-compat registry hook in `compat.ts` mirroring `isObjectNodeType` /
-     `normalizeCompatObject` (~384/~860) so structural import/export consults the registry
-     instead of hardcoded `if (node.type === ...)` branches.
-   - Generic `insert-structural` command + export `placeSubtree`
-     (`commands/objects.ts` ~152) so a view's `createCommand` builds a
-     container-with-children subtree without a bespoke core command.
-   - Open `StructuralNodeType` (`model.ts` ~193) from a closed union to registry-driven
-     (built-ins still known, registered types allowed).
-
-2. **Migrate callout onto it — and only callout.** Delete `insert-callout` and the
-   callout compat branch; re-register callout through `structuralDefinition` +
-   `insert-structural`. **Done when core has zero `callout` knowledge.** This is the proof
-   the table would otherwise be (badly).
-
-3. **Build the table** (docs/019) as `StructuralNodeView` + `StructuralDefinition`.
-   ⚠️ *Corrected:* this is **greenfield, not a migration, and it DOES touch core** (see
-   §5.2). It opens the `StructuralNodeType` union for `table`/`row`/`cell`, adds the 2D
-   positional model, and imports the legacy baked-table JSON. Two differently-shaped
-   consumers (callout = linear container, table = nested 2D grid) then validate — and likely
-   *extend* — the contract. The guardrail: new optional `StructuralDefinition` slots = good;
-   `if (type==="table")` in core = the SPI failing, refuse it.
-
-4. **Opportunistic mop-up.** Migrate `quote`; decide about `list/listitem` — likely leave
-   their flattening in core as a legitimate dialect concern. Defer the public third-party
-   *opening* (open union as public API, docs/020 §13) until the shape settles after step 3.
-
-### 7.2 Status
-
-- [x] **Step 1 — core structural half** (2026-06-21). New `core/structural-registry.ts`
-  (`StructuralDefinition` = `createSubtree` + `fromCompatNode`; built-in callout core +
-  global registry + `getStructuralDefinition`/`isStructuralDefinitionType`). Generic
-  `insert-structural` command (`compileInsertStructural`) replaces `compileInsertCallout`.
-  Registry-driven structural *import* in `compat.ts` (callout no longer a hardcoded
-  branch; `isBlockChild` consults the registry). `registerNode({ structuralDefinition })`
-  front wired with a type-agreement assert. New core surface exported from
-  `core/index.ts` + public `index.ts`. *Note:* the closed `StructuralNodeType` union is
-  intentionally still closed (one `as StructuralNodeType` cast in the compat branch);
-  opening it is step 3's job. Structural *export* was already generic — untouched.
-- [x] **Step 2 — callout migration** (2026-06-21). `callout.tsx` insert now emits
-  `{ type: "insert-structural", structuralType: "callout" }`; callout's subtree + compat
-  logic live in its `StructuralDefinition`. **Core has zero `callout`-specific knowledge**
-  (no `insert-callout` command, no `if (type==="callout")` compat branch). Proof green:
-  typecheck clean, all 768 vitest pass, format clean.
-- [ ] Step 3 — table (greenfield editable structural table; opens the union; second
-  consumer of the SPI; touches core — §5.2)
-- [ ] Step 4 — quote/list mop-up + public opening (deferred)
-
-### 7.3 Node-kind taxonomy — which kind is each "placeholder"?
-
-Two built-ins render as placeholders today, but for **opposite** reasons — only one is
-miscategorized:
-
-- **`table` → belongs STRUCTURAL, currently a stand-in object.** A table owns
-  engine-navigable block children (cells with carets). It is an object today only because
-  the structural editing was never built. → step 3 moves it to its correct kind.
-- **`table-of-contents` → correctly an OBJECT, stays an object.** A TOC owns **no**
-  navigable children: its entries are *derived* from the document's headings at publish time
-  (`buildDocumentIndex`), and its only editable data is settings (title/levels/placement),
-  edited via the config popover (`configFields`). It renders a marker in the editor *by
-  design* (the per-node view doesn't have the whole document), not because it's unfinished.
-  Making it structural would be miscategorization — there are no children to navigate. It is
-  already complete as an object (insert + config + bake + reader-side derivation all work).
-
-The dividing line, restated: **structural = owns block children the engine renders
-recursively with carets/scopes** (callout, list, quote, table). **object = atomic, opaque
-internals, no navigable children** (media, embed, divider, code-block, math, TOC). "Renders
-a placeholder" is orthogonal to kind — TOC is a finished object that shows a marker; table is
-an unfinished feature wearing an object costume.
+# Live table (docs/022) — remaining parity gaps vs the legacy Lexical table
+
+> Handoff scratchpad (2026-06-21). Durable design is in [docs/021](docs/021_structural_node_spi.md) (structural Node SPI) and [docs/022](docs/022_live_editable_table.md) (live table). This file is the working list of what is DONE and what REMAINS to reach 100% parity with the legacy Lexical table. The user wants ALL remaining gaps done (no deferral); they are paused here to compact context. Resume from "Remaining gaps" below.
+
+## Current state (all green)
+
+`pnpm typecheck`, `pnpm test` (795 pass), `pnpm format:check`, `pnpm build` are all clean. Not committed.
+
+## What is DONE
+
+docs/021 (structural SPI): symmetric core half (`StructuralDefinition` = `createSubtree` + `fromCompatNode` + optional `toCompatNode`), registry-driven compat import/export, generic `insert-structural` + generic `insert-structural-child`/`remove-structural-child` commands, opened `StructuralNodeType` union, deep-remove selection remap (`mapSelection` records each `remove-node`'s full subtree). Callout migrated off all hardcoded paths.
+
+docs/022 (table), DONE so far:
+- Structural model `table → tablerow → tablecell → blocks`; cells are editable scopes (click + arrow-descent enter a cell).
+- `core/table.ts`: `createSubtree` (legacy 3×3 seed: header row + header column, corner `headerState` 3, seeded `colWidths` [160,160,160], layout `responsive`), `fromCompatNode` (ragged→rectangular padding, skipped for merged tables), cell `toCompatNode` (paragraph→inline projection, byte-stable).
+- Cell attrs preserved verbatim through round-trip: `headerState`, `colSpan`, `rowSpan`, `backgroundColor`, `verticalAlign` (B1/B5 — merged/background tables survive load→save).
+- Three structural views `view/nodes/table.tsx` (live raw `<table>/<tr>/<td|th>` with engine hooks + spans/background; resting via `@idco/ui` `RichTextTable`/`Row`/`Cell`, which now render colSpan/rowSpan/background).
+- `view/table-operations.ts`: insert/delete row + column (one undoable tx; delete-column conserves total width via `scaleColumnWidths`); `colWidths` sync on insert/delete column; header bitfield toggles (ROW=1/COLUMN=2, per-axis, preserving the other); `toggleRowNumbers`; `setTableLayout`; `resizeColumns` + pure `resizeColumnWidths`/`scaleColumnWidths`; `tabWithinTable` (Tab/Shift-Tab row-major, append row past end); `selectionCell`; `headerState`.
+- `view/table-controls.tsx`: the live Word/Docs-style overlay (port of legacy `TableControlsPlugin`) — hover band, nearest-boundary insert "+", nearest-cell delete "−", column resize drag handles, whole-table `BlockChrome` (layout `ChromeSelect` fixed/responsive/full-width with rescale-on-responsive; structure multi-select menu header-row/header-column/numbered-column; remove-table). Mounted once in `view/react-view.tsx` (both virtualized + non-virtualized branches).
+- Tests: `tests/editor/engine-table.test.ts` (model/insert, byte-stable round-trip incl. merged-cell attr preservation + multi-block cell + ragged padding, structure ops, header bitfield, layout, width math, Tab, guardrail) and `tests/editor/engine-structural-child-commands.test.ts`.
+
+## Remaining gaps — ALL IMPLEMENTED (2026-06-21)
+
+All six are landed on top of the last live-table commit. Gates green: `pnpm typecheck`, `pnpm test` (805 pass), `pnpm format`, `pnpm build`. The pointer/layout-driven UI is typecheck/build-verified + manually exercised (jsdom has no layout); the pure model ops are unit-tested in `tests/editor/engine-table.test.ts`.
+
+1. Cell MERGE / UNMERGE — DONE. `mergeCells`/`unmergeCell` in `view/table-operations.ts`, composing the generic steps (`set-node-attr` spans, `move-node` to carry covered content into the anchor, `remove-node`/`insert-node` for covered cells) — one undoable tx, faithful to `@lexical/table` `$mergeCells`/`$unmergeCellNode`. Unmerge header bits follow the documented heuristic (first-row keeps ROW, first-col keeps COLUMN). Tested: 2×2 merge carries content, 1×1 no-op, atomic undo, unmerge restores rectangle.
+
+2. Rectangular cell-range SELECTION — DONE, view-layer (no new `EditorSelection` variant; core selection union untouched, per docs/022 §7). Pure helpers `tableGrid` (span-aware `$computeTableMap` analogue), `selectedCellRange`, `cellCoords` in `table-operations.ts` (unit-tested); drag-to-select + range painting in the new `view/table-interactions.tsx`. Grid-shaped copy/paste/delete over the range is the one piece NOT wired (merge consumes the range; clipboard is future work).
+
+3. Column / row MOVE — DONE. `moveColumn`/`moveRow` + pure `moveArrayItem` in `table-operations.ts` (move cells via `move-node`, move the `colWidths` entry, one tx; refused on merged tables matching `$isSimpleTable`). Exposed in the context menu. Unit-tested incl. undo + merged-table refusal.
+
+4. Right-click CONTEXT MENU — DONE. `view/table-interactions.tsx` (React Aria `MenuTrigger` at the cursor, the `@idco/ui` behavior contract) — insert row/col above-below-left-right, merge/unmerge (conditional), move col/row, delete row/col/table. Mounted in `react-view.tsx` (both branches).
+
+5. Responsive RESCALE — DONE via the renderer, not a ResizeObserver. The shared `RichTextTable` (live + resting) already emits a `%`-based `<colgroup>` from the `colWidths` ratios, so responsive/full-width tables reflow to their container natively via CSS — the live editor table behaves exactly like the published page, with no model write on reflow. The legacy JS `ResizeObserver` (`table-plugin.tsx`) existed only because Lexical's stock `TableNode` rendered absolute px and had to rewrite widths on every reflow; porting it to the owned model was pure churn AND unsound (a non-historic colWidths write desyncs the strict-`from` undo/redo of a prior manual resize — caught in review). Intentionally not ported; the ratio renderer is strictly better. Documented in `table-controls.tsx`.
+
+6. Geometric VERTICAL cross-cell nav — DONE. `verticalNavigation` in `view/navigation.ts` rewritten as an iterative document-level probe (steps the goal-column point until it resolves to a different text position or exits the viewport), per docs/019 §4.10. No change needed in `text-block.tsx` (it already calls `verticalNavigation`). General fix — also improves vertical motion across mixed-width body blocks.
+
+### Known follow-ups (honest, not blocking)
+- Grid-shaped clipboard (copy/paste/delete over a cell range) — selection + merge exist; clipboard is the remaining piece of gap #2.
+- Insert/delete/move row/column are REFUSED on a merged table (all guarded by `hasMergedCells`, matching the legacy `$isSimpleTable` guard) and hidden in the context menu when the table has any merged cell — so they can never corrupt a span. Editing a merged table's structure = unmerge first, then edit. The legacy merge-aware TableObserver insert/delete path is the one feature not ported; this is the only sub-parity item.
+- Imported tables without `colWidths` stay auto-sized (see below) — unchanged.
+
+### Hardening round 5 (UX feedback) — applied fixes
+- Cell-action button moved out of the top chrome to a single floating **`…` (Ellipsis) button at the active cell's top-right** (the spot the user pointed to). Its popover holds merge / unmerge / fill color / vertical align. Lives in `table-interactions.tsx` (local range state again; the `table-selection-store` pub-sub was removed and the chrome reverted to just layout/structure/resize).
+- Wrong-cell coloring fixed at the root: targets resolve **live at click time** and prefer the caret's cell unless the range is a real 2+ selection that *contains the caret*; plus a **stale range is dropped the moment the caret leaves it** (`subscribeSelection`). So a leftover selection can no longer shadow the cell you're actually in.
+
+### Hardening round 4 (UX feedback) — applied fixes
+- #3 (in-cell merge): Backspace at the start of a cell's 2nd paragraph (or Delete at the end of one) now folds the two paragraphs *within the cell* — `previousTextLeaf`/`nextTextLeaf` in `core/commands/shared.ts` are scope-aware (search the node's parent scope, descend structural siblings, confined to the scope so it never merges across a cell boundary); the merge adjacency check in `text.ts` is parent-entry based. Tested.
+- #4 (edge buttons gone on merged tables): insert/delete row/column are now **merge-aware** (grid-map based — extend a span crossing the edit line, shrink/remove on delete, move a span-origin cell into the next row). The hover edges + menu items no longer hide on a merged table; only the column "+/−"/resize hide when the *header row itself* has a colSpan (`headerRowHasColSpan`, since their geometry comes from header cells). Move still refuses on merged tables. Tested (insert/delete/move across a rowSpan, incl. the move case).
+- #2 (dark text on dark fill): `readableTextColor` (luminance-based) flips cell text to near-black/near-white against the cell's fill, so a colored cell is legible in any theme (live + resting render).
+- #1/#6 (toolbar position + always-on): removed the separate floating cell toolbar. Cell actions (merge / unmerge / fill color / vertical align) now live in the table's **autohide hover chrome** next to the gear (a "paint bucket" `PopoverTrigger` in `BlockChrome`), so they're positioned correctly and reveal with the chrome instead of always-on. The drag-selection + range painting stays in `table-interactions.tsx`; the range is shared to the chrome via a tiny per-store pub-sub (`table-selection-store.ts`).
+- #5 (colored the wrong cell): the chrome's cell actions resolve their target cells **live at click time** (current range, else the caret's cell) instead of a stale render closure, and `TableControls` now subscribes to selection + range changes — so a fill always hits the cell the caret/selection is actually in. The chrome wrapper + popover are tagged `data-engine-cell-toolbar` so interacting with them never clears the range mid-action.
+
+### Hardening round 3 (UX feedback) — applied fixes
+- **Double context menu / merge unreachable:** the owned editor already has its own right-click menu (`view/context-menu.tsx` `EngineContextMenu`); `TableInteractions` had added a *second* `contextmenu` listener → two menus, and the table one (with Merge) got shadowed. Removed the table right-click menu entirely — now there is exactly one right-click menu (the editor's, for cell text/block actions).
+- **Cell actions are now a chrome, not right-click:** `TableInteractions` renders a floating **cell toolbar** above the active range/cell when a cell-range (2+) is selected or the caret is in a cell. It has Merge (range 2+), Unmerge (merged cell), **Fill color** (swatch popover + clear), **Vertical align** (top/middle/bottom), and a "More" (`Ellipsis`) menu with insert/delete/move row+column (hidden on a merged table). So merge + color + structural ops are all discoverable without right-clicking.
+- **Cell background color (the "I don't see any options"):** new `setCellBackground` op + the Fill swatch popover; `verticalAlign` editable via `setCellVerticalAlign` (both `set-node-attr`, one undo for a range; already rendered + round-tripped). Tested.
+- Guarded the document `pointerdown` (which clears the cell range) so clicking inside the toolbar or its popovers doesn't drop the range before the action runs (`data-engine-cell-toolbar` marker on the bar + popover content).
+
+### Hardening round 2 follow-ups
+- `verticalNavigation`: capped the iterative geometric probe at ~64 hit-tests (each is a `caretPositionFromPoint`) so an ArrowUp/Down at a document boundary can't fan out into hundreds of DOM queries; step widened to ~½ line. Bounds input latency in real browsers.
+- Demo: `stories/engine-phase8.stories.tsx` `FullEditor` now renders a deliberately complex table (header row + column, a rowSpan and a colSpan merge, per-cell background + vertical-align, numbered gutter, responsive) instead of the youtube embed — flexes merge render, header stripes, valign, and the live chrome. Imports through `importPayloadLexical` → `toTableObject` → structural import; round-trip-safe.
+- No remaining correctness bugs found. Backspace-at-cell-start being a no-op is correct (matches Docs — Backspace must not merge cells); the numbered-gutter resize offset and per-pointer grid recompute are minor/cosmetic and left as noted.
+
+### Hardening round 2 (loose read-only review) — applied fixes
+- M1 (the reported bug): inserting a row/column or Tab-appending a row now inherits header state from the neighbor (legacy `$insertTableColumn`/`$insertTableRow`) — a new column in the header row gets the ROW bit, a new row's first cell gets the COLUMN bit — so the header stripe continues instead of breaking. (`buildCell`/`buildRow`/`insertRow`/`insertColumn` in table-operations.ts; tested.)
+- C1/C2/M4 (critical): a text selection that crossed a container boundary (two cells, a cell and the body) corrupted the grid on delete/type/split (`deleteRange` merged tails across scopes via `coveredSiblings`' cross-parent early-return). Fixed generally (no table literals → SPI guardrail stays green): `deleteRange` now collapses a cross-scope range to a safe no-op at `start`; and selection *creation* is confined so the range rarely forms — the text drag stops at the anchor's scope (`use-drag-selection.ts`) and shift-extend won't cross a scope boundary (`verticalNavigation`). Cross-cell drag is the `TableInteractions` cell-range overlay, not a text range. Tested.
+- M2: `verticalAlign` is now rendered (live + resting) via `verticalAlignClass` — a stored middle/bottom-aligned cell shows correctly instead of always top.
+- M3: column resize handles + the geometry-based insert/delete affordances are hidden on a merged table (they derive geometry from the header row's cells, which desync under spans) — only the whole-table chrome shows. Consistent with the merged-table op guards.
+- m3: the right-click menu now suppresses "insert row above" / "insert column left" on a header row/column boundary, matching the hover chrome.
+- m1: re-checked legacy `$mergeCells` — it does NOT drop the anchor's empty paragraph, so the current behavior is faithful; left as-is.
+- Skipped (acceptable / out of scope): Backspace-at-cell-edge is a safe no-op (m2); numbered gutter geometry offset (m5); per-pointer grid recompute (m6); duplicate cell-finder helpers (n1).
+
+### Review round 1 (read-only subagent) — applied fixes
+- C1: insert/delete row/column would corrupt a merged grid (offered with visual coords vs physical-index ops). Fixed: guarded all four ops with `hasMergedCells` + hid the menu items on merged tables (above).
+- M2: ResizeObserver model-write polluted undo + cleared redo, and a non-historic fix was unsound. Fixed by removing the observer entirely (the renderer reflows responsively via `%` colgroup — gap 5 above).
+- M3: `unmergeCell` header heuristic now AND-reduces the COLUMN/ROW bit across the whole column/row of the pre-unmerge grid (faithful to `$unmergeCellNode`), not an offset-only approximation.
+- m5: `tableGrid` no longer synthesizes phantom rows for an overflowing `rowSpan` (bounded to `rows.length`, like `$computeTableMap`).
+- m4: added a `verticalNavigation` loop-termination test (engine-scope-nav).
+- n8: insert-below/right use the `…End` direction icons.
+- Verified-correct (not changed): merge sequential index math + atomic undo; move-node index semantics; SPI guardrail still green.
+
+## Minor notes / decisions to confirm on resume
+
+- Imported tables WITHOUT `colWidths` are left auto-sized (not seeded) to keep the byte-stable round-trip; resize commits widths on release (the first drag has no live `<col>` preview until widths exist). Legacy seeded via a runtime plugin (`useSeedColumnWidths`). If desired, add a one-time seed-on-first-render path (not on import, which would break round-trip).
+- Seed default is legacy-faithful: 3×3 with header row AND header column (corner `headerState` 3). If a header-column-by-default is unwanted as a product choice, change `buildTableSubtree` in `core/table.ts`.
+- The SPI guardrail test asserts no `tablecell`/`tablerow`/`editor-table`/`=== "table"` literal in core command/compat files — keep it green (all grid logic stays in `view/` + the registered `core/table.ts` definition).
+- Legacy parity reference files: `legacy/plugins/{table-controls-plugin,table-plugin,context-menu-plugin}.tsx`, `legacy/nodes/table-node.tsx`, `legacy/model/{layout,insert-actions}.ts`, and `@lexical/table` behaviors.
+
+### Hardening round 6 (UX feedback) — applied fixes
+- Wrong-cell fill (4th report): root cause was `liveTargets()` in `table-interactions.tsx` returning the cell *range* instead of the caret's cell. Two holes: (a) the `!ctx ||` escape returned a range with no caret in it; (b) the range was only cleared when the caret *left* it, so a stale/auto-span-expanded range outlived the caret and hijacked a single-cell action. `activeCellContext` + `setCellBackground` were verified correct (they target exactly the resolved cell), so the defect was purely range-vs-ctx. Fix: `liveTargets` now requires a caret and that the caret is inside a ≥2-cell range; and the `subscribeSelection` handler collapses the range on *any* genuine caret move (drag-guarded), so a stale range can no longer survive to a fill. Merge still reads the live range at press time. (Diagnosis confirmed by a read-only subagent.)
+- ArrowUp/Down no longer walked from a text caret onto the horizontal gap cursor beside an in-cell object ("horizontal caret did not work inside cell"). Regression from the geometric vertical probe (`verticalNavigation`): it returned null on every non-text hit and *kept stepping*, walking over atoms (a code block in a cell, dividers, images) to the next text line — skipping the gap-cursor stop the old block-order `verticalCross` produced. Fix (generic, no table literal → SPI guardrail green): when the probe hits a `kind === "object"` block it returns null so the caller falls back to `selectionForNavigation`/`verticalCross`, which yields the gap beside the atom; a `structural` hit (a cell/row/table border the probe passes through) still keeps stepping, so text-to-text cross-cell vertical movement is preserved. docs/022 §5 / docs/019 §4.9.
+- Gates: typecheck clean · 818 tests · format clean · build Done. (The geometric probe can't be unit-tested headlessly — jsdom has no `caretPositionFromPoint` — so it is build-verified + manual, per the standing 2D-nav note.)
+
+### Hardening round 7 (in-cell caret + backspace) — applied fixes
+Fresh-context read-only subagent found two real defects (both: scope-generalized for keyboard but an older entry point kept a body/sibling assumption):
+- BUG A — clicking could not place the gap cursor (horizontal caret) inside a cell. `onRootMouseDown` bailed on *any* `[data-engine-block-id]` hit, and a `<td>` is one, so a click on cell padding / between in-cell blocks never reached the gap resolver; and `gapAtPointer` hard-coded `store.bodyId`. Fix (view, generic): `onRootMouseDown` now resolves the scope from the click — body when it missed every block, the structural container (cell/callout) when it landed on that container's own box, bail only on a leaf block; `gapAtPointer` takes `(scope, scopeEl)` and hit-tests that scope's children against its content box. Gap geometry (`gap-cursor.ts`) and the overlay (`gapOverlayRect`, resolves a non-body scope element from blockRefs) were already scope-generic, so the marker renders. `use-gap-cursor.ts`.
+- BUG B — Backspace in an empty paragraph below an object deleted the object (a code block in a cell). `compileDelete` ran the adjacent-atom delete (`adjacentSiblingAtom`/`deleteAdjacentAtom`) *before* the empty-line removal, so the previous-sibling object was eaten. Fix (`core/commands/text.ts`): when the caret block is an empty placeholder paragraph whose previous sibling is an atom, prefer `removeEmptyBlock` (remove the empty line, land a gap beside the atom) over deleting the atom; `removeEmptyBlock` returns null for the only block in a scope so the atom delete still applies then, and the empty-after-*text* case still merges (keeping the focused leaf alive for the mobile keyboard). This reverses the old docs/019 §4.12.6 "empty-after-atom deletes the atom" choice as a product decision (deleting the node above an empty line was surprising); the asserting test (engine-delete-positional.test.ts) was updated to the new behavior (order keeps the atom, caret rests on the gap the line vacated). The other empty-placeholder tests (empty-first, sole-empty) are unaffected — they don't have an atom as the previous sibling.
+- Gates: typecheck clean · 818 tests · format clean · build Done.
+
+### Hardening round 8 (UX: hover chrome + caret ink) — applied
+- The cell "…" chrome now appears on HOVER, not on focus. `table-interactions.tsx`: a `hovered` cell state tracked from the document pointermove drives the floating button (anchored to the hovered cell's top-right); the popover is controlled (`isOpen`/`onOpenChange`) so its cell is *pinned* while open — the pointer can roam onto the popover or off the table without moving/dismissing it. Targets now resolve to the *anchor* (hovered/pinned) cell — `liveTargets` and `canUnmerge` use it, not the caret cell — so the button always acts on the cell it visually belongs to. `cellMerged()` replaces `activeCellContext` for the unmerge flag. Merge still uses the drag range. `inChrome` keeps the last hover while the pointer is over the toolbar so moving onto the button doesn't dismiss it.
+- Caret/gap ink on colored cells: the engine paints its own caret (a div with `background: CanvasText`), so CSS `caret-color` cannot reach it — on a dark cell fill the caret was invisible. `selection-overlay.tsx`: `OverlayRect` gained an optional `color`; `cellInkFor(store, nodeId)` walks to the nearest `tablecell` ancestor and returns `readableTextColor(backgroundColor)` (the same auto-contrast the cell text uses), applied to the collapsed caret and the gap marker; uncolored cells keep `CanvasText`. So the caret matches the text ink on a colored cell, in both themes.
+- Gates: typecheck clean · 818 tests · format clean · build Done.
+
+### Hardening round 9 (caret-ink as an SPI hook, not a welded literal) — applied
+Round 8's caret-ink fix hardcoded `node.type === "tablecell"` + `backgroundColor` in the generic selection overlay — type-specific knowledge welded into a generic place (violates docs/021 §10 in spirit; passed the guardrail only because it scans `core/`, not `view/`). A custom node that paints a surface couldn't influence caret ink. Refactored to a proper extension point:
+- Added optional `caretInk?(node): string | undefined` to BOTH view-half SPIs — `StructuralNodeView` (typed `StructuralNode`) and `NodeView` (typed `ObjectNode`). The engine paints its own caret so CSS `caret-color` can't reach it; a node that renders a colored surface returns its auto-contrast ink here.
+- `selection-overlay.tsx`: `cellInkFor` → `caretInkFor`, now node-agnostic — walks ancestors from the caret node and asks each node's registered view (`getStructuralView`/`getNodeView`) for a `caretInk` contribution, first non-null wins. No table/`backgroundColor` literal remains in the overlay; dropped the `readableTextColor` import there.
+- `nodes/table.tsx`: the `tablecell` `StructuralNodeView` now implements `caretInk(node) => backgroundColor ? readableTextColor(backgroundColor) : undefined`, right beside where it applies that same ink to the cell text — so caret and text ink derive from one source and can't drift. Callouts / custom embeds get the same capability for free by implementing the hook.
+- Same visual result as round 8. Gates: typecheck clean · 818 tests · format clean · build Done.

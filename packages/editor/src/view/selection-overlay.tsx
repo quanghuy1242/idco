@@ -19,6 +19,8 @@ import {
   type TextLeafNode,
 } from "../core";
 import { gapMarkerRect } from "./gap-cursor";
+import { getNodeView } from "./node-view";
+import { getStructuralView } from "./structural-view";
 import {
   characterClientRects,
   makeRect,
@@ -44,6 +46,10 @@ type OverlayRect = {
   readonly node: NodeId;
   readonly top: number;
   readonly width: number;
+  /** Ink for a caret/gap when it sits in a colored cell — the painted caret is
+   *  not a native one, so CSS `caret-color` cannot reach it; we color it here to
+   *  match the cell's auto-contrast text (docs/022 §7). Undefined → `CanvasText`. */
+  readonly color?: string;
 };
 
 export function selectionRects(
@@ -56,7 +62,9 @@ export function selectionRects(
   // children of its scope (docs/019 §4.9/§5.8) — never a vertical I-beam.
   if (store.selection?.type === "gap") {
     const rect = gapOverlayRect(store, store.selection, root, blockRefs);
-    return rect ? [rect] : [];
+    if (!rect) return [];
+    const color = caretInkFor(store, store.selection.scope);
+    return [color ? { ...rect, color } : rect];
   }
   if (store.selection?.type !== "text") return [];
   const selection = store.selection;
@@ -75,6 +83,7 @@ export function selectionRects(
     const leaf = store.getNode(focus.node);
     const element = blockRefs.get(focus.node);
     if (leaf?.kind === "text" && element) {
+      const color = caretInkFor(store, focus.node);
       rects.push(
         ...caretRectsFromRange(
           element,
@@ -82,7 +91,7 @@ export function selectionRects(
           focus.node,
           focus.offset,
           leaf.content.text.length,
-        ),
+        ).map((rect) => (color ? { ...rect, color } : rect)),
       );
     }
   } else {
@@ -147,6 +156,34 @@ export function selectionRects(
     }
   }
   return rects;
+}
+
+/**
+ * The caret/gap ink for a position, or undefined → the theme's `CanvasText`. The
+ * engine paints its own caret, so CSS `caret-color` never reaches it; instead the
+ * overlay walks from `nodeId` up its ancestors and asks each node's registered
+ * view for a `caretInk` contribution (the object `NodeView` or the
+ * `StructuralNodeView`), taking the first that returns one. This keeps the
+ * overlay free of any per-type knowledge — a table cell maps its `backgroundColor`
+ * to a readable ink in its own view, and any custom node can do the same without
+ * touching this file (docs/021 §10, docs/022 §7).
+ */
+function caretInkFor(store: EditorStore, nodeId: NodeId): string | undefined {
+  let id: NodeId | undefined = nodeId;
+  const seen = new Set<NodeId>();
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    const node = store.getNode(id);
+    if (node?.kind === "structural") {
+      const ink = getStructuralView(node.type)?.caretInk?.(node);
+      if (ink) return ink;
+    } else if (node?.kind === "object") {
+      const ink = getNodeView(node.type)?.caretInk?.(node);
+      if (ink) return ink;
+    }
+    id = store.parentEntry(id)?.parent;
+  }
+  return undefined;
 }
 
 /**
@@ -444,9 +481,11 @@ export function SelectionOverlay(props: {
                 ? "idco-caret-blink 1.06s step-end infinite"
                 : undefined,
               background:
-                isCaret || isGap || isPreedit
-                  ? "CanvasText"
-                  : "color-mix(in srgb, Highlight 36%, transparent)",
+                isCaret || isGap
+                  ? (rect.color ?? "CanvasText")
+                  : isPreedit
+                    ? "CanvasText"
+                    : "color-mix(in srgb, Highlight 36%, transparent)",
               borderRadius: isCaret ? 1 : isGap ? 2 : isPreedit ? 0 : 3,
               height: rect.height,
               left: rect.left,

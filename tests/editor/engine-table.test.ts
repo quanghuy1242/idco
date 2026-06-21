@@ -23,21 +23,33 @@ import {
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  activeCellContext,
+  cellCoords,
   columnCount,
   deleteColumn,
   deleteRow,
+  hasMergedCells,
   headerState,
   insertColumn,
   insertRow,
+  mergeCells,
+  moveArrayItem,
+  moveColumn,
+  moveRow,
   resizeColumns,
   resizeColumnWidths,
   scaleColumnWidths,
+  selectedCellRange,
   selectionCell,
+  setCellBackground,
+  setCellVerticalAlign,
   setTableLayout,
   tabWithinTable,
+  tableGrid,
   toggleHeaderColumn,
   toggleHeaderRow,
   toggleRowNumbers,
+  unmergeCell,
 } from "../../packages/editor/src/view/table-operations";
 
 function structural(store: EditorStore, id: NodeId): StructuralNode {
@@ -115,6 +127,27 @@ function legacyTableDoc(
       ],
     },
   } as RichTextCompatDocument;
+}
+
+/** Build a structural-model store from a simple rectangular grid of cell texts. */
+function simpleTableStore(rows: readonly (readonly string[])[]): EditorStore {
+  const doc = {
+    root: {
+      children: [
+        {
+          children: rows.map((cells) => ({
+            children: cells.map((text) => ({
+              children: [{ text, type: "text" }],
+              type: "tablecell",
+            })),
+            type: "tablerow",
+          })),
+          type: "table",
+        },
+      ],
+    },
+  } as RichTextCompatDocument;
+  return createEditorStoreFromCompat(doc);
 }
 
 /** Flatten a compat node's nested text to a plain string. */
@@ -395,6 +428,41 @@ describe("table — structure operations (docs/022 §6)", () => {
     expect(columnCount(store, tableId)).toBe(3);
   });
 
+  it("inserted column inherits the ROW header bit (header row continues)", () => {
+    const store = makeStore();
+    const tableId = insertedTable(store).id; // seeded header row + header column
+    insertColumn(store, tableId, 3); // new last column
+    const headerRow = structural(
+      store,
+      structural(store, tableId).children[0]!,
+    );
+    // The new header-row cell carries the ROW bit; a new body-row cell does not.
+    expect(
+      Number(
+        structural(store, headerRow.children[3]!).attrs?.headerState ?? 0,
+      ) & 1,
+    ).toBe(1);
+    const bodyRow = structural(store, structural(store, tableId).children[1]!);
+    expect(
+      structural(store, bodyRow.children[3]!).attrs?.headerState ?? 0,
+    ).toBe(0);
+  });
+
+  it("inserted row inherits the COLUMN header bit (header column continues)", () => {
+    const store = makeStore();
+    const tableId = insertedTable(store).id; // seeded header row + header column
+    insertRow(store, tableId, 3); // new last row
+    const newRow = structural(store, structural(store, tableId).children[3]!);
+    // The new first cell carries the COLUMN bit; interior cells do not.
+    expect(
+      Number(structural(store, newRow.children[0]!).attrs?.headerState ?? 0) &
+        2,
+    ).toBe(2);
+    expect(structural(store, newRow.children[1]!).attrs?.headerState ?? 0).toBe(
+      0,
+    );
+  });
+
   it("refuses to delete the last column", () => {
     const store = makeStore();
     const tableId = insertedTable(store).id;
@@ -559,6 +627,506 @@ describe("table — layout, width math, and header state (docs/022 §6, §10.4)"
   it("scaleColumnWidths rescales proportionally to the target total", () => {
     expect(scaleColumnWidths([100, 300], 200)).toEqual([50, 150]);
     expect(scaleColumnWidths([1, 1, 1], 100)).toEqual([33, 33, 34]);
+  });
+});
+
+describe("table — span-aware grid map + cell-range (docs/022 §7)", () => {
+  it("tableGrid resolves a merged cell across the positions it covers", () => {
+    const doc = {
+      root: {
+        children: [
+          {
+            children: [
+              {
+                children: [
+                  {
+                    children: [{ text: "wide", type: "text" }],
+                    colSpan: 2,
+                    type: "tablecell",
+                  },
+                ],
+                type: "tablerow",
+              },
+              {
+                children: [
+                  {
+                    children: [{ text: "x", type: "text" }],
+                    type: "tablecell",
+                  },
+                  {
+                    children: [{ text: "y", type: "text" }],
+                    type: "tablecell",
+                  },
+                ],
+                type: "tablerow",
+              },
+            ],
+            type: "table",
+          },
+        ],
+      },
+    } as RichTextCompatDocument;
+    const store = createEditorStoreFromCompat(doc);
+    const tableId = store.order[0]!;
+    const grid = tableGrid(store, tableId);
+    expect(grid.colCount).toBe(2);
+    expect(grid.rowCount).toBe(2);
+    // The two top positions are the same (spanning) cell; the bottom row is two.
+    expect(grid.map[0]![0]!.cellId).toBe(grid.map[0]![1]!.cellId);
+    expect(grid.map[0]![0]!.colSpan).toBe(2);
+    expect(grid.map[1]![0]!.cellId).not.toBe(grid.map[1]![1]!.cellId);
+  });
+
+  it("selectedCellRange returns the rectangle's distinct cells", () => {
+    const store = simpleTableStore([
+      ["a", "b", "c"],
+      ["d", "e", "f"],
+      ["g", "h", "i"],
+    ]);
+    const grid = tableGrid(store, store.order[0]!);
+    const range = selectedCellRange(
+      grid,
+      { col: 0, row: 0 },
+      { col: 1, row: 1 },
+    );
+    expect(range.rect).toEqual({ maxCol: 1, maxRow: 1, minCol: 0, minRow: 0 });
+    expect(range.cellIds).toHaveLength(4);
+  });
+
+  it("moveArrayItem reorders without mutating the source", () => {
+    const source = ["a", "b", "c"];
+    expect(moveArrayItem(source, 0, 2)).toEqual(["b", "c", "a"]);
+    expect(moveArrayItem(source, 2, 0)).toEqual(["c", "a", "b"]);
+    expect(source).toEqual(["a", "b", "c"]);
+    expect(moveArrayItem(source, 5, 0)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("table — column / row move (docs/022 §7, legacy $moveTableColumn)", () => {
+  it("moveColumn reorders every row's cell and the matching colWidths entry", () => {
+    const store = simpleTableStore([
+      ["a", "b", "c"],
+      ["d", "e", "f"],
+    ]);
+    const tableId = store.order[0]!;
+    resizeColumns(store, tableId, [100, 160, 200]);
+    moveColumn(store, tableId, 0, 2);
+    // Each row now reads b, c, a (the first column moved to the end).
+    const cellText = (cellId: NodeId) =>
+      store.requireTextNode(structural(store, cellId).children[0]!).content
+        .text;
+    const rowText = (rowIndex: number) =>
+      structural(store, structural(store, tableId).children[rowIndex]!)
+        .children.map((id) => cellText(id))
+        .join("");
+    expect(rowText(0)).toBe("bca");
+    expect(rowText(1)).toBe("efd");
+    expect(structural(store, tableId).attrs?.colWidths).toEqual([
+      160, 200, 100,
+    ]);
+    store.undo();
+    expect(rowText(0)).toBe("abc");
+    expect(structural(store, tableId).attrs?.colWidths).toEqual([
+      100, 160, 200,
+    ]);
+  });
+
+  it("moveRow reorders the table's rows in one undoable step", () => {
+    const store = simpleTableStore([
+      ["a", "b"],
+      ["c", "d"],
+      ["e", "f"],
+    ]);
+    const tableId = store.order[0]!;
+    const firstCellText = (rowIndex: number) => {
+      const cellId = structural(
+        store,
+        structural(store, tableId).children[rowIndex]!,
+      ).children[0]!;
+      return store.requireTextNode(structural(store, cellId).children[0]!)
+        .content.text;
+    };
+    moveRow(store, tableId, 0, 2);
+    expect([firstCellText(0), firstCellText(1), firstCellText(2)]).toEqual([
+      "c",
+      "e",
+      "a",
+    ]);
+    store.undo();
+    expect([firstCellText(0), firstCellText(1), firstCellText(2)]).toEqual([
+      "a",
+      "c",
+      "e",
+    ]);
+  });
+
+  it("move is refused on a merged table (legacy $isSimpleTable guard)", () => {
+    const store = simpleTableStore([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+    const tableId = store.order[0]!;
+    mergeCells(store, tableId, { col: 0, row: 0 }, { col: 1, row: 0 });
+    expect(hasMergedCells(store, tableId)).toBe(true);
+    const before = compatFromEditorStore(store);
+    moveColumn(store, tableId, 0, 1);
+    moveRow(store, tableId, 0, 1);
+    // No-ops: the exported document is unchanged.
+    expect(compatFromEditorStore(store)).toEqual(before);
+  });
+
+  it("insert/delete row/column are refused on a merged table (no grid corruption)", () => {
+    const store = simpleTableStore([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+    const tableId = store.order[0]!;
+    mergeCells(store, tableId, { col: 0, row: 0 }, { col: 1, row: 0 });
+    const before = compatFromEditorStore(store);
+    insertRow(store, tableId, 1);
+    deleteRow(store, tableId, 1);
+    insertColumn(store, tableId, 1);
+    deleteColumn(store, tableId, 1);
+    expect(compatFromEditorStore(store)).toEqual(before);
+  });
+});
+
+describe("table — cell merge / unmerge (docs/022 §7, legacy $mergeCells)", () => {
+  it("merges a 2×2 range into the top-left cell, carrying content", () => {
+    const store = simpleTableStore([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+    const tableId = store.order[0]!;
+    const target = mergeCells(
+      store,
+      tableId,
+      { col: 0, row: 0 },
+      { col: 1, row: 1 },
+    );
+    expect(target).not.toBeNull();
+    const cell = structural(store, target!);
+    expect(cell.attrs?.colSpan).toBe(2);
+    expect(cell.attrs?.rowSpan).toBe(2);
+    // The covered cells were removed; their content moved into the target.
+    expect(
+      structural(store, structural(store, tableId).children[0]!).children,
+    ).toHaveLength(1);
+    const exported = compatFromEditorStore(store);
+    const merged = exported.root.children[0]!.children?.[0]?.children?.[0];
+    expect(merged?.colSpan).toBe(2);
+    expect(merged?.rowSpan).toBe(2);
+    expect(textOf(merged!)).toBe("abcd");
+  });
+
+  it("a 1×1 range is a no-op merge", () => {
+    const store = simpleTableStore([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+    const tableId = store.order[0]!;
+    expect(
+      mergeCells(store, tableId, { col: 0, row: 0 }, { col: 0, row: 0 }),
+    ).toBeNull();
+    expect(hasMergedCells(store, tableId)).toBe(false);
+  });
+
+  it("undo reverses a merge atomically", () => {
+    const store = simpleTableStore([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+    const tableId = store.order[0]!;
+    const before = compatFromEditorStore(store);
+    mergeCells(store, tableId, { col: 0, row: 0 }, { col: 1, row: 1 });
+    store.undo();
+    expect(compatFromEditorStore(store)).toEqual(before);
+  });
+
+  it("unmergeCell restores the covered cells and clears the spans", () => {
+    const store = simpleTableStore([
+      ["a", "b", "c"],
+      ["d", "e", "f"],
+      ["g", "h", "i"],
+    ]);
+    const tableId = store.order[0]!;
+    const target = mergeCells(
+      store,
+      tableId,
+      { col: 1, row: 1 },
+      { col: 2, row: 2 },
+    );
+    expect(hasMergedCells(store, tableId)).toBe(true);
+    unmergeCell(store, tableId, target!);
+    expect(hasMergedCells(store, tableId)).toBe(false);
+    // The grid is rectangular again (3 cells per row).
+    for (const rowId of structural(store, tableId).children) {
+      expect(structural(store, rowId).children).toHaveLength(3);
+    }
+    expect(cellCoords(tableGrid(store, tableId), target!)).toEqual({
+      col: 1,
+      row: 1,
+    });
+  });
+});
+
+describe("table — cross-cell selection is non-corrupting (deleteRange scope guard)", () => {
+  it("delete-selection across two cells is a safe no-op, not a grid corruption", () => {
+    const store = simpleTableStore([
+      ["ab", "cd"],
+      ["ef", "gh"],
+    ]);
+    const tableId = store.order[0]!;
+    const row0 = structural(store, tableId).children[0]!;
+    const cellA = structural(store, row0).children[0]!;
+    const cellB = structural(store, row0).children[1]!;
+    const leafA = structural(store, cellA).children[0]!;
+    const leafB = structural(store, cellB).children[0]!;
+    const a = store.requireTextNode(leafA);
+    const b = store.requireTextNode(leafB);
+    // A text selection that spans two cells (anchor in A, focus in B).
+    store.dispatch({
+      origin: "local",
+      selectionAfter: {
+        anchor: pointAtOffset(leafA, a.content, 1),
+        focus: pointAtOffset(leafB, b.content, 1),
+        type: "text",
+      },
+      steps: [],
+    });
+    store.command({ type: "delete-selection" });
+    // Neither cell is emptied or merged; both keep their paragraph and text.
+    expect(store.requireTextNode(leafA).content.text).toBe("ab");
+    expect(store.requireTextNode(leafB).content.text).toBe("cd");
+    expect(structural(store, cellB).children).toHaveLength(1);
+    // Typing over the same cross-cell selection collapses to the start cell, never
+    // splices the far cell's text in.
+    store.dispatch({
+      origin: "local",
+      selectionAfter: {
+        anchor: pointAtOffset(leafA, store.requireTextNode(leafA).content, 1),
+        focus: pointAtOffset(leafB, store.requireTextNode(leafB).content, 1),
+        type: "text",
+      },
+      steps: [],
+    });
+    store.command({ type: "insert-text", text: "X" });
+    expect(store.requireTextNode(leafB).content.text).toBe("cd");
+  });
+});
+
+describe("table — cell attributes (fill + vertical align, docs/022 §7)", () => {
+  it("setCellBackground sets/clears the attr across cells in one undo", () => {
+    const store = simpleTableStore([["a", "b", "c"]]);
+    const tableId = store.order[0]!;
+    const cells = structural(
+      store,
+      structural(store, tableId).children[0]!,
+    ).children;
+    setCellBackground(store, [cells[0]!, cells[1]!], "#14532d");
+    expect(structural(store, cells[0]!).attrs?.backgroundColor).toBe("#14532d");
+    expect(structural(store, cells[1]!).attrs?.backgroundColor).toBe("#14532d");
+    expect(structural(store, cells[2]!).attrs?.backgroundColor).toBeUndefined();
+    store.undo(); // one undo reverses both
+    expect(structural(store, cells[0]!).attrs?.backgroundColor).toBeUndefined();
+    expect(structural(store, cells[1]!).attrs?.backgroundColor).toBeUndefined();
+    // Clearing removes the attr.
+    setCellBackground(store, [cells[0]!], "#333");
+    setCellBackground(store, [cells[0]!], undefined);
+    expect(structural(store, cells[0]!).attrs?.backgroundColor).toBeUndefined();
+  });
+
+  it("setCellVerticalAlign stores middle/bottom and clears for top", () => {
+    const store = simpleTableStore([["a"]]);
+    const tableId = store.order[0]!;
+    const cell = structural(store, structural(store, tableId).children[0]!)
+      .children[0]!;
+    setCellVerticalAlign(store, [cell], "middle");
+    expect(structural(store, cell).attrs?.verticalAlign).toBe("middle");
+    setCellVerticalAlign(store, [cell], "top");
+    expect(structural(store, cell).attrs?.verticalAlign).toBeUndefined();
+  });
+
+  it("activeCellContext finds the caret's cell and its merged flag", () => {
+    const store = simpleTableStore([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+    const tableId = store.order[0]!;
+    const cellA = structural(store, structural(store, tableId).children[0]!)
+      .children[0]!;
+    const leafA = structural(store, cellA).children[0]!;
+    const a = store.requireTextNode(leafA);
+    store.dispatch({
+      origin: "local",
+      selectionAfter: {
+        anchor: pointAtOffset(leafA, a.content, 0),
+        focus: pointAtOffset(leafA, a.content, 0),
+        type: "text",
+      },
+      steps: [],
+    });
+    expect(activeCellContext(store)).toEqual({
+      cellId: cellA,
+      merged: false,
+      tableId,
+    });
+    const target = mergeCells(
+      store,
+      tableId,
+      { col: 0, row: 0 },
+      { col: 1, row: 0 },
+    );
+    // After merge the caret lands in the merged cell; it reports merged.
+    expect(activeCellContext(store)?.cellId).toBe(target);
+    expect(activeCellContext(store)?.merged).toBe(true);
+  });
+});
+
+/** A table with a 2-row span on the first cell (a non-rectangular grid). */
+function spanTableStore(): EditorStore {
+  const cell = (text: string, extra?: Record<string, unknown>) => ({
+    children: [{ text, type: "text" }],
+    ...extra,
+    type: "tablecell",
+  });
+  const doc = {
+    root: {
+      children: [
+        {
+          children: [
+            {
+              children: [cell("A", { rowSpan: 2 }), cell("B"), cell("C")],
+              type: "tablerow",
+            },
+            { children: [cell("D"), cell("E")], type: "tablerow" },
+            { children: [cell("F"), cell("G"), cell("H")], type: "tablerow" },
+          ],
+          type: "table",
+        },
+      ],
+    },
+  } as RichTextCompatDocument;
+  return createEditorStoreFromCompat(doc);
+}
+
+describe("table — in-cell paragraph merge (Backspace folds within a cell)", () => {
+  it("Backspace at the start of a cell's 2nd paragraph merges it into the 1st", () => {
+    const doc = {
+      root: {
+        children: [
+          {
+            children: [
+              {
+                children: [
+                  {
+                    children: [
+                      {
+                        children: [{ text: "Widgets", type: "text" }],
+                        type: "paragraph",
+                      },
+                      {
+                        children: [{ text: "12400", type: "text" }],
+                        type: "paragraph",
+                      },
+                    ],
+                    type: "tablecell",
+                  },
+                ],
+                type: "tablerow",
+              },
+            ],
+            type: "table",
+          },
+        ],
+      },
+    } as RichTextCompatDocument;
+    const store = createEditorStoreFromCompat(doc);
+    const tableId = store.order[0]!;
+    const cell = structural(
+      store,
+      structural(store, structural(store, tableId).children[0]!).children[0]!,
+    );
+    expect(cell.children).toHaveLength(2);
+    const para2 = cell.children[1]!;
+    const p2 = store.requireTextNode(para2);
+    // Caret at the very start of the 2nd paragraph.
+    store.dispatch({
+      origin: "local",
+      selectionAfter: {
+        anchor: pointAtOffset(para2, p2.content, 0),
+        focus: pointAtOffset(para2, p2.content, 0),
+        type: "text",
+      },
+      steps: [],
+    });
+    store.command({ type: "delete-backward" });
+    const after = structural(
+      store,
+      structural(store, structural(store, tableId).children[0]!).children[0]!,
+    );
+    expect(after.children).toHaveLength(1); // the two paragraphs folded into one
+    expect(store.requireTextNode(after.children[0]!).content.text).toBe(
+      "Widgets12400",
+    );
+  });
+});
+
+describe("table — merge-aware insert/delete (docs/022 §7)", () => {
+  function span(store: EditorStore, cellId: NodeId, key: string): number {
+    const c = structural(store, cellId);
+    const v = c.attrs?.[key];
+    return typeof v === "number" ? v : 1;
+  }
+
+  it("insertColumn on a merged grid places cells at the right physical index", () => {
+    const store = spanTableStore();
+    const tableId = store.order[0]!;
+    const aId = tableGrid(store, tableId).map[0]![0]!.cellId; // the rowSpan cell
+    insertColumn(store, tableId, 1);
+    const grid = tableGrid(store, tableId);
+    expect(grid.colCount).toBe(4);
+    // The rowSpan cell still covers (0,0) and (1,0).
+    expect(grid.map[0]![0]!.cellId).toBe(aId);
+    expect(grid.map[1]![0]!.cellId).toBe(aId);
+    expect(span(store, aId, "rowSpan")).toBe(2);
+  });
+
+  it("insertRow across a rowSpan extends the span instead of splitting it", () => {
+    const store = spanTableStore();
+    const tableId = store.order[0]!;
+    const aId = tableGrid(store, tableId).map[0]![0]!.cellId;
+    insertRow(store, tableId, 1); // between the two rows the span covers
+    const grid = tableGrid(store, tableId);
+    expect(grid.rowCount).toBe(4);
+    expect(span(store, aId, "rowSpan")).toBe(3); // extended to cover the new row
+    expect(grid.map[2]![0]!.cellId).toBe(aId); // still covers the new middle row
+  });
+
+  it("deleteColumn removes a 1×1 column and keeps the rowSpan cell's content", () => {
+    const store = spanTableStore();
+    const tableId = store.order[0]!;
+    deleteColumn(store, tableId, 1); // the B/D/G column (all 1×1)
+    const grid = tableGrid(store, tableId);
+    expect(grid.colCount).toBe(2);
+    // The span cell survives at (0,0)..(1,0).
+    expect(grid.map[0]![0]!.cellId).toBe(grid.map[1]![0]!.cellId);
+  });
+
+  it("deleteRow moves a span-origin cell into the next row and shrinks it", () => {
+    const store = spanTableStore();
+    const tableId = store.order[0]!;
+    const aId = tableGrid(store, tableId).map[0]![0]!.cellId;
+    deleteRow(store, tableId, 0); // row 0 is where the rowSpan begins
+    const grid = tableGrid(store, tableId);
+    expect(grid.rowCount).toBe(2);
+    // The span cell moved down to the new row 0 and is now 1×1, content intact.
+    expect(grid.map[0]![0]!.cellId).toBe(aId);
+    expect(span(store, aId, "rowSpan")).toBe(1);
+    expect(cellCoords(grid, aId)).toEqual({ col: 0, row: 0 });
+    const exported = compatFromEditorStore(store);
+    const firstCell = exported.root.children[0]!.children?.[0]?.children?.[0];
+    expect(textOf(firstCell!)).toBe("A");
   });
 });
 
