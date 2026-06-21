@@ -54,6 +54,7 @@ export {
   BlockRegistry,
   createDefaultBlockRegistry,
   registerGlobalNodeDefinition,
+  unregisterGlobalNodeDefinition,
   globalNodeDefinitions,
   BUILT_IN_OBJECT_DEFINITIONS,
   bakeObjectData,

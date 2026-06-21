@@ -5,10 +5,12 @@
  * assert the adapter maps the real node types into the engine and drops-with-
  * report what it cannot map, never crashing on real-shaped data.
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   createEditorStoreFromCompat,
   importPayloadLexical,
+  registerGlobalNodeDefinition,
+  unregisterGlobalNodeDefinition,
   type EditorStore,
 } from "../../packages/editor/src/core";
 
@@ -115,5 +117,26 @@ describe("Payload-Lexical import adapter", () => {
   it("never throws on an empty or malformed document", () => {
     expect(() => importPayloadLexical({})).not.toThrow();
     expect(importPayloadLexical({}).document.root.children).toEqual([]);
+  });
+
+  // The hook test registers a global definition; clean it up so it does not leak
+  // into the shared module-level registry for the rest of the run.
+  afterAll(() => unregisterGlobalNodeDefinition("spi-payload-widget"));
+
+  it("maps a registered custom node's Payload type via its fromPayload hook (W8)", () => {
+    // A host registers a node that knows how to read its own dialect type, so the
+    // importer maps it instead of dropping it — no edit to payload-import.ts.
+    registerGlobalNodeDefinition({
+      fromPayload: (node) =>
+        node.type === "payload-widget" ? { type: "spi-payload-widget" } : null,
+      normalizeData: () => ({ data: {}, status: "ready" }),
+      type: "spi-payload-widget",
+    });
+    const { document, report } = importPayloadLexical({
+      root: { children: [{ id: "w1", type: "payload-widget" }] },
+    });
+    expect(report.mapped["payload-widget"]).toBe(1);
+    expect(report.dropped["payload-widget"]).toBeUndefined();
+    expect(document.root.children[0]?.type).toBe("spi-payload-widget");
   });
 });

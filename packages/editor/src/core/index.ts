@@ -65,6 +65,7 @@ export {
   createDefaultBlockRegistry,
   globalNodeDefinitions,
   registerGlobalNodeDefinition,
+  unregisterGlobalNodeDefinition,
 } from "./registry";
 export type {
   StructuralCompatContext,

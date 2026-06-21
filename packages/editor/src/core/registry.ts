@@ -62,6 +62,16 @@ export type NodeDefinition = {
   ): Omit<RichTextCompatNode, "id" | "type">;
   isExportComplete?(value: ObjectNormalizationResult): boolean;
   /**
+   * Map a Payload/Lexical dialect node to this node's compat shape (note.md W8).
+   * The Payload importer (`payload-import`) tries each registered definition's
+   * `fromPayload` for a dialect type it has no built-in mapping for, before
+   * dropping it — so a host adds a Payload mapping for its custom node without
+   * editing the importer. Return `null` for a node this definition does not
+   * handle; otherwise return a compat node whose `type` is this definition's
+   * `type`, so the normal compat import then resolves it.
+   */
+  fromPayload?(node: Record<string, unknown>): RichTextCompatNode | null;
+  /**
    * Produce the object's static baked snapshot from its opaque data, or `null`
    * when the data cannot bake (e.g. media with no source). Pure compute and
    * DOM-free so the bake can run in the Web Worker (docs/010 §7.5); the engine
@@ -154,6 +164,11 @@ const GLOBAL_NODE_DEFINITIONS = new Map<string, NodeDefinition>();
 /** Register a custom node's definition globally (docs/016 §7). Idempotent by type. */
 export function registerGlobalNodeDefinition(definition: NodeDefinition): void {
   GLOBAL_NODE_DEFINITIONS.set(definition.type, definition);
+}
+
+/** Remove a globally-registered node definition by type (the register twin). */
+export function unregisterGlobalNodeDefinition(type: string): void {
+  GLOBAL_NODE_DEFINITIONS.delete(type);
 }
 
 /** The custom node definitions registered so far (docs/016 §7). */

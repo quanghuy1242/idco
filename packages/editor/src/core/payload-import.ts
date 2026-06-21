@@ -25,6 +25,8 @@
  */
 import type { DocumentSettings, RichTextCompatNode } from "./model";
 import type { RichTextCompatDocument } from "./model";
+import { globalNodeDefinitions } from "./registry";
+import { globalStructuralDefinitions } from "./structural-registry";
 
 /** A Payload/Lexical node is loose JSON; we read only the fields we map. */
 type PayloadNode = {
@@ -129,6 +131,25 @@ function isNode<T>(value: T | null): value is T {
   return value !== null;
 }
 
+/**
+ * Try each registered node / structural definition's `fromPayload` hook (W8), so
+ * a host's custom node maps its own Payload dialect type without editing this
+ * importer. Only globally-registered (custom) definitions are consulted; the
+ * built-in dialect types keep their explicit mappings in `mapBlock`. Order:
+ * object definitions first, then structural, first non-null wins — so two hooks
+ * answering the same dialect type resolve deterministically (object precedence).
+ */
+function mapViaRegistry(node: PayloadNode): RichTextCompatNode | null {
+  for (const definition of [
+    ...globalNodeDefinitions(),
+    ...globalStructuralDefinitions(),
+  ]) {
+    const mapped = definition.fromPayload?.(node as Record<string, unknown>);
+    if (mapped) return mapped;
+  }
+  return null;
+}
+
 function isInlineContainer(type: string | undefined): boolean {
   return (
     type === "paragraph" ||
@@ -209,11 +230,21 @@ function mapBlock(
         type: "code-block",
       } as RichTextCompatNode);
       return;
-    default:
-      // `block` (Payload Blocks) and any unknown type: drop with a report entry,
+    default: {
+      // A registered custom node (object or structural) may map its own Payload
+      // dialect type before we drop it (note.md W8), so a host adds a mapping
+      // without editing this importer.
+      const custom = mapViaRegistry(node);
+      if (custom) {
+        report.map(type || "unknown");
+        out.push(custom);
+        return;
+      }
+      // `block` (Payload Blocks) and any unmapped type: drop with a report entry,
       // never throw on real data (AC7).
       report.drop(type || "unknown");
       return;
+    }
   }
 }
 

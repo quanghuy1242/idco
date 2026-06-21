@@ -131,6 +131,16 @@ export type StructuralDefinition = {
     node: StructuralNode,
     ctx: StructuralExportContext,
   ): StructuralExportResult;
+  /**
+   * Map a Payload/Lexical dialect node to this container's compat shape (note.md
+   * W8) — the structural twin of `NodeDefinition.fromPayload`. The Payload
+   * importer tries each registered definition for an unmapped dialect type before
+   * dropping it. Return `null` when this definition does not handle the node;
+   * otherwise a compat node whose `type` is this definition's `type`. The importer
+   * does not recurse into the returned node's children, so a container hook owns
+   * converting its own dialect subtree to compat children.
+   */
+  fromPayload?(node: Record<string, unknown>): RichTextCompatNode | null;
 };
 
 /**
