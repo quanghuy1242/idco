@@ -67,6 +67,14 @@ export {
   type MarkRenderArgs,
   type MarkToolbarMeta,
 } from "./mark-registry";
+export {
+  blockTypeKey,
+  blockTypeRole,
+  getBlockType,
+  listBlockTypes,
+  registerBlockType,
+  type BlockTypeDefinition,
+} from "./block-type-registry";
 export { sanitizeHtmlToCompat } from "./paste-html";
 export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
 export {

@@ -58,6 +58,7 @@ await import("./editor/engine-style-invariants.test");
 await import("./editor/engine-objects.test");
 await import("./editor/engine-node-spi.test");
 await import("./editor/engine-structural-spi.test");
+await import("./editor/engine-block-type-spi.test");
 await import("./editor/engine-structural-child-commands.test");
 await import("./editor/engine-table.test");
 await import("./editor/engine-compat-links.test");

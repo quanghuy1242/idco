@@ -18,6 +18,7 @@ import {
   type NodeId,
   type TextLeafNode,
 } from "../core";
+import { blockTypeRole } from "./block-type-registry";
 import { gapMarkerRect } from "./gap-cursor";
 import { getNodeView } from "./node-view";
 import { getStructuralView } from "./structural-view";
@@ -643,14 +644,7 @@ function serializeRect(rect: DOMRect): SerializedRect {
 
 /** A screen-reader label for a text leaf: its role plus a short text preview. */
 export function ariaLabelForLeaf(node: TextLeafNode): string {
-  const role =
-    node.type === "heading"
-      ? "Heading"
-      : node.type === "listitem"
-        ? "List item"
-        : node.type === "quote"
-          ? "Quote"
-          : "Paragraph";
+  const role = blockTypeRole(node.type);
   const preview = node.content.text.trim().slice(0, 40);
   return preview ? `${role}: ${preview}` : `${role}, empty`;
 }

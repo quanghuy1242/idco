@@ -52,6 +52,7 @@ import { EngineBlock } from "./block-dispatch";
 import { listOverlayStructuralViews } from "./structural-view";
 import { listOverlayNodeViews } from "./node-view";
 import { registerBuiltInMarks } from "./mark-render";
+import { registerBuiltInBlockTypes } from "./block-type-registry";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_VIEWPORT_HEIGHT,
@@ -78,6 +79,9 @@ registerBuiltInNodeViews();
 // context menu (which read `listMarks()`) see a populated registry regardless of
 // import order; the call is idempotent with mark-render's own module-load call.
 registerBuiltInMarks();
+// And the built-in block types (note.md W5), same rationale: the toolbar + context
+// menu read `listBlockTypes()`, and `selection-overlay` reads `blockTypeRole`.
+registerBuiltInBlockTypes();
 
 // The diagnostics + imperative-handle types live in the diagnostics controller;
 // re-export them here so the public view surface keeps the same names.

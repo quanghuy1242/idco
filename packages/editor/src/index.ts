@@ -43,6 +43,12 @@ export {
   type MarkRenderArgs,
   type MarkToolbarMeta,
   type LinkMode,
+  registerBlockType,
+  listBlockTypes,
+  getBlockType,
+  blockTypeKey,
+  blockTypeRole,
+  type BlockTypeDefinition,
 } from "./view";
 export {
   BlockRegistry,
