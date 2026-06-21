@@ -71,6 +71,7 @@ import {
   getStructuralDefinition,
   isStructuralDefinitionType,
 } from "./structural-registry";
+import { importFlatBlock, type FlatBlockImportContext } from "./flat-blocks";
 import { createEditorStore, type EditorStore } from "./store";
 import { safeHref } from "./url-safety";
 
@@ -237,90 +238,43 @@ function importInlineAsParagraph(
   return [paragraphId];
 }
 
+/** Bind the compat import helpers into the `FlatBlockImportContext` flat-blocks
+ *  needs, so the intrinsic flat-block logic lives in one module without owning the
+ *  import walk (the same ctx-of-helpers pattern `StructuralDefinition` uses). */
+function flatBlockContext(state: BuildState): FlatBlockImportContext {
+  return {
+    allocator: state.allocator,
+    importChildren: (children) =>
+      (children ?? []).flatMap((child) => importCompatNode(child, state)),
+    inlineMarks: (children, content, leafId) =>
+      marksFromInlineChildren(children, content, leafId),
+    inlineText: (children) => textFromInlineChildren(children),
+    isBlockChild: (node) => isBlockChild(node, state.registry),
+    nodeId: (node) => nodeId(node, state.allocator),
+    pickAttrs,
+    register: (compatId, built) => state.blocks.set(compatId, built),
+  };
+}
+
 function importCompatNode(
   node: RichTextCompatNode,
   state: BuildState,
 ): readonly NodeId[] {
+  /*
+   * Intrinsic flat blocks (paragraph/heading/quote/listitem and the `list`
+   * flatten) import through the single patterned entry in `flat-blocks` — they are
+   * core text-leaf primitives, deliberately not registry types (note.md W3). A
+   * non-flat node returns null here and falls through to the structural/object
+   * registries below.
+   */
+  const flatBlock = importFlatBlock(node, flatBlockContext(state));
+  if (flatBlock) return flatBlock;
   const id = nodeId(node, state.allocator);
   /*
-   * Text leaves:
-   *
-   * Legacy rich-text JSON stores a paragraph as an element node whose children
-   * are many inline nodes. The owned model stores a paragraph as exactly one
-   * text leaf. That means the import path has to flatten the inline text first,
-   * then rebuild mark ranges from the same flattened content so their character
-   * anchors refer to the correct leaf.
-   */
-  if (node.type === "paragraph" || node.type === "editor-paragraph") {
-    const content = state.allocator.createTextSlice(
-      textFromInlineChildren(node.children),
-    );
-    state.blocks.set(
-      id,
-      makeTextNode({
-        attrs: pickAttrs(node, ["format", "indent"]),
-        content,
-        id,
-        marks: marksFromInlineChildren(node.children, content, id),
-        type: "paragraph",
-      }),
-    );
-    return [id];
-  }
-  if (node.type === "heading" || node.type === "editor-heading") {
-    const content = state.allocator.createTextSlice(
-      textFromInlineChildren(node.children),
-    );
-    state.blocks.set(
-      id,
-      makeTextNode({
-        attrs: pickAttrs(node, ["anchorId", "format", "indent", "tag"]),
-        content,
-        id,
-        marks: marksFromInlineChildren(node.children, content, id),
-        type: "heading",
-      }),
-    );
-    return [id];
-  }
-  if (node.type === "quote" || node.type === "editor-quote") {
-    if (hasBlockChildren(node.children, state.registry)) {
-      const children = (node.children ?? []).flatMap((child) =>
-        importCompatNode(child, state),
-      );
-      state.blocks.set(
-        id,
-        makeStructuralNode({
-          attrs: pickAttrs(node, ["format"]),
-          children,
-          id,
-          type: "quote",
-        }),
-      );
-      return [id];
-    }
-    const content = state.allocator.createTextSlice(
-      textFromInlineChildren(node.children),
-    );
-    state.blocks.set(
-      id,
-      makeTextNode({
-        attrs: pickAttrs(node, ["format", "indent"]),
-        content,
-        id,
-        marks: marksFromInlineChildren(node.children, content, id),
-        type: "quote",
-      }),
-    );
-    return [id];
-  }
-  /*
    * Registry-driven structural import (note §7). A structural type with a
-   * registered `StructuralDefinition` (callout today, the future table) imports
-   * through its own `fromCompatNode`, so core keeps no per-type branch — the
-   * structural twin of the object registry path below. `quote`/`list`/`listitem`
-   * remain hardcoded above until they are migrated (their list-flattening is a
-   * legitimate dialect concern, not a cheat — note §7).
+   * registered `StructuralDefinition` (callout, the table family) imports through
+   * its own `fromCompatNode`, so core keeps no per-type branch — the structural
+   * twin of the object registry path below.
    */
   const structuralDefinition = getStructuralDefinition(node.type);
   if (structuralDefinition) {
@@ -343,51 +297,6 @@ function importCompatNode(
         // `StructuralNodeType` is the registry-driven open set (docs/021 §8.1), so
         // a registered type's string flows in without a cast.
         type: node.type,
-      }),
-    );
-    return [id];
-  }
-  /*
-   * Lists are flat-by-design (docs/018 §2.10): a `list` container is flattened to
-   * top-level `listitem` text leaves carrying `listType` (bullet/number) plus a
-   * depth `indent`, never a structural `list` node. Flattening is what lets an
-   * imported list render on the editor surface (a structural `list` would show the
-   * `[list]` placeholder) and keeps `compileIndentItem`'s structural-nesting
-   * branch unreachable-by-design — the only producer of a structural `list` is now
-   * a hand-built fixture, never a user-creatable or imported document.
-   */
-  if (node.type === "list" || node.type === "editor-list") {
-    return flattenCompatList(node, state, 0);
-  }
-  if (node.type === "listitem" || node.type === "editor-listitem") {
-    // A `listitem` reached directly (not via a `list` parent) is already a flat
-    // top-level item; carry its own `listType` if one is set, else it defaults to
-    // bullet at render. A block-bearing bare item keeps the structural shape (a
-    // defensive edge — lists themselves never reach here, they flatten above).
-    if (hasBlockChildren(node.children, state.registry)) {
-      const children = importListItemChildren(node.children, state);
-      state.blocks.set(
-        id,
-        makeStructuralNode({
-          attrs: pickAttrs(node, ["checked", "value"]),
-          children,
-          id,
-          type: "listitem",
-        }),
-      );
-      return [id];
-    }
-    const content = state.allocator.createTextSlice(
-      textFromInlineChildren(node.children),
-    );
-    state.blocks.set(
-      id,
-      makeTextNode({
-        attrs: pickAttrs(node, ["checked", "indent", "listType", "value"]),
-        content,
-        id,
-        marks: marksFromInlineChildren(node.children, content, id),
-        type: "listitem",
       }),
     );
     return [id];
@@ -735,119 +644,6 @@ function textFromInlineChildren(
       return textFromInlineChildren(child.children);
     })
     .join("");
-}
-
-function importListItemChildren(
-  children: readonly RichTextCompatNode[] | undefined,
-  state: BuildState,
-): readonly NodeId[] {
-  /*
-   * Legacy list items can contain inline text followed by a nested list. Flattening
-   * those children would turn the nested list into plain text and violate the
-   * normalized-tree contract from docs/011. The owned model keeps the list item as
-   * structural only for that mixed case, with one generated text leaf for direct
-   * inline content and normal child ids for nested blocks.
-   */
-  const inlineChildren: RichTextCompatNode[] = [];
-  const ids: NodeId[] = [];
-  for (const child of children ?? []) {
-    if (isBlockChild(child, state.registry)) {
-      ids.push(...importCompatNode(child, state));
-    } else {
-      inlineChildren.push(child);
-    }
-  }
-  const inlineText = textFromInlineChildren(inlineChildren);
-  if (inlineText.length > 0) {
-    const textId = state.allocator.createNodeId();
-    const content = state.allocator.createTextSlice(inlineText);
-    state.blocks.set(
-      textId,
-      makeTextNode({
-        content,
-        id: textId,
-        marks: marksFromInlineChildren(inlineChildren, content, textId),
-        type: "listitem",
-      }),
-    );
-    ids.unshift(textId);
-  }
-  return ids;
-}
-
-/** The two list flavours the flat model renders (docs/018 §2.10). */
-type CompatListType = "bullet" | "number";
-
-function isCompatList(node: RichTextCompatNode): boolean {
-  return node.type === "list" || node.type === "editor-list";
-}
-
-/** Resolve a legacy `list` node's flavour from its `listType`/`tag` (default bullet). */
-function compatListType(node: RichTextCompatNode): CompatListType {
-  if (node.listType === "number" || node.tag === "ol") return "number";
-  return "bullet";
-}
-
-/**
- * Flatten a legacy `list` into top-level `listitem` text leaves (docs/018 §2.10).
- * Each item carries the list's `listType` and a `depth` indent; a nested list
- * inside an item flattens into the following items at `depth + 1`, so the visual
- * nesting survives without a structural `list` node (one level per depth).
- */
-function flattenCompatList(
-  node: RichTextCompatNode,
-  state: BuildState,
-  depth: number,
-): NodeId[] {
-  const listType = compatListType(node);
-  const ids: NodeId[] = [];
-  for (const child of node.children ?? []) {
-    if (isCompatList(child)) {
-      ids.push(...flattenCompatList(child, state, depth + 1));
-    } else if (child.type === "listitem" || child.type === "editor-listitem") {
-      ids.push(...flattenCompatListItem(child, state, depth, listType));
-    } else {
-      // A stray non-item, non-list child: import it normally rather than drop it.
-      ids.push(...importCompatNode(child, state));
-    }
-  }
-  return ids;
-}
-
-/** One flattened list item: its inline text leaf, then any nested lists after it. */
-function flattenCompatListItem(
-  item: RichTextCompatNode,
-  state: BuildState,
-  depth: number,
-  listType: CompatListType,
-): NodeId[] {
-  const inlineChildren = (item.children ?? []).filter(
-    (child) => !isCompatList(child),
-  );
-  const nestedLists = (item.children ?? []).filter(isCompatList);
-  const id = nodeId(item, state.allocator);
-  const content = state.allocator.createTextSlice(
-    textFromInlineChildren(inlineChildren),
-  );
-  state.blocks.set(
-    id,
-    makeTextNode({
-      attrs: {
-        ...pickAttrs(item, ["checked", "value"]),
-        listType,
-        ...(depth > 0 ? { indent: depth } : {}),
-      },
-      content,
-      id,
-      marks: marksFromInlineChildren(inlineChildren, content, id),
-      type: "listitem",
-    }),
-  );
-  const ids: NodeId[] = [id];
-  for (const sublist of nestedLists) {
-    ids.push(...flattenCompatList(sublist, state, depth + 1));
-  }
-  return ids;
 }
 
 function hasBlockChildren(
