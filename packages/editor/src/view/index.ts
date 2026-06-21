@@ -8,6 +8,7 @@
  */
 export {
   OwnedModelEditorView,
+  type ObjectBlockDiagnostics,
   type OwnedModelEditorViewDiagnostics,
   type OwnedModelEditorViewHandle,
   type OwnedModelEditorViewProps,
