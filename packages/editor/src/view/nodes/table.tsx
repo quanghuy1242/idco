@@ -24,6 +24,8 @@ import {
 } from "@quanghuy1242/idco-ui";
 import { type JsonValue, type StructuralNode } from "../../core";
 import { type StructuralNodeView } from "../structural-view";
+import { TableControls } from "../table-controls";
+import { TableInteractions } from "../table-interactions";
 
 /** Cell classes copied from the reader `RichTextTableCell` so live matches rest. */
 const CELL_CLASS =
@@ -66,6 +68,20 @@ function makeTableView(type: string): StructuralNodeView {
             keywords: ["table", "grid", "rows", "columns"],
             label: "Table",
           }
+        : undefined,
+    // The whole-table hover controls and the cell-range/cell-action layer are a
+    // single pair of portals that scan the surface for every table (both `table`
+    // and `editor-table`, docs/022 §6/§7), so they mount once for the whole view,
+    // not per node. Register that overlay only on the canonical `table` view so it
+    // is enumerated exactly once; `editor-table` shares the same running overlay.
+    renderOverlay:
+      type === "table"
+        ? ({ store, rootRef }) => (
+            <>
+              <TableControls rootRef={rootRef} store={store} />
+              <TableInteractions store={store} />
+            </>
+          )
         : undefined,
     renderContainer: ({ node, registerBlock, children }) => {
       const colWidths = numberArray(node.attrs?.colWidths);

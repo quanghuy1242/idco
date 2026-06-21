@@ -67,6 +67,18 @@ export type NodeViewLiveArgs = {
   readonly initialHeight: number;
 };
 
+/**
+ * Arguments to an object node's view-level overlay render (note.md W1) — the
+ * object twin of `StructuralOverlayArgs`. An overlay is one floating surface that
+ * serves every instance of the type at once, mounted once by the view
+ * orchestrator. `rootRef` is the element it anchors and measures within (the
+ * scroller content when virtualized, the surface root otherwise).
+ */
+export type NodeOverlayArgs = {
+  readonly store: EditorStore;
+  readonly rootRef: RefObject<HTMLElement | null>;
+};
+
 /** Insert/format affordance metadata for the Phase 8 slash/insert menu. */
 export type NodeViewInsert = {
   readonly label: string;
@@ -139,6 +151,14 @@ export type NodeView = {
    * the auto-contrast ink here. Consulted generically by the selection overlay.
    */
   caretInk?(node: ObjectNode): string | undefined;
+  /**
+   * A view-level overlay mounted once for this type (note.md W1) — the object twin
+   * of `StructuralNodeView.renderOverlay`. The view orchestrator enumerates every
+   * registered overlay and mounts it inside the surface. No built-in object uses
+   * it yet; the slot exists so a custom object's floating chrome stays out of
+   * `react-view`.
+   */
+  renderOverlay?(args: NodeOverlayArgs): ReactNode;
 };
 
 const NODE_VIEWS = new Map<string, NodeView>();
@@ -164,6 +184,19 @@ export function listInsertableNodes(): readonly (NodeView & {
   const out: (NodeView & { insert: NonNullable<NodeView["insert"]> })[] = [];
   for (const view of NODE_VIEWS.values()) {
     if (view.insert) out.push(view as never);
+  }
+  return out;
+}
+
+/** Every registered object node that mounts a view-level overlay (W1). */
+export function listOverlayNodeViews(): readonly (NodeView & {
+  renderOverlay: NonNullable<NodeView["renderOverlay"]>;
+})[] {
+  const out: (NodeView & {
+    renderOverlay: NonNullable<NodeView["renderOverlay"]>;
+  })[] = [];
+  for (const view of NODE_VIEWS.values()) {
+    if (view.renderOverlay) out.push(view as never);
   }
   return out;
 }

@@ -25,6 +25,7 @@ export {
   listInsertableNodes,
   registerNode,
   registerNodeView,
+  type NodeOverlayArgs,
   type NodeView,
   type NodeViewChromeArgs,
   type NodeViewConfigField,
@@ -40,6 +41,7 @@ export {
   type StructuralContainerArgs,
   type StructuralNodeView,
   type StructuralNodeViewInsert,
+  type StructuralOverlayArgs,
   type StructuralRestingArgs,
 } from "./structural-view";
 export {

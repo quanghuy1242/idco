@@ -29,11 +29,13 @@ export {
   type NodeViewRestingArgs,
   type NodeViewChromeArgs,
   type NodeViewConfigField,
+  type NodeOverlayArgs,
   type RegisterNodeArgs,
   type StructuralNodeView,
   type StructuralNodeViewInsert,
   type StructuralContainerArgs,
   type StructuralRestingArgs,
+  type StructuralOverlayArgs,
 } from "./view";
 export {
   BlockRegistry,

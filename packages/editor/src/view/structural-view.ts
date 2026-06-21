@@ -21,7 +21,7 @@
  * open set (docs/021 §8.1), so a registered type need not be a built-in literal.
  * `quote`/`list`/`listitem` keep hardcoded compat branches until migrated.
  */
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import type {
   EditorCommand,
   EditorNode,
@@ -55,6 +55,21 @@ export type StructuralRestingArgs = {
   readonly children: readonly EditorNode[];
   readonly renderSequence: (nodes: readonly EditorNode[]) => ReactNode;
   readonly renderListItems: (nodes: readonly EditorNode[]) => ReactNode;
+};
+
+/**
+ * Arguments to a structural node's view-level overlay render (docs/020 §4.2,
+ * note.md W1). An overlay is a single floating surface that serves every instance
+ * of its type at once — a portal with its own global pointer listeners — rather
+ * than a per-block element. The table's hover controls and cell-selection layer
+ * are the first consumer (docs/022 §6/§7): one overlay scans the surface for every
+ * table, so it is mounted once, not per node. `rootRef` is the element the overlay
+ * anchors and measures within (the scroller content when virtualized, the surface
+ * root otherwise), so geometry stays correct under virtualization.
+ */
+export type StructuralOverlayArgs = {
+  readonly store: EditorStore;
+  readonly rootRef: RefObject<HTMLElement | null>;
 };
 
 /** Insert-menu affordance for a structural node (docs/020 §7.1). */
@@ -93,6 +108,14 @@ export type StructuralNodeView = {
    * each registered view, keeping no per-type knowledge of its own.
    */
   caretInk?(node: StructuralNode): string | undefined;
+  /**
+   * A view-level overlay mounted once for this type, regardless of how many
+   * instances exist (docs/020 §4.2, note.md W1). The engine's view orchestrator
+   * enumerates every registered overlay and mounts it inside the surface, so a
+   * feature's floating chrome (the table's hover controls) no longer has to be
+   * hardcoded into `react-view`. Omit it for a node with no overlay.
+   */
+  renderOverlay?(args: StructuralOverlayArgs): ReactNode;
 };
 
 const STRUCTURAL_VIEWS = new Map<string, StructuralNodeView>();
@@ -126,6 +149,19 @@ export function listInsertableStructuralNodes(): readonly (StructuralNodeView & 
   })[] = [];
   for (const view of STRUCTURAL_VIEWS.values()) {
     if (view.insert) out.push(view as never);
+  }
+  return out;
+}
+
+/** Every registered structural node that mounts a view-level overlay (W1). */
+export function listOverlayStructuralViews(): readonly (StructuralNodeView & {
+  renderOverlay: NonNullable<StructuralNodeView["renderOverlay"]>;
+})[] {
+  const out: (StructuralNodeView & {
+    renderOverlay: NonNullable<StructuralNodeView["renderOverlay"]>;
+  })[] = [];
+  for (const view of STRUCTURAL_VIEWS.values()) {
+    if (view.renderOverlay) out.push(view as never);
   }
   return out;
 }

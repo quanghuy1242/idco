@@ -23,6 +23,10 @@ import {
   registerNode,
   type StructuralNodeView,
 } from "../../packages/editor/src/view";
+// The overlay enumerators are orchestrator-internal (only `react-view` consumes
+// them, like `getStructuralView`/`getNodeView`), so they are deep-imported here.
+import { listOverlayStructuralViews } from "../../packages/editor/src/view/structural-view";
+import { listOverlayNodeViews } from "../../packages/editor/src/view/node-view";
 
 function structuralNode(type: string, attrs: object = {}): StructuralNode {
   return {
@@ -124,5 +128,67 @@ describe("structural SPI — a brand-new node via registerNode (docs/020 §4.2)"
     expect(
       getStructuralView("not-a-registered-structural-type"),
     ).toBeUndefined();
+  });
+});
+
+describe("overlay SPI — renderOverlay slot (note.md W1)", () => {
+  it("registers the table overlay once, on the canonical `table` view only", () => {
+    // One pair of portals serves every table, so the overlay rides the canonical
+    // `table` view and not the `editor-table` alias — otherwise it mounts twice.
+    expect(typeof getStructuralView("table")!.renderOverlay).toBe("function");
+    expect(getStructuralView("editor-table")!.renderOverlay).toBeUndefined();
+    const types = listOverlayStructuralViews().map((view) => view.type);
+    expect(types).toContain("table");
+    expect(types).not.toContain("editor-table");
+  });
+
+  it("enumerates a custom structural overlay and skips a view without one", () => {
+    const withOverlay: StructuralNodeView = {
+      renderContainer: ({ children }) => createElement("div", null, children),
+      renderOverlay: () =>
+        createElement("div", { "data-overlay": "custom" }, "OVERLAY"),
+      renderResting: ({ children, renderSequence }) =>
+        createElement("div", null, renderSequence(children)),
+      type: "spi-overlay-yes",
+    };
+    const withoutOverlay: StructuralNodeView = {
+      renderContainer: ({ children }) => createElement("div", null, children),
+      renderResting: ({ children, renderSequence }) =>
+        createElement("div", null, renderSequence(children)),
+      type: "spi-overlay-no",
+    };
+    registerNode({ structuralView: withOverlay });
+    registerNode({ structuralView: withoutOverlay });
+
+    const types = listOverlayStructuralViews().map((view) => view.type);
+    expect(types).toContain("spi-overlay-yes");
+    expect(types).not.toContain("spi-overlay-no");
+
+    // The slot is invoked with the orchestrator's args and its node renders.
+    const { container } = render(
+      getStructuralView("spi-overlay-yes")!.renderOverlay!({
+        rootRef: { current: null },
+        store: {} as never,
+      }) as never,
+    );
+    expect(container.querySelector('[data-overlay="custom"]')).not.toBeNull();
+    expect(container.textContent).toContain("OVERLAY");
+  });
+
+  it("enumerates a registered object overlay (no built-in object uses the slot)", () => {
+    expect(
+      listOverlayNodeViews().some((view) => view.type === "spi-object-overlay"),
+    ).toBe(false);
+    registerNode({
+      view: {
+        renderOverlay: () =>
+          createElement("div", { "data-overlay": "obj" }, "OBJ"),
+        renderResting: () => createElement("div", null, "rest"),
+        type: "spi-object-overlay",
+      },
+    });
+    expect(
+      listOverlayNodeViews().some((view) => view.type === "spi-object-overlay"),
+    ).toBe(true);
   });
 });

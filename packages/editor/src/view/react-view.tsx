@@ -26,12 +26,15 @@
  */
 import {
   forwardRef,
+  Fragment,
   useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   type CSSProperties,
+  type ReactNode,
   type Ref,
+  type RefObject,
 } from "react";
 import {
   createEngineScheduler,
@@ -46,8 +49,8 @@ import { TouchSelectionLayer } from "./touch-selection";
 import { baseViewStyle, computeWindowListMeta } from "./styles";
 import { cancelFrame } from "./raf";
 import { EngineBlock } from "./block-dispatch";
-import { TableControls } from "./table-controls";
-import { TableInteractions } from "./table-interactions";
+import { listOverlayStructuralViews } from "./structural-view";
+import { listOverlayNodeViews } from "./node-view";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_VIEWPORT_HEIGHT,
@@ -338,8 +341,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scheduler={scheduler}
           store={store}
         />
-        <TableControls rootRef={rootRef} store={store} />
-        <TableInteractions store={store} />
+        {renderEngineOverlays(store, rootRef)}
         {isTouchDevice && (
           <TouchSelectionLayer
             actions={touchActions}
@@ -397,8 +399,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           scheduler={scheduler}
           store={store}
         />
-        <TableControls rootRef={contentRef} store={store} />
-        <TableInteractions store={store} />
+        {renderEngineOverlays(store, contentRef)}
         {isTouchDevice && (
           <TouchSelectionLayer
             actions={touchActions}
@@ -416,6 +417,33 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     </div>
   );
 });
+
+/**
+ * Mount every registered view-level overlay once (docs/020 §4.2, note.md W1).
+ * Each registered `StructuralNodeView`/`NodeView` overlay is a singleton portal
+ * that serves all instances of its type (the table's hover controls + cell
+ * layer), so the orchestrator enumerates the registries and mounts each here.
+ * This keeps a feature's floating chrome out of this file — before W1 the table
+ * overlays were hardcoded imports in both render branches. `rootRef` is the
+ * branch's anchor element (the scroller content when virtualized, else the root).
+ */
+function renderEngineOverlays(
+  store: EditorStore,
+  rootRef: RefObject<HTMLElement | null>,
+): ReactNode[] {
+  return [
+    ...listOverlayStructuralViews().map((view) => (
+      <Fragment key={`structural:${view.type}`}>
+        {view.renderOverlay({ rootRef, store })}
+      </Fragment>
+    )),
+    ...listOverlayNodeViews().map((view) => (
+      <Fragment key={`object:${view.type}`}>
+        {view.renderOverlay({ rootRef, store })}
+      </Fragment>
+    )),
+  ];
+}
 
 /** Build the default bake/index worker, or null where `Worker` is unavailable. */
 function defaultCreateBakeWorker(): Worker | null {
