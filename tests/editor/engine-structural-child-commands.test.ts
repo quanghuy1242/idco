@@ -213,18 +213,23 @@ describe("structural SPI — generic structural-child commands (docs/021 §8.2)"
     store.command({ index: 0, scope: gridId, type: "remove-structural-child" });
 
     // The deep paragraph is gone, and the selection was relocated to a live
-    // position rather than left dangling on the deleted node.
+    // position rather than left dangling on the deleted node. Whatever variant
+    // it landed on, the node it references must still exist and not be the
+    // deleted caret paragraph — asserted unconditionally over the referenced id.
     expect(store.getNode(caretNode!)).toBeUndefined();
     const sel = store.selection;
     expect(sel).not.toBeNull();
-    if (sel?.type === "text") {
-      expect(sel.focus.node).not.toBe(caretNode);
-      expect(store.getNode(sel.focus.node)).toBeDefined();
-    } else if (sel?.type === "gap") {
-      expect(store.getNode(sel.scope)).toBeDefined();
-    } else if (sel?.type === "node") {
-      expect(store.getNode(sel.node)).toBeDefined();
-    }
+    const referenced =
+      sel?.type === "text"
+        ? sel.focus.node
+        : sel?.type === "gap"
+          ? sel.scope
+          : sel?.type === "node"
+            ? sel.node
+            : undefined;
+    expect(referenced).toBeDefined();
+    expect(referenced).not.toBe(caretNode);
+    expect(store.getNode(referenced!)).toBeDefined();
   });
 
   it("rejects a child op on a non-structural scope or an out-of-range index", () => {

@@ -30,7 +30,7 @@ export function columnCount(store: EditorStore, tableId: NodeId): number {
 
 function buildCell(
   store: EditorStore,
-  headerState = 0,
+  header = 0,
 ): {
   cell: EditorNode;
   descendants: EditorNode[];
@@ -42,7 +42,7 @@ function buildCell(
     type: "paragraph",
   });
   const cell = makeStructuralNode({
-    ...(headerState ? { attrs: { headerState } } : {}),
+    ...(header ? { attrs: { headerState: header } } : {}),
     children: [paragraphId],
     id: store.allocator.createNodeId(),
     type: "tablecell",
@@ -1179,7 +1179,7 @@ function placeRestoredCell(
   store: EditorStore,
   rowId: NodeId,
   index: number,
-  headerState: number,
+  header: number,
 ): void {
   const paragraphId = store.allocator.createNodeId();
   const paragraph = makeTextNode({
@@ -1188,7 +1188,7 @@ function placeRestoredCell(
     type: "paragraph",
   });
   const cell = makeStructuralNode({
-    ...(headerState ? { attrs: { headerState } } : {}),
+    ...(header ? { attrs: { headerState: header } } : {}),
     children: [paragraphId],
     id: store.allocator.createNodeId(),
     type: "tablecell",

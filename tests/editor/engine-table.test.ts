@@ -89,15 +89,16 @@ function insertedTable(store: EditorStore): StructuralNode {
  * id-bearing so import preserves the structural ids and export is comparable to
  * the source byte-for-byte (the `idco_node_` prefix is what `nodeId` keeps).
  */
+const legacyCell = (id: string, text: string, header?: number) => ({
+  children: [{ text, type: "text" }],
+  ...(header ? { headerState: header } : {}),
+  id,
+  type: "tablecell",
+});
+
 function legacyTableDoc(
   type: "table" | "editor-table",
 ): RichTextCompatDocument {
-  const cell = (id: string, text: string, headerState?: number) => ({
-    children: [{ text, type: "text" }],
-    ...(headerState ? { headerState } : {}),
-    id,
-    type: "tablecell",
-  });
   return {
     root: {
       children: [
@@ -105,16 +106,16 @@ function legacyTableDoc(
           children: [
             {
               children: [
-                cell("idco_node_c1", "Name", 3),
-                cell("idco_node_c2", "Role", 3),
+                legacyCell("idco_node_c1", "Name", 3),
+                legacyCell("idco_node_c2", "Role", 3),
               ],
               id: "idco_node_r1",
               type: "tablerow",
             },
             {
               children: [
-                cell("idco_node_c3", "Ada"),
-                cell("idco_node_c4", "Eng"),
+                legacyCell("idco_node_c3", "Ada"),
+                legacyCell("idco_node_c4", "Eng"),
               ],
               id: "idco_node_r2",
               type: "tablerow",
@@ -983,24 +984,32 @@ describe("table — cell attributes (fill + vertical align, docs/022 §7)", () =
   });
 });
 
+const spanCell = (text: string, extra?: Record<string, unknown>) => ({
+  children: [{ text, type: "text" }],
+  ...extra,
+  type: "tablecell",
+});
+
 /** A table with a 2-row span on the first cell (a non-rectangular grid). */
 function spanTableStore(): EditorStore {
-  const cell = (text: string, extra?: Record<string, unknown>) => ({
-    children: [{ text, type: "text" }],
-    ...extra,
-    type: "tablecell",
-  });
   const doc = {
     root: {
       children: [
         {
           children: [
             {
-              children: [cell("A", { rowSpan: 2 }), cell("B"), cell("C")],
+              children: [
+                spanCell("A", { rowSpan: 2 }),
+                spanCell("B"),
+                spanCell("C"),
+              ],
               type: "tablerow",
             },
-            { children: [cell("D"), cell("E")], type: "tablerow" },
-            { children: [cell("F"), cell("G"), cell("H")], type: "tablerow" },
+            { children: [spanCell("D"), spanCell("E")], type: "tablerow" },
+            {
+              children: [spanCell("F"), spanCell("G"), spanCell("H")],
+              type: "tablerow",
+            },
           ],
           type: "table",
         },
