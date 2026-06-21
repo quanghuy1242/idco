@@ -179,6 +179,25 @@ export type RegisterNodeArgs = {
  * engine internals.
  */
 export function registerNode(args: RegisterNodeArgs): void {
+  // A node is either an object (`view` + optional `definition`) or a structural
+  // container (`structuralView`); never both (docs/016 §7, docs/020 §4.2).
+  if (args.view && args.structuralView) {
+    throw new Error(
+      "registerNode: pass either `view` (object) or `structuralView` (structural), not both.",
+    );
+  }
+  if (!args.view && !args.structuralView) {
+    throw new Error(
+      "registerNode: one of `view` or `structuralView` is required.",
+    );
+  }
+  // The paired halves must agree on `type` so the two registries stay keyed
+  // together (the persistence/render contract depends on it, docs/016 §7/§4.2).
+  if (args.definition && args.view && args.definition.type !== args.view.type) {
+    throw new Error(
+      `registerNode: definition.type "${args.definition.type}" !== view.type "${args.view.type}".`,
+    );
+  }
   if (args.definition) registerGlobalNodeDefinition(args.definition);
   if (args.view) registerNodeView(args.view);
   if (args.structuralView) registerStructuralView(args.structuralView);
