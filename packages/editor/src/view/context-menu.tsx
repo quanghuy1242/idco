@@ -21,34 +21,14 @@ import {
   orderedTextLeaves,
   pointAtOffset,
   type EditorStore,
-  type TextLeafType,
-  type TextMarkKind,
 } from "../core";
+import { listMarks } from "./mark-registry";
+import { listBlockTypes } from "./block-type-registry";
+import { listToggleCommand } from "./chrome-commands";
 
-const FORMAT_ITEMS: readonly {
-  readonly mark: TextMarkKind;
-  readonly icon: string;
-  readonly label: string;
-}[] = [
-  { icon: "Bold", label: "Bold", mark: "bold" },
-  { icon: "Italic", label: "Italic", mark: "italic" },
-  { icon: "Underline", label: "Underline", mark: "underline" },
-  { icon: "Strikethrough", label: "Strikethrough", mark: "strikethrough" },
-  { icon: "Code", label: "Code", mark: "code" },
-  { icon: "Highlighter", label: "Highlight", mark: "highlight" },
-];
-
-const BLOCK_ITEMS: readonly {
-  readonly label: string;
-  readonly icon: string;
-  readonly blockType: TextLeafType;
-  readonly tag?: string;
-}[] = [
-  { blockType: "paragraph", icon: "Pilcrow", label: "Paragraph" },
-  { blockType: "heading", icon: "Heading1", label: "Heading 1", tag: "h1" },
-  { blockType: "heading", icon: "Heading2", label: "Heading 2", tag: "h2" },
-  { blockType: "quote", icon: "Quote", label: "Quote" },
-];
+// Format marks and block types are read from the W4/W5 registries (the same
+// source the toolbar uses), so this menu can no longer drift from it — it now
+// shows every chooser block type (the old hardcoded copy was missing H3/H4).
 
 type MenuPos = {
   readonly x: number;
@@ -167,6 +147,9 @@ export function EngineContextMenu(props: {
 
   const hasSelection = hasTextSelection(store);
   const listActive = store.query({ type: "current-block-type" }) === "listitem";
+  // From the W4/W5 registries — same source as the toolbar, so no drift.
+  const formatMarks = listMarks().filter((mark) => mark.toolbar);
+  const blockTypes = listBlockTypes().filter((entry) => entry.chooser);
 
   // Universal edit commands, present in every menu (cut/copy/delete disabled
   // without a selection); the contextual group follows the separator.
@@ -252,50 +235,50 @@ export function EngineContextMenu(props: {
         {editItems}
         <Separator className="my-1 h-px bg-base-300" />
         {pos?.kind === "selection"
-          ? FORMAT_ITEMS.map((item) => {
+          ? formatMarks.map((format) => {
               const active = store.query({
-                mark: item.mark,
+                mark: format.kind,
                 type: "is-mark-active",
               });
               return (
                 <MenuItem
-                  id={item.mark}
-                  key={item.mark}
+                  id={format.kind}
+                  key={format.kind}
                   onAction={() =>
                     run(() =>
-                      store.command({ mark: item.mark, type: "toggle-mark" }),
+                      store.command({ mark: format.kind, type: "toggle-mark" }),
                     )
                   }
-                  textValue={item.label}
+                  textValue={format.toolbar!.label}
                 >
                   <span
                     className={`flex items-center gap-2.5 ${active ? "text-primary" : ""}`}
                   >
-                    <NavIcon name={item.icon} />
-                    {item.label}
+                    <NavIcon name={format.toolbar!.icon} />
+                    {format.toolbar!.label}
                   </span>
                 </MenuItem>
               );
             })
           : [
-              ...BLOCK_ITEMS.map((item) => (
+              ...blockTypes.map((entry) => (
                 <MenuItem
-                  id={`block:${item.blockType}:${item.tag ?? ""}`}
-                  key={`block:${item.blockType}:${item.tag ?? ""}`}
+                  id={`block:${entry.id}`}
+                  key={`block:${entry.id}`}
                   onAction={() =>
                     run(() =>
                       store.command({
-                        blockType: item.blockType,
-                        ...(item.tag ? { tag: item.tag } : {}),
+                        blockType: entry.blockType,
+                        ...(entry.tag ? { tag: entry.tag } : {}),
                         type: "set-block-type",
                       }),
                     )
                   }
-                  textValue={item.label}
+                  textValue={entry.label}
                 >
                   <span className="flex items-center gap-2.5">
-                    <NavIcon name={item.icon} />
-                    {item.label}
+                    <NavIcon name={entry.icon} />
+                    {entry.label}
                   </span>
                 </MenuItem>
               )),
@@ -303,12 +286,7 @@ export function EngineContextMenu(props: {
                 id="list"
                 key="list"
                 onAction={() =>
-                  run(() =>
-                    store.command({
-                      blockType: listActive ? "paragraph" : "listitem",
-                      type: "set-block-type",
-                    }),
-                  )
+                  run(() => store.command(listToggleCommand(listActive)))
                 }
                 textValue="List"
               >

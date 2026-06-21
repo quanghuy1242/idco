@@ -29,78 +29,17 @@ import {
   NavIcon,
   PopoverTrigger,
 } from "@quanghuy1242/idco-ui";
-import type { EditorStore, TextLeafType, TextMarkKind } from "../core";
+import type { EditorStore } from "../core";
 import { listInsertableNodes } from "./node-view";
 import { listInsertableStructuralNodes } from "./structural-view";
+import { listMarks } from "./mark-registry";
+import { listBlockTypes } from "./block-type-registry";
+import { listToggleCommand } from "./chrome-commands";
 
-/** A format toggle's mark kind, lucide icon name, and accessible label. */
-const FORMAT_BUTTONS: readonly {
-  readonly mark: TextMarkKind;
-  readonly icon: string;
-  readonly label: string;
-}[] = [
-  { icon: "Bold", label: "Bold", mark: "bold" },
-  { icon: "Italic", label: "Italic", mark: "italic" },
-  { icon: "Underline", label: "Underline", mark: "underline" },
-  { icon: "Strikethrough", label: "Strikethrough", mark: "strikethrough" },
-  { icon: "Code", label: "Code", mark: "code" },
-  { icon: "Highlighter", label: "Highlight", mark: "highlight" },
-];
-
-const BLOCK_TYPES: readonly {
-  readonly label: string;
-  readonly icon: string;
-  readonly blockType: TextLeafType;
-  readonly tag?: string;
-  /** Class that previews the style in the dropdown item (legacy parity). */
-  readonly preview: string;
-}[] = [
-  {
-    blockType: "paragraph",
-    icon: "Pilcrow",
-    label: "Paragraph",
-    preview: "text-sm",
-  },
-  {
-    blockType: "heading",
-    icon: "Heading1",
-    label: "Heading 1",
-    preview: "text-2xl font-bold",
-    tag: "h1",
-  },
-  {
-    blockType: "heading",
-    icon: "Heading2",
-    label: "Heading 2",
-    preview: "text-xl font-bold",
-    tag: "h2",
-  },
-  {
-    blockType: "heading",
-    icon: "Heading3",
-    label: "Heading 3",
-    preview: "text-lg font-semibold",
-    tag: "h3",
-  },
-  {
-    blockType: "heading",
-    icon: "Heading4",
-    label: "Heading 4",
-    preview: "text-base font-semibold",
-    tag: "h4",
-  },
-  {
-    blockType: "quote",
-    icon: "Quote",
-    label: "Quote",
-    preview: "text-sm italic text-base-content/70",
-  },
-];
-
-/** A stable id for a block-type menu item (independent of array order). */
-function blockTypeKey(choice: { blockType: string; tag?: string }): string {
-  return `${choice.blockType}:${choice.tag ?? ""}`;
-}
+// The format marks and block types are read from the W4/W5 registries
+// (`listMarks().filter((m) => m.toolbar)` and `listBlockTypes().filter((b) =>
+// b.chooser)`), so the toolbar and the context menu can no longer drift — both
+// read the one source, and adding a mark/block type is one registration.
 
 /**
  * Subscribe a component to selection + commit so toolbar query state stays live.
@@ -142,6 +81,10 @@ export function EditorToolbar(props: {
   const { store, focusEditor, onFind } = props;
   // Re-read query state whenever selection or content changes.
   useToolbarVersion(store);
+  // Format buttons + block-type chooser come from the registries (W6), so they
+  // cannot drift from the context menu, which reads the same source.
+  const formatMarks = listMarks().filter((mark) => mark.toolbar);
+  const blockTypes = listBlockTypes().filter((entry) => entry.chooser);
   const [linkValue, setLinkValue] = useState("");
 
   const run = useCallback(
@@ -228,7 +171,7 @@ export function EditorToolbar(props: {
       ? focusNode.attrs.tag
       : undefined;
   const currentBlock =
-    BLOCK_TYPES.find(
+    blockTypes.find(
       (choice) =>
         choice.blockType === blockType &&
         (choice.tag ?? undefined) === currentTag,
@@ -289,9 +232,9 @@ export function EditorToolbar(props: {
           <Menu
             className="w-56"
             onAction={(key) => {
-              // Keyed by a stable `blockType:tag` id, not array index, so
-              // reordering BLOCK_TYPES never changes what an item does.
-              const choice = BLOCK_TYPES.find((c) => blockTypeKey(c) === key);
+              // Keyed by the registry's stable `blockType:tag` id, so order in
+              // the registry never changes what an item does.
+              const choice = blockTypes.find((c) => c.id === key);
               if (choice) {
                 run(() =>
                   store.command({
@@ -303,12 +246,8 @@ export function EditorToolbar(props: {
               }
             }}
           >
-            {BLOCK_TYPES.map((choice) => (
-              <MenuItem
-                id={blockTypeKey(choice)}
-                key={blockTypeKey(choice)}
-                textValue={choice.label}
-              >
+            {blockTypes.map((choice) => (
+              <MenuItem id={choice.id} key={choice.id} textValue={choice.label}>
                 {/* Each item previews its own style (Heading 1 large + bold, …),
                     the legacy block-style menu's look. */}
                 <span className="flex items-center gap-3">
@@ -325,28 +264,28 @@ export function EditorToolbar(props: {
 
       <Sep />
 
-      {FORMAT_BUTTONS.map((button) => {
+      {formatMarks.map((format) => {
         const active = store.query({
-          mark: button.mark,
+          mark: format.kind,
           type: "is-mark-active",
         });
         return (
           <span
-            data-engine-format={button.mark}
+            data-engine-format={format.kind}
             data-engine-format-active={active ? "true" : "false"}
-            key={button.mark}
+            key={format.kind}
           >
             <Button
-              ariaLabel={button.label}
-              iconName={button.icon}
+              ariaLabel={format.toolbar!.label}
+              iconName={format.toolbar!.icon}
               onClick={() =>
                 run(() =>
-                  store.command({ mark: button.mark, type: "toggle-mark" }),
+                  store.command({ mark: format.kind, type: "toggle-mark" }),
                 )
               }
               size="sm"
               square
-              tooltip={button.label}
+              tooltip={format.toolbar!.label}
               variant={active ? "primary" : "ghost"}
             />
           </span>
@@ -359,13 +298,7 @@ export function EditorToolbar(props: {
         ariaLabel="Bulleted list"
         iconName="List"
         onClick={() =>
-          run(() =>
-            store.command({
-              blockType: bulletActive ? "paragraph" : "listitem",
-              listType: "bullet",
-              type: "set-block-type",
-            }),
-          )
+          run(() => store.command(listToggleCommand(bulletActive, "bullet")))
         }
         size="sm"
         square
@@ -376,13 +309,7 @@ export function EditorToolbar(props: {
         ariaLabel="Numbered list"
         iconName="ListOrdered"
         onClick={() =>
-          run(() =>
-            store.command({
-              blockType: numberActive ? "paragraph" : "listitem",
-              listType: "number",
-              type: "set-block-type",
-            }),
-          )
+          run(() => store.command(listToggleCommand(numberActive, "number")))
         }
         size="sm"
         square

@@ -284,7 +284,7 @@ function importCompatNode(
     return [id];
   }
   if (node.type === "quote" || node.type === "editor-quote") {
-    if (hasBlockChildren(node.children)) {
+    if (hasBlockChildren(node.children, state.registry)) {
       const children = (node.children ?? []).flatMap((child) =>
         importCompatNode(child, state),
       );
@@ -326,7 +326,8 @@ function importCompatNode(
   if (structuralDefinition) {
     const result = structuralDefinition.fromCompatNode(node, {
       allocator: state.allocator,
-      hasBlockChildren,
+      hasBlockChildren: (children) =>
+        hasBlockChildren(children, state.registry),
       importChildren: (children) =>
         (children ?? []).flatMap((child) => importCompatNode(child, state)),
       importInlineAsParagraph: (inlineNode) =>
@@ -363,7 +364,7 @@ function importCompatNode(
     // top-level item; carry its own `listType` if one is set, else it defaults to
     // bullet at render. A block-bearing bare item keeps the structural shape (a
     // defensive edge — lists themselves never reach here, they flatten above).
-    if (hasBlockChildren(node.children)) {
+    if (hasBlockChildren(node.children, state.registry)) {
       const children = importListItemChildren(node.children, state);
       state.blocks.set(
         id,
@@ -750,7 +751,7 @@ function importListItemChildren(
   const inlineChildren: RichTextCompatNode[] = [];
   const ids: NodeId[] = [];
   for (const child of children ?? []) {
-    if (isBlockChild(child)) {
+    if (isBlockChild(child, state.registry)) {
       ids.push(...importCompatNode(child, state));
     } else {
       inlineChildren.push(child);
@@ -851,11 +852,15 @@ function flattenCompatListItem(
 
 function hasBlockChildren(
   children: readonly RichTextCompatNode[] | undefined,
+  registry: BlockRegistry,
 ): boolean {
-  return (children ?? []).some(isBlockChild);
+  return (children ?? []).some((child) => isBlockChild(child, registry));
 }
 
-function isBlockChild(node: RichTextCompatNode): boolean {
+function isBlockChild(
+  node: RichTextCompatNode,
+  registry: BlockRegistry,
+): boolean {
   return (
     node.type === "paragraph" ||
     node.type === "editor-paragraph" ||
@@ -866,7 +871,10 @@ function isBlockChild(node: RichTextCompatNode): boolean {
     node.type === "list" ||
     node.type === "editor-list" ||
     isStructuralDefinitionType(node.type) ||
-    isBuiltInObjectCompatType(node.type)
+    // A registered object node — built-in OR a host's custom node — is a block
+    // child; the single registry check (W7) replaces the old hardcoded built-in
+    // object-type list, so a custom object now round-trips like a built-in.
+    isObjectNodeType(node.type, registry)
   );
 }
 
@@ -900,18 +908,6 @@ function nodeId(node: RichTextCompatNode, allocator: IdAllocator): NodeId {
 
 function isObjectNodeType(type: string, registry: BlockRegistry): boolean {
   return registry.get(type) !== undefined;
-}
-
-function isBuiltInObjectCompatType(type: string): boolean {
-  // `table`/`editor-table` are structural now (docs/022); they count as block
-  // children through `isStructuralDefinitionType` in `isBlockChild`, not here.
-  return (
-    type === "code-block" ||
-    type === "media" ||
-    type === "post-ref" ||
-    type === "embed" ||
-    type === "table-of-contents"
-  );
 }
 
 function pickAttrs(

@@ -112,4 +112,38 @@ describe("node SPI — a brand-new node via registerNode (docs/016 §7)", () => 
     // View side: the same registerNode call wired the React half.
     expect(getNodeView("spi-callout")).toBeDefined();
   });
+
+  it("treats a registered object nested in a quote as a block child (W7)", () => {
+    registerNode({
+      definition: calloutDefinition,
+      view: {
+        renderResting: ({ baked }) =>
+          createElement("aside", null, String(baked.kind)),
+        type: "spi-callout",
+      },
+    });
+    // Before W7 the compat `isBlockChild` used a hardcoded built-in object list
+    // that excluded custom (and even some built-in) objects, so an object nested
+    // in a quote was misread as inline and flattened away. Now it is registry-
+    // driven, so the quote imports as a structural container holding the object.
+    const store = createEditorStoreFromCompat({
+      root: {
+        children: [
+          {
+            children: [{ tone: "warning", type: "spi-callout" }],
+            type: "quote",
+          },
+        ],
+      },
+    });
+    const quote = store
+      .order!.map((id) => store.getNode(id))
+      .find((node) => node?.kind === "structural" && node.type === "quote");
+    expect(quote?.kind).toBe("structural");
+    const childIds = quote && quote.kind === "structural" ? quote.children : [];
+    const child = childIds
+      .map((id) => store.getNode(id))
+      .find((node) => node?.kind === "object");
+    expect(child?.type).toBe("spi-callout");
+  });
 });
