@@ -270,7 +270,11 @@ describe("§2.8 callout is inserted as a structural container", () => {
       origin: "local",
       selectionAfter: {
         anchor: pointAtOffset(lineA.id, lineA.content, 0),
-        focus: pointAtOffset(lineB.id, lineB.content, lineB.content.text.length),
+        focus: pointAtOffset(
+          lineB.id,
+          lineB.content,
+          lineB.content.text.length,
+        ),
         type: "text",
       },
       steps: [],

@@ -273,7 +273,9 @@ export const Phase019CalloutTail: Story = () => {
     });
     const calloutItem2 = makeTextNode({
       attrs: { listType: "bullet" },
-      content: allocator.createTextSlice("which the old callout could not hold"),
+      content: allocator.createTextSlice(
+        "which the old callout could not hold",
+      ),
       id: allocator.createNodeId(),
       type: "listitem",
     });

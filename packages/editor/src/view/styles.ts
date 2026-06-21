@@ -116,8 +116,8 @@ export const ENGINE_TYPOGRAPHY_CSS =
   // `top` aligns the glyph centre with the first text line: box pad-top (8px) +
   // the lead block's pad-top (5px) + half the line-leading, so it reads level
   // with the first line rather than floating at the box top.
-  '[data-engine-view-root] [data-engine-callout-glyph]{position:absolute;left:0.7rem;top:14px;pointer-events:none;color:var(--color-info, #0ea5e9);}' +
-  '[data-engine-view-root] [data-engine-callout-glyph] svg{height:1.4rem;width:1.4rem;}' +
+  "[data-engine-view-root] [data-engine-callout-glyph]{position:absolute;left:0.7rem;top:14px;pointer-events:none;color:var(--color-info, #0ea5e9);}" +
+  "[data-engine-view-root] [data-engine-callout-glyph] svg{height:1.4rem;width:1.4rem;}" +
   '[data-engine-view-root] [data-engine-callout-tone="success"] [data-engine-callout-glyph]{color:var(--color-success, #16a34a);}' +
   '[data-engine-view-root] [data-engine-callout-tone="warning"] [data-engine-callout-glyph]{color:var(--color-warning, #d97706);}' +
   '[data-engine-view-root] [data-engine-callout-tone="error"] [data-engine-callout-glyph]{color:var(--color-error, #dc2626);}' +
