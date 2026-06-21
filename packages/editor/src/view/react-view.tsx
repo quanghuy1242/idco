@@ -51,6 +51,7 @@ import { cancelFrame } from "./raf";
 import { EngineBlock } from "./block-dispatch";
 import { listOverlayStructuralViews } from "./structural-view";
 import { listOverlayNodeViews } from "./node-view";
+import { registerBuiltInMarks } from "./mark-render";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_VIEWPORT_HEIGHT,
@@ -73,6 +74,10 @@ import {
 // Register the built-in node views once when the editor module loads (docs/020
 // §4.4); the call is idempotent so repeated module loads are safe.
 registerBuiltInNodeViews();
+// Register the built-in marks too (note.md W4). Explicit here so the toolbar +
+// context menu (which read `listMarks()`) see a populated registry regardless of
+// import order; the call is idempotent with mark-render's own module-load call.
+registerBuiltInMarks();
 
 // The diagnostics + imperative-handle types live in the diagnostics controller;
 // re-export them here so the public view surface keeps the same names.

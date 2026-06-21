@@ -20,131 +20,140 @@
  * segment renders its raw substring (including `\n`, which `pre-wrap` lays out),
  * so a model offset stays a plain index into the visible text.
  */
-import type { ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import type { ResolvedMark, TextLeafNode, TextMarkKind } from "../core";
 import { resolveLeafMarks, safeHref, segmentText } from "../core";
-
-/** Stable nesting order so overlapping marks render to a deterministic tree. */
-const MARK_NESTING_ORDER: readonly TextMarkKind[] = [
-  "link",
-  "comment",
-  "glossary",
-  "highlight",
-  "bold",
-  "italic",
-  "underline",
-  "strikethrough",
-  "subscript",
-  "superscript",
-  "code",
-];
-
-function markRank(kind: TextMarkKind): number {
-  const index = MARK_NESTING_ORDER.indexOf(kind);
-  return index === -1 ? MARK_NESTING_ORDER.length : index;
-}
+import {
+  getMark,
+  markNestingRank,
+  registerMark,
+  type LinkMode,
+  type MarkDefinition,
+  type MarkRenderArgs,
+} from "./mark-registry";
 
 function markHref(mark: ResolvedMark): string {
   const href = mark.attrs?.href;
   return typeof href === "string" ? href : "";
 }
 
-/**
- * Wrap `child` in the semantic element for one mark kind. Links carry their href
- * and are inert inside the editor (the engine owns clicks; navigation is the
- * reader's job), so the anchor cannot steal focus or follow on mousedown.
- */
-/** Whether links navigate (reader) or are inert (the editor owns clicks). */
-export type LinkMode = "inert" | "navigable";
+/** A simple format mark that wraps its child in one semantic element. */
+function elementMark(
+  kind: TextMarkKind,
+  tag: string,
+  nestingRank: number,
+  toolbar?: MarkDefinition["toolbar"],
+): MarkDefinition {
+  return {
+    kind,
+    nestingRank,
+    render: ({ child, key }) =>
+      createElement(tag, { "data-engine-mark": kind, key }, child),
+    ...(toolbar ? { toolbar } : {}),
+  };
+}
 
+/**
+ * The link mark: carries its href but is inert inside the editor (the engine owns
+ * clicks; navigation is the reader's job), so the anchor cannot steal focus or
+ * follow on mousedown. The reader passes `linkMode: "navigable"` for a real link.
+ */
+function renderLinkMark({
+  mark,
+  child,
+  key,
+  linkMode,
+}: MarkRenderArgs): ReactNode {
+  return (
+    <a
+      key={key}
+      data-engine-mark="link"
+      data-engine-mark-href={markHref(mark)}
+      data-engine-mark-id={mark.id}
+      href={
+        linkMode === "navigable"
+          ? safeHref(markHref(mark)) || undefined
+          : undefined
+      }
+      onMouseDown={
+        linkMode === "inert" ? (event) => event.preventDefault() : undefined
+      }
+    >
+      {child}
+    </a>
+  );
+}
+
+/** Annotation marks (comment/glossary) render as an id-carrying span. */
+function renderAnnotationMark({ mark, child, key }: MarkRenderArgs): ReactNode {
+  return (
+    <span key={key} data-engine-mark={mark.kind} data-engine-mark-id={mark.id}>
+      {child}
+    </span>
+  );
+}
+
+// Built-in marks (note.md W4). Registration order is the toolbar's display order
+// for the togglable formats; `nestingRank` (lower = outermost) is independent and
+// preserves the previous `MARK_NESTING_ORDER`. Adding a mark is now one
+// registration here (or a host's `registerMark`), not edits across the render
+// switch, the toolbar, and the context menu.
+const BUILT_IN_MARKS: readonly MarkDefinition[] = [
+  elementMark("bold", "strong", 4, { icon: "Bold", label: "Bold" }),
+  elementMark("italic", "em", 5, { icon: "Italic", label: "Italic" }),
+  elementMark("underline", "u", 6, { icon: "Underline", label: "Underline" }),
+  elementMark("strikethrough", "s", 7, {
+    icon: "Strikethrough",
+    label: "Strikethrough",
+  }),
+  elementMark("code", "code", 10, { icon: "Code", label: "Code" }),
+  elementMark("highlight", "mark", 3, {
+    icon: "Highlighter",
+    label: "Highlight",
+  }),
+  elementMark("subscript", "sub", 8),
+  elementMark("superscript", "sup", 9),
+  { kind: "link", nestingRank: 0, render: renderLinkMark },
+  { kind: "comment", nestingRank: 1, render: renderAnnotationMark },
+  { kind: "glossary", nestingRank: 2, render: renderAnnotationMark },
+];
+
+let builtInMarksRegistered = false;
+
+/**
+ * Register the built-in marks once (idempotent). Called at module load below, and
+ * exported so the view orchestrator can call it explicitly (next to
+ * `registerBuiltInNodeViews`). Unlike node views — which register only through the
+ * orchestrator — marks self-register here too, because the standalone resting
+ * reader (`resting-document`, which imports this module directly without the editor
+ * orchestrator) must render marks. The guard means a second call cannot clobber a
+ * host's `registerMark` override of a built-in.
+ */
+export function registerBuiltInMarks(): void {
+  if (builtInMarksRegistered) return;
+  builtInMarksRegistered = true;
+  for (const definition of BUILT_IN_MARKS) registerMark(definition);
+}
+
+registerBuiltInMarks();
+
+/**
+ * Wrap one segment's child in a mark's element via the registry, with a neutral
+ * span fallback for an unregistered kind (so the segment text is never dropped).
+ */
 function wrapMark(
   mark: ResolvedMark,
   child: ReactNode,
   key: string,
   linkMode: LinkMode,
 ): ReactNode {
-  // `key` is passed directly to each element (never spread): React 19 warns when a
-  // spread object carries a `key`, and these nested mark wrappers each take one.
-  const common = { "data-engine-mark": mark.kind };
-  switch (mark.kind) {
-    case "bold":
-      return (
-        <strong key={key} {...common}>
-          {child}
-        </strong>
-      );
-    case "italic":
-      return (
-        <em key={key} {...common}>
-          {child}
-        </em>
-      );
-    case "underline":
-      return (
-        <u key={key} {...common}>
-          {child}
-        </u>
-      );
-    case "strikethrough":
-      return (
-        <s key={key} {...common}>
-          {child}
-        </s>
-      );
-    case "code":
-      return (
-        <code key={key} {...common}>
-          {child}
-        </code>
-      );
-    case "highlight":
-      return (
-        <mark key={key} {...common}>
-          {child}
-        </mark>
-      );
-    case "subscript":
-      return (
-        <sub key={key} {...common}>
-          {child}
-        </sub>
-      );
-    case "superscript":
-      return (
-        <sup key={key} {...common}>
-          {child}
-        </sup>
-      );
-    case "link":
-      // In the editor the link is inert: no `href` (so a click never navigates
-      // away from the editing surface) and mousedown is suppressed so it cannot
-      // steal focus from the EditContext host. The reader renders a real link.
-      return (
-        <a
-          key={key}
-          {...common}
-          data-engine-mark-href={markHref(mark)}
-          data-engine-mark-id={mark.id}
-          href={
-            linkMode === "navigable"
-              ? safeHref(markHref(mark)) || undefined
-              : undefined
-          }
-          onMouseDown={
-            linkMode === "inert" ? (event) => event.preventDefault() : undefined
-          }
-        >
-          {child}
-        </a>
-      );
-    case "comment":
-    case "glossary":
-      return (
-        <span key={key} {...common} data-engine-mark-id={mark.id}>
-          {child}
-        </span>
-      );
-  }
+  const definition = getMark(mark.kind);
+  if (definition) return definition.render({ child, key, linkMode, mark });
+  return (
+    <span key={key} data-engine-mark={mark.kind}>
+      {child}
+    </span>
+  );
 }
 
 /**
@@ -170,7 +179,7 @@ export function renderLeafMarks(
     let child: ReactNode = segment.text;
     // Innermost first: sort so the outermost (lowest-rank) mark wraps last.
     const ordered = [...segment.marks].sort(
-      (a, b) => markRank(b.kind) - markRank(a.kind),
+      (a, b) => markNestingRank(b.kind) - markNestingRank(a.kind),
     );
     for (const mark of ordered) {
       child = wrapMark(mark, child, `${segment.from}:${mark.id}`, linkMode);

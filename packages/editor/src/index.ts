@@ -36,6 +36,13 @@ export {
   type StructuralContainerArgs,
   type StructuralRestingArgs,
   type StructuralOverlayArgs,
+  registerMark,
+  listMarks,
+  getMark,
+  type MarkDefinition,
+  type MarkRenderArgs,
+  type MarkToolbarMeta,
+  type LinkMode,
 } from "./view";
 export {
   BlockRegistry,

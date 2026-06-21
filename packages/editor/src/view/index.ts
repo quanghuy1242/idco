@@ -58,6 +58,15 @@ export {
   type FindMatch,
 } from "./find-bar";
 export { renderLeafMarks } from "./mark-render";
+export {
+  getMark,
+  listMarks,
+  registerMark,
+  type LinkMode,
+  type MarkDefinition,
+  type MarkRenderArgs,
+  type MarkToolbarMeta,
+} from "./mark-registry";
 export { sanitizeHtmlToCompat } from "./paste-html";
 export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
 export {

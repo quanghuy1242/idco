@@ -28,6 +28,11 @@ import {
   resolveOffsetToDom,
   textNodesOf,
 } from "../../packages/editor/src/view/geometry";
+import {
+  getMark,
+  listMarks,
+  registerMark,
+} from "../../packages/editor/src/view/mark-registry";
 
 let markSeq = 0;
 function mark(
@@ -150,5 +155,85 @@ describe("multi-text-node geometry (view)", () => {
       const back = modelOffsetFromDom(host, dom!.node, dom!.offset);
       expect(back).toBe(offset);
     }
+  });
+});
+
+describe("mark registry (view SPI, note.md W4)", () => {
+  it("exposes the six togglable formats with toolbar meta in toolbar order", () => {
+    const toolbar = listMarks().filter((def) => def.toolbar);
+    expect(toolbar.map((def) => def.kind)).toEqual([
+      "bold",
+      "italic",
+      "underline",
+      "strikethrough",
+      "code",
+      "highlight",
+    ]);
+    expect(toolbar.map((def) => def.toolbar!.label)).toEqual([
+      "Bold",
+      "Italic",
+      "Underline",
+      "Strikethrough",
+      "Code",
+      "Highlight",
+    ]);
+  });
+
+  it("registers attr/annotation marks as render-only (no toolbar)", () => {
+    for (const kind of [
+      "link",
+      "comment",
+      "glossary",
+      "subscript",
+      "superscript",
+    ] as const) {
+      expect(getMark(kind)?.toolbar).toBeUndefined();
+      expect(typeof getMark(kind)?.render).toBe("function");
+    }
+  });
+
+  it("ranks nesting deterministically (link outermost, code innermost)", () => {
+    expect(getMark("link")!.nestingRank).toBeLessThan(
+      getMark("bold")!.nestingRank,
+    );
+    expect(getMark("bold")!.nestingRank).toBeLessThan(
+      getMark("code")!.nestingRank,
+    );
+  });
+
+  it("renders a host-registered mark and falls back to a neutral span otherwise", () => {
+    // A host can register a brand-new mark kind. `TextMarkKind` is the persisted
+    // union (compat needs the literals), so a synthetic view-only kind is cast.
+    registerMark({
+      kind: "test-custom" as TextMarkKind,
+      nestingRank: 50,
+      render: ({ child, key }) => (
+        <ins key={key} data-engine-mark="test-custom">
+          {child}
+        </ins>
+      ),
+    });
+    const custom = leaf("hi", (c) => [
+      mark(c, "test-custom" as TextMarkKind, 0, 2),
+    ]);
+    const { container: registered } = render(
+      <div>{renderLeafMarks(custom)}</div>,
+    );
+    expect(
+      registered.querySelector("ins[data-engine-mark='test-custom']"),
+    ).not.toBeNull();
+    expect(registered.textContent).toBe("hi");
+
+    // An unregistered kind renders the neutral fallback span (text never dropped).
+    const unknown = leaf("yo", (c) => [
+      mark(c, "totally-unknown" as TextMarkKind, 0, 2),
+    ]);
+    const { container: fallback } = render(
+      <div>{renderLeafMarks(unknown)}</div>,
+    );
+    expect(
+      fallback.querySelector("span[data-engine-mark='totally-unknown']"),
+    ).not.toBeNull();
+    expect(fallback.textContent).toBe("yo");
   });
 });
