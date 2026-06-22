@@ -1,6 +1,9 @@
 import { useState } from "react";
 import type { Story, StoryDefault } from "@ladle/react";
-import { RichTextEditor, type RichTextEditorDocument } from "@idco/editor";
+import {
+  RichTextEditor,
+  type RichTextEditorDocument,
+} from "@quanghuy1242/idco-editor-legacy";
 import {
   CodeEditor,
   FileDropzone,

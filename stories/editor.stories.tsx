@@ -1,4 +1,7 @@
-import { RichTextEditor, type RichTextEditorDocument } from "@idco/editor";
+import {
+  RichTextEditor,
+  type RichTextEditorDocument,
+} from "@quanghuy1242/idco-editor-legacy";
 import { Stack, Text } from "@idco/ui";
 import type { Story, StoryDefault } from "@ladle/react";
 import { useEffect, useState } from "react";

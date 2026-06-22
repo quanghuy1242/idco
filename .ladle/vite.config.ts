@@ -14,6 +14,9 @@ const contentRendererSrc = fileURLToPath(
 const editorSrc = fileURLToPath(
   new URL("../packages/editor/src/index.ts", import.meta.url),
 );
+const editorLegacySrc = fileURLToPath(
+  new URL("../packages/editor-legacy/src/index.ts", import.meta.url),
+);
 const nextLinkMock = fileURLToPath(
   new URL("./mocks/next-link.tsx", import.meta.url),
 );
@@ -51,6 +54,11 @@ export default defineConfig({
       { find: "@idco/lib", replacement: libSrc },
       { find: "@quanghuy1242/idco-lib", replacement: libSrc },
       { find: "@idco/content-renderer", replacement: contentRendererSrc },
+      { find: "@idco/editor-legacy", replacement: editorLegacySrc },
+      {
+        find: "@quanghuy1242/idco-editor-legacy",
+        replacement: editorLegacySrc,
+      },
       { find: "@idco/editor", replacement: editorSrc },
       { find: "@quanghuy1242/idco-editor", replacement: editorSrc },
       {
