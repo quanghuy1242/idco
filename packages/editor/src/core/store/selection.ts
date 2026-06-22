@@ -14,9 +14,9 @@
  * It is framework-free on purpose (no React, no DOM): the view layer calls it
  * from a `copy`/`cut` handler, but the function itself only reads the store.
  */
-import type { EditorSelection, NodeId, TextLeafNode } from "./model";
-import { resolvePointOffset } from "./model";
-import { ROOT_NODE_ID, type EditorStore } from "./store";
+import type { EditorSelection, NodeId, TextLeafNode } from "../model";
+import { resolvePointOffset } from "../model";
+import { ROOT_NODE_ID, type EditorStore } from "./editor-store";
 
 type LeafEntry = {
   readonly id: NodeId;

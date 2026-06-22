@@ -23,8 +23,8 @@ import {
   type TextMark,
   type TextPoint,
 } from "../model";
-import { mapTextOffset } from "../mapping";
-import type { Step } from "../steps";
+import { mapTextOffset } from "../model";
+import type { Step } from "../model";
 import type { EditorStore } from "./editor-store";
 
 export function remapMarksForReplace(

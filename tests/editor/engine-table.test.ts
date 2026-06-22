@@ -1152,7 +1152,7 @@ describe("table — the SPI guardrail (docs/021 §10, docs/022 §12)", () => {
       "commands/blocks.ts",
       "commands/text.ts",
       "commands/shared.ts",
-      "compat.ts",
+      "compat/compat.ts",
     ];
     for (const file of guardedFiles) {
       const source = readFileSync(join(coreDir, file), "utf8");

@@ -32,7 +32,7 @@ import {
   type TextContent,
   type TextLeafType,
   type TextMark,
-} from "./model";
+} from "../model";
 
 /**
  * The compat-import helpers a flat block borrows from `compat.ts`, so this module

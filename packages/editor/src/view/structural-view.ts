@@ -11,7 +11,7 @@
  * no node-type knowledge (docs/016 §10).
  *
  * Scope: this is the **view half**. Its core twin — `StructuralDefinition`
- * (`core/structural-registry.ts`) — owns a structural type's insert subtree and
+ * (`core/registry/structural-registry.ts`) — owns a structural type's insert subtree and
  * compat round-trip, so a registered type now inserts (generic `insert-structural`
  * command) and survives save/load with no per-type core branch (note §7). Both
  * halves register through the same `registerNode({ structuralView,

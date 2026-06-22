@@ -41,8 +41,8 @@ import {
   type NodeId,
   type RichTextCompatNode,
   type StructuralNode,
-} from "./model";
-import { tableStructuralDefinitions } from "./table/definitions";
+} from "../model";
+import { tableStructuralDefinitions } from "../table/definitions";
 
 /**
  * The initial subtree a structural insert builds: the container root plus its

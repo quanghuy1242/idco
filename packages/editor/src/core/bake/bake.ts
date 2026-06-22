@@ -32,8 +32,8 @@ import {
   type JsonValue,
   type NodeId,
   type ObjectNodeStatus,
-} from "./model";
-import { createDefaultBlockRegistry, type BlockRegistry } from "./registry";
+} from "../model";
+import { createDefaultBlockRegistry, type BlockRegistry } from "../registry";
 
 /** The outcome of baking one object's opaque data. */
 export type BakeObjectResult = {

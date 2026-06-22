@@ -5,7 +5,7 @@ import {
   EditContext,
   install,
   releaseForcedInstall,
-} from "../../packages/editor/src/core/vendor/editcontext-polyfill";
+} from "../../packages/editor/src/vendor/editcontext-polyfill";
 
 function nativeCtor() {}
 

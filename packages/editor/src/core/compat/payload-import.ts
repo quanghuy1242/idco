@@ -23,10 +23,10 @@
  *
  * It is framework-free core: it manipulates plain JSON only.
  */
-import type { DocumentSettings, RichTextCompatNode } from "./model";
-import type { RichTextCompatDocument } from "./model";
-import { globalNodeDefinitions } from "./registry";
-import { globalStructuralDefinitions } from "./structural-registry";
+import type { DocumentSettings, RichTextCompatNode } from "../model";
+import type { RichTextCompatDocument } from "../model";
+import { globalNodeDefinitions } from "../registry";
+import { globalStructuralDefinitions } from "../registry";
 
 /** A Payload/Lexical node is loose JSON; we read only the fields we map. */
 type PayloadNode = {

@@ -29,7 +29,7 @@ import {
   install,
   releaseForcedInstall,
   syncPolyfillSelection,
-} from "../core/vendor/editcontext-polyfill";
+} from "../vendor/editcontext-polyfill";
 import {
   caretClientRect,
   characterClientRects,

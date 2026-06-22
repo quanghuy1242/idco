@@ -74,14 +74,14 @@ export type {
   StructuralExportContext,
   StructuralExportResult,
   StructuralSubtree,
-} from "./structural-registry";
+} from "./registry";
 export {
   BUILT_IN_STRUCTURAL_DEFINITIONS,
   getStructuralDefinition,
   globalStructuralDefinitions,
   isStructuralDefinitionType,
   registerGlobalStructuralDefinition,
-} from "./structural-registry";
+} from "./registry";
 export type {
   BakeObjectResult,
   BakeWorkerJob,
@@ -97,13 +97,13 @@ export {
   segmentText,
   type ResolvedMark,
   type TextSegment,
-} from "./marks";
+} from "./model";
 export {
   importPayloadLexical,
   type PayloadImportReport,
   type PayloadImportResult,
   type PayloadLexicalInput,
-} from "./payload-import";
+} from "./compat";
 export {
   detectMarkdownShortcut,
   type BlockShortcut,
@@ -113,12 +113,12 @@ export {
   type WrapPairShortcut,
 } from "./markdown-shortcuts";
 export { safeHref } from "./url-safety";
-export type { BakeService, WorkerLike } from "./bake-service";
+export type { BakeService, WorkerLike } from "./bake";
 export {
   createLoopbackBakeService,
   createLoopbackWorker,
   createWorkerBakeService,
-} from "./bake-service";
+} from "./bake";
 export type {
   AddMarkStep,
   CommittedTransaction,
@@ -134,7 +134,7 @@ export type {
   Step,
   StoreDirty,
   TransactionDraft,
-} from "./steps";
+} from "./model";
 export type {
   EnginePerformanceDashboard,
   EnginePerformanceSnapshot,
@@ -177,8 +177,8 @@ export {
   type MapBias,
   type MapPos,
   type PointRedirect,
-} from "./mapping";
-export { collectSelectionText, orderedTextLeaves } from "./selection";
+} from "./model";
+export { collectSelectionText, orderedTextLeaves } from "./store";
 export {
   ROOT_NODE_ID,
   TransactionBuilder,

@@ -8,7 +8,7 @@ import {
   type NodeId,
 } from "../model";
 import { bakeObjectData } from "../bake";
-import { getStructuralDefinition } from "../structural-registry";
+import { getStructuralDefinition } from "../registry";
 import type { EditorStore, TransactionBuilder } from "../store";
 import {
   childrenOf,

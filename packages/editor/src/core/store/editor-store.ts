@@ -62,7 +62,7 @@ import {
   type MapBias,
   type MapPos,
   type PointRedirect,
-} from "../mapping";
+} from "../model";
 import { createDefaultBlockRegistry, type BlockRegistry } from "../registry";
 import {
   cloneAttrsWithValue,
@@ -80,7 +80,7 @@ import {
   type Step,
   type StoreDirty,
   type TransactionDraft,
-} from "../steps";
+} from "../model";
 import {
   TYPING_COALESCE_MS,
   canCoalesceTyping,

@@ -13,7 +13,7 @@ import {
   type TextLeafNode,
   type TextMarkKind,
 } from "../model";
-import type { CommittedTransaction } from "../steps";
+import type { CommittedTransaction } from "../model";
 
 // A typing run within this idle gap coalesces into one undo entry; a longer
 // pause opens a fresh group (docs/011 §7.5: "a ~500 ms idle gap").

@@ -110,7 +110,7 @@ export type OwnedModelEditorViewProps = {
   readonly overscan?: number;
   /**
    * Factory for the bake/index Web Worker (docs/010 §7.5). Defaults to a worker
-   * built over `core/bake.worker`; return null to force the in-memory loopback
+   * built over `core/bake/bake.worker`; return null to force the in-memory loopback
    * (tests/SSR, or where `Worker` is unavailable).
    */
   readonly createBakeWorker?: () => Worker | null;
@@ -458,7 +458,7 @@ function renderEngineOverlays(
 function defaultCreateBakeWorker(): Worker | null {
   if (typeof Worker === "undefined") return null;
   try {
-    return new Worker(new URL("../core/bake.worker.ts", import.meta.url), {
+    return new Worker(new URL("../core/bake/bake.worker.ts", import.meta.url), {
       type: "module",
     });
   } catch {

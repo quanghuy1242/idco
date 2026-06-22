@@ -28,7 +28,7 @@
   },
   "overrides": [
     {
-      "files": ["packages/editor/src/core/vendor/editcontext-polyfill/**/*.ts"],
+      "files": ["packages/editor/src/vendor/editcontext-polyfill/**/*.ts"],
       "rules": {
         "no-underscore-dangle": "off",
         "typescript/no-unsafe-declaration-merging": "off"

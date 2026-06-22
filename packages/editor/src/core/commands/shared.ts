@@ -19,7 +19,7 @@ import {
   type TextPoint,
   type TextSlice,
 } from "../model";
-import type { Step } from "../steps";
+import type { Step } from "../model";
 import type { EditorStore, PendingFormat, TransactionBuilder } from "../store";
 
 export const EMPTY_SLICE: TextSlice = { runs: [], text: "" };

@@ -25,8 +25,8 @@ import {
   type BakeWorkerResult,
   type DocumentIndex,
 } from "./bake";
-import type { EditorDocumentSnapshot, JsonValue } from "./model";
-import type { BlockRegistry } from "./registry";
+import type { EditorDocumentSnapshot, JsonValue } from "../model";
+import type { BlockRegistry } from "../registry";
 
 /** The minimal transport contract a `Worker` satisfies. */
 export type WorkerLike = {

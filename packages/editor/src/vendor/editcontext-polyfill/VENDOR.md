@@ -66,6 +66,6 @@ for s, c in zip(m["sources"], m["sourcesContent"]):
         open(os.path.join("src", os.path.basename(s)), "w").write(c)
 PY
 # diff a file (normalize the .js import suffix our copies use):
-VEN=<repo>/packages/editor/src/core/vendor/editcontext-polyfill
+VEN=<repo>/packages/editor/src/vendor/editcontext-polyfill
 diff <(sed 's/\.js"/"/g' src/focus-manager.ts) <(sed 's/\.js"/"/g' "$VEN/focus-manager.ts")
 ```

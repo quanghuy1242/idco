@@ -61,19 +61,22 @@ import {
   type TextLeafNode,
   type TextLeafType,
   type TextMark,
-} from "./model";
+} from "../model";
 import {
   createDefaultBlockRegistry,
   type BlockRegistry,
   type UnknownObjectPolicy,
-} from "./registry";
+} from "../registry";
 import {
   getStructuralDefinition,
   isStructuralDefinitionType,
-} from "./structural-registry";
-import { importFlatBlock, type FlatBlockImportContext } from "./flat-blocks";
-import { createEditorStore, type EditorStore } from "./store";
-import { safeHref } from "./url-safety";
+} from "../registry";
+import {
+  importFlatBlock,
+  type FlatBlockImportContext,
+} from "../registry/flat-blocks";
+import { createEditorStore, type EditorStore } from "../store";
+import { safeHref } from "../url-safety";
 
 /**
  * Lexical-compatible text-format bitmask.

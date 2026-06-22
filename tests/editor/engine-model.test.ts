@@ -604,7 +604,7 @@ describe("owned-model editor core", () => {
     const modules = await Promise.all([
       import("../../packages/editor/src/core/model"),
       import("../../packages/editor/src/core/registry"),
-      import("../../packages/editor/src/core/steps"),
+      import("../../packages/editor/src/core/model/steps"),
       import("../../packages/editor/src/core/store"),
       import("../../packages/editor/src/core/compat"),
     ]);

@@ -3,7 +3,9 @@
  * single mutable identity (docs/011 §6.8) in `editor-store.ts`; the `this`-free
  * dispatch helpers live in `history.ts` (undo coalescing) and `mapping-helpers.ts`
  * (mark/selection remap, notify-skip, value utilities). This barrel preserves the
- * original `core/store` import shape so no caller changes.
+ * original `core/store` import shape so no caller changes. `selection.ts` (read
+ * helpers over a store's current selection) moved in here under note.md CP5
+ * because it depends on the store.
  */
 export {
   ROOT_NODE_ID,
@@ -16,3 +18,4 @@ export {
   type EditorSubscriber,
   type EditorCommitSubscriber,
 } from "./editor-store";
+export { collectSelectionText, orderedTextLeaves } from "./selection";

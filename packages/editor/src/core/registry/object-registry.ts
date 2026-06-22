@@ -1,5 +1,5 @@
 /**
- * Object-block registry for the owned-model editor.
+ * Object-block SPI for the owned-model editor — the framework-free half.
  *
  * Why this file exists
  * --------------------
@@ -9,18 +9,26 @@
  * store the object, move it, select it atomically, and swap its data through an
  * invertible step, but it should not infer the meaning of arbitrary fields.
  *
- * The registry is the explicit contract for that boundary. Each object kind
- * says how to normalize incoming data, how to import/export the old rich-text
- * JSON representation, and whether its baked/export data is complete. Phase 3
- * only needs enough built-ins to preserve data and prove the boundary; real
- * object bake pipelines come later.
+ * The `NodeDefinition` contract is the explicit boundary for that: each object
+ * kind says how to normalize incoming data, how to import/export the old
+ * rich-text JSON representation, and whether its baked/export data is complete.
+ *
+ * Scope split (note.md CP1): this file owns the object SPI — the
+ * `NodeDefinition` contract, the global custom-node registration, and the
+ * `BUILT_IN_OBJECT_DEFINITIONS`. The generic runtime registry that holds and
+ * resolves definitions (`BlockRegistry` + `createDefaultBlockRegistry`) lives in
+ * its sibling `block-registry.ts`; it consumes this file's definitions. The SPI
+ * and the runtime were one file (`core/registry.ts`) under a generic name, which
+ * buried the SPI; splitting them makes `object-registry.ts` the mirror of
+ * `structural-registry.ts`. `compatObjectFromValue` is exported only so the
+ * runtime registry's `toCompatObject` fallback can share the one default shape.
  */
 import type {
   BakedSnapshot,
   JsonValue,
   ObjectNodeStatus,
   RichTextCompatNode,
-} from "./model";
+} from "../model";
 
 /** Explicit policy for object kinds the registry does not understand. */
 export type UnknownObjectPolicy = "reject" | "drop";
@@ -101,57 +109,6 @@ export type NodeDefinition = {
  */
 export type BlockDefinition = NodeDefinition;
 
-/** Registry of object-block definitions used by compat import/export. */
-export class BlockRegistry {
-  readonly #definitions = new Map<string, NodeDefinition>();
-
-  constructor(definitions: readonly NodeDefinition[] = []) {
-    definitions.forEach((definition) => this.register(definition));
-  }
-
-  register(definition: NodeDefinition): void {
-    /*
-     * Duplicate registrations are rejected instead of "last write wins" because
-     * object parsing is part of the persistence contract. Two definitions for
-     * the same type would make import/export nondeterministic.
-     */
-    if (this.#definitions.has(definition.type)) {
-      throw new Error(`Duplicate block definition: ${definition.type}`);
-    }
-    this.#definitions.set(definition.type, definition);
-  }
-
-  get(type: string): NodeDefinition | undefined {
-    return this.#definitions.get(type);
-  }
-
-  require(type: string): NodeDefinition {
-    const definition = this.get(type);
-    if (!definition) throw new Error(`Unknown object block: ${type}`);
-    return definition;
-  }
-
-  normalizeSnapshotObject(
-    type: string,
-    value: unknown,
-  ): ObjectNormalizationResult {
-    return this.require(type).normalizeData(value);
-  }
-
-  normalizeCompatObject(node: RichTextCompatNode): ObjectNormalizationResult {
-    const definition = this.require(node.type);
-    return definition.fromCompatNode?.(node) ?? definition.normalizeData(node);
-  }
-
-  toCompatObject(
-    type: string,
-    value: ObjectNormalizationResult,
-  ): Omit<RichTextCompatNode, "id" | "type"> {
-    const definition = this.require(type);
-    return definition.toCompatNode?.(value) ?? compatObjectFromValue(value);
-  }
-}
-
 /**
  * Globally registered custom node definitions (docs/016 §7). The view's
  * `registerNode` records a custom object's framework-free half here so that every
@@ -174,17 +131,6 @@ export function unregisterGlobalNodeDefinition(type: string): void {
 /** The custom node definitions registered so far (docs/016 §7). */
 export function globalNodeDefinitions(): readonly NodeDefinition[] {
   return [...GLOBAL_NODE_DEFINITIONS.values()];
-}
-
-/** Built-ins, globally-registered custom nodes, plus caller-provided definitions. */
-export function createDefaultBlockRegistry(
-  definitions: readonly NodeDefinition[] = [],
-): BlockRegistry {
-  return new BlockRegistry([
-    ...BUILT_IN_OBJECT_DEFINITIONS,
-    ...globalNodeDefinitions(),
-    ...definitions,
-  ]);
 }
 
 /**
@@ -435,7 +381,12 @@ function simpleObjectDefinition(
   };
 }
 
-function compatObjectFromValue(
+/**
+ * The default compat shape for an object whose definition has no `toCompatNode`.
+ * Exported for the runtime registry's `toCompatObject` fallback (block-registry)
+ * so both paths emit one shape; otherwise file-private to the object SPI.
+ */
+export function compatObjectFromValue(
   value: ObjectNormalizationResult,
 ): Omit<RichTextCompatNode, "id" | "type"> {
   const data = isJsonObject(value.data) ? value.data : { data: value.data };
