@@ -27,7 +27,7 @@ import {
   safeHref,
   type EditorStore,
   type NodeId,
-} from "../core";
+} from "../../core";
 
 type LinkTarget = {
   readonly node: NodeId;

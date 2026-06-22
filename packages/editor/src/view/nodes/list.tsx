@@ -7,7 +7,7 @@
  * resting render emits a real `<ul>`/`<ol>` whose `<li>` children the resting
  * engine builds via `renderListItems`. Co-located so the two cannot drift.
  */
-import { type StructuralNodeView } from "../structural-view";
+import { type StructuralNodeView } from "../spi";
 import { structuralListStyle } from "../styles";
 
 export const listStructuralView: StructuralNodeView = {

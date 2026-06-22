@@ -5,7 +5,7 @@
  * resting render is the shared `RichTextPostReference` card the reader uses.
  */
 import { RichTextPostReference } from "@quanghuy1242/idco-ui";
-import { type NodeView } from "../node-view";
+import { type NodeView } from "../spi";
 import { asRecord, stringField } from "../object-data";
 
 export const postRefView: NodeView = {

@@ -17,7 +17,7 @@ import {
   type NodeId,
   type OwnedEditorHandle,
 } from "../../core";
-import { activeSelectionNode } from "../navigation";
+import { activeSelectionNode } from "../overlays";
 import type { ImeBoundsSnapshot } from "../types";
 import type { ViewRefs } from "./refs";
 import type { VirtualWindow } from "./use-virtual-window";

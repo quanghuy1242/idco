@@ -29,10 +29,10 @@ import {
   EngineContextMenu,
   useContextMenu,
   type ContextMenuController,
-} from "./context-menu";
-import { EditorToolbar } from "./editor-chrome";
-import { FindBar, useFindController, type FindController } from "./find-bar";
-import { LinkPopover, useLinkInteraction } from "./link-popover";
+} from "./chrome";
+import { EditorToolbar } from "./chrome";
+import { FindBar, useFindController, type FindController } from "./chrome";
+import { LinkPopover, useLinkInteraction } from "./chrome";
 import {
   OwnedModelEditorView,
   type OwnedModelEditorViewHandle,

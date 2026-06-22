@@ -3,7 +3,7 @@
  * node rendered through the SPI with no edit to the dispatcher. Its framework-free
  * definition is the built-in in `core/registry.ts`; this is its React half.
  */
-import { type NodeView } from "../node-view";
+import { type NodeView } from "../spi";
 
 export const dividerView: NodeView = {
   ariaLabel: "Divider",

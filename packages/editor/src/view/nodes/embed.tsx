@@ -6,7 +6,7 @@
  * editor's at-rest embed matches the published page.
  */
 import { RichTextEmbed } from "@quanghuy1242/idco-ui";
-import { type NodeView } from "../node-view";
+import { type NodeView } from "../spi";
 import { asRecord, stringField } from "../object-data";
 import { objectStatusStyle } from "../styles";
 

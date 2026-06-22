@@ -28,7 +28,7 @@ import type {
   EditorStore,
   NodeId,
   StructuralNode,
-} from "../core";
+} from "../../core";
 
 /** Arguments to a structural node's live (editing) container render. */
 export type StructuralContainerArgs = {
@@ -116,6 +116,24 @@ export type StructuralNodeView = {
    * hardcoded into `react-view`. Omit it for a node with no overlay.
    */
   renderOverlay?(args: StructuralOverlayArgs): ReactNode;
+  /**
+   * Claim the Tab / Shift-Tab key when the caret sits inside this container
+   * (note.md VP6/VF3). Return `true` if this container handled the key, `false`
+   * to let the editor fall back to the default indent/outdent. The generic text
+   * surface enumerates every registered handler (`listTabHandlers`) and lets each
+   * self-check whether the caret is in its own container — so the surface keeps no
+   * per-type knowledge, the same way `caretInk`/`renderOverlay` do. The table is
+   * the first consumer (Tab walks cells, docs/022 §5); before this slot the table
+   * check was hardcoded into `text-block`. `forward` is true for Tab, false for
+   * Shift-Tab. Omit it for a container with no Tab behavior.
+   */
+  handleTab?(args: StructuralTabArgs): boolean;
+};
+
+/** Arguments to a structural node's Tab-key handler (note.md VP6). */
+export type StructuralTabArgs = {
+  readonly store: EditorStore;
+  readonly forward: boolean;
 };
 
 const STRUCTURAL_VIEWS = new Map<string, StructuralNodeView>();
@@ -162,6 +180,25 @@ export function listOverlayStructuralViews(): readonly (StructuralNodeView & {
   })[] = [];
   for (const view of STRUCTURAL_VIEWS.values()) {
     if (view.renderOverlay) out.push(view as never);
+  }
+  return out;
+}
+
+/**
+ * Every registered structural node that claims the Tab key (note.md VP6). The
+ * text surface tries each in registration order, first `true` wins; if none
+ * claims it, the editor indents/outdents. Each handler self-checks whether the
+ * caret is in its container, so this stays orchestrator-internal and per-type
+ * knowledge never leaks into the generic surface.
+ */
+export function listTabHandlers(): readonly (StructuralNodeView & {
+  handleTab: NonNullable<StructuralNodeView["handleTab"]>;
+})[] {
+  const out: (StructuralNodeView & {
+    handleTab: NonNullable<StructuralNodeView["handleTab"]>;
+  })[] = [];
+  for (const view of STRUCTURAL_VIEWS.values()) {
+    if (view.handleTab) out.push(view as never);
   }
   return out;
 }

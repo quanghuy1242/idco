@@ -18,11 +18,11 @@ import {
   BlockChrome,
   ChromeButton,
 } from "@quanghuy1242/idco-ui";
-import { type EditorStore, type NodeId, type ObjectNode } from "../core";
-import { getNodeView } from "./node-view";
+import { type EditorStore, type NodeId, type ObjectNode } from "../../core";
+import { getNodeView } from "../spi";
 import { ObjectConfigPanel } from "./object-config";
 import { renderRestingObject } from "./resting-document";
-import { objectBlockStyle } from "./styles";
+import { objectBlockStyle } from "../styles";
 
 /**
  * `display:contents` so the chrome wrapper generates no box (its `BlockChrome`

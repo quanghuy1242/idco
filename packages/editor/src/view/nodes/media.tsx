@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, RichTextMediaFigure } from "@quanghuy1242/idco-ui";
 import { type EditorStore, type NodeId, type ObjectNode } from "../../core";
-import { type NodeView } from "../node-view";
+import { type NodeView } from "../spi";
 import { asRecord, currentObjectRecord, stringField } from "../object-data";
 import { useUpload } from "../upload-context";
 import {

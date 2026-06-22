@@ -21,9 +21,9 @@ import {
   orderedTextLeaves,
   pointAtOffset,
   type EditorStore,
-} from "../core";
-import { listMarks } from "./mark-registry";
-import { listBlockTypes } from "./block-type-registry";
+} from "../../core";
+import { listMarks } from "../spi";
+import { listBlockTypes } from "../spi";
 import { listToggleCommand } from "./chrome-commands";
 
 // Format marks and block types are read from the W4/W5 registries (the same

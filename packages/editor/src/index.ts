@@ -36,6 +36,7 @@ export {
   type StructuralContainerArgs,
   type StructuralRestingArgs,
   type StructuralOverlayArgs,
+  type StructuralTabArgs,
   registerMark,
   listMarks,
   getMark,

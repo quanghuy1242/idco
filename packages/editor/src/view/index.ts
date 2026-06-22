@@ -19,7 +19,7 @@ export {
   nextGraphemeBoundary,
   prevGraphemeBoundary,
   wordRangeAt,
-} from "./navigation";
+} from "./overlays";
 export {
   getNodeView,
   listInsertableNodes,
@@ -33,7 +33,7 @@ export {
   type NodeViewLiveArgs,
   type NodeViewRestingArgs,
   type RegisterNodeArgs,
-} from "./node-view";
+} from "./spi";
 export {
   getStructuralView,
   listInsertableStructuralNodes,
@@ -43,21 +43,22 @@ export {
   type StructuralNodeViewInsert,
   type StructuralOverlayArgs,
   type StructuralRestingArgs,
-} from "./structural-view";
+  type StructuralTabArgs,
+} from "./spi";
 export {
   OwnedModelEditor,
   type OwnedModelEditorHandle,
   type OwnedModelEditorProps,
 } from "./owned-model-editor";
-export { EditorToolbar } from "./editor-chrome";
+export { EditorToolbar } from "./chrome";
 export {
   FindBar,
   findMatches,
   useFindController,
   type FindController,
   type FindMatch,
-} from "./find-bar";
-export { renderLeafMarks } from "./mark-render";
+} from "./chrome";
+export { renderLeafMarks } from "./render";
 export {
   getMark,
   listMarks,
@@ -66,7 +67,7 @@ export {
   type MarkDefinition,
   type MarkRenderArgs,
   type MarkToolbarMeta,
-} from "./mark-registry";
+} from "./spi";
 export {
   blockTypeKey,
   blockTypeRole,
@@ -74,7 +75,7 @@ export {
   listBlockTypes,
   registerBlockType,
   type BlockTypeDefinition,
-} from "./block-type-registry";
+} from "./spi";
 export { sanitizeHtmlToCompat } from "./paste-html";
 export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
 export {
@@ -86,7 +87,7 @@ export {
   RestingDocument,
   RestingLeaf,
   type RestingDocumentProps,
-} from "./resting-document";
+} from "./render";
 export {
   computeWindowListMeta,
   listItemStyle,

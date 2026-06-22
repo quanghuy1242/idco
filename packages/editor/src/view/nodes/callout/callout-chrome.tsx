@@ -11,7 +11,7 @@ import {
   ChromeSelect,
   type ChromeSelectOption,
 } from "@quanghuy1242/idco-ui";
-import type { EditorStore, NodeId, StructuralNode } from "../core";
+import type { EditorStore, NodeId, StructuralNode } from "../../../core";
 
 /** Callout tones, matching the `Alert` component (info / success / warning / error). */
 const CALLOUT_TONES: readonly ChromeSelectOption<string>[] = [

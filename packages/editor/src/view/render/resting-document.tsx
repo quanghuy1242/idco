@@ -24,11 +24,11 @@ import {
   type NodeId,
   type ObjectNode,
   type TextLeafNode,
-} from "../core";
-import { getNodeView } from "./node-view";
-import { getStructuralView } from "./structural-view";
+} from "../../core";
+import { getNodeView } from "../spi";
+import { getStructuralView } from "../spi";
 import { renderLeafMarks } from "./mark-render";
-import { ENGINE_RESTING_TYPOGRAPHY_CSS, indentMarginStyle } from "./styles";
+import { ENGINE_RESTING_TYPOGRAPHY_CSS, indentMarginStyle } from "../styles";
 
 /**
  * The single resting render of a heavy object's baked content — the source of

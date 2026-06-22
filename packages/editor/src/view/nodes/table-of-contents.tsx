@@ -7,7 +7,7 @@
  * list renders in the reader / the TOC rail (docs/018 §2.14). Its title is edited
  * through the dispatcher's default config popover (`configFields`).
  */
-import { type NodeView } from "../node-view";
+import { type NodeView } from "../spi";
 import { asRecord, stringField } from "../object-data";
 
 /** The card styling for the resting table-of-contents marker. */

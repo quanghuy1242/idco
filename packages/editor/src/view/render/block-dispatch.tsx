@@ -7,16 +7,16 @@
  * Lifted verbatim from `react-view.tsx`.
  */
 import type { RefObject } from "react";
-import type { EditorStore, NodeId, TextPoint } from "../core";
+import type { EditorStore, NodeId, TextPoint } from "../../core";
 import { EngineObjectBlock } from "./object-block";
-import { getStructuralView } from "./structural-view";
-import { useEditorNode } from "./store-hooks";
+import { getStructuralView } from "../spi";
+import { useEditorNode } from "../store-hooks";
 import { EngineTextBlock } from "./text-block";
 import {
   computeWindowListMeta,
   structuralContainerStyle,
   type ListItemMeta,
-} from "./styles";
+} from "../styles";
 
 export function EngineBlock(props: {
   readonly id: NodeId;

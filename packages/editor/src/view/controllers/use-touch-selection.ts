@@ -16,9 +16,9 @@ import {
   type TextMarkKind,
   type TextPoint,
 } from "../../core";
-import { caretClientRect, clampOffset, resolveTextPointAt } from "../geometry";
-import { wordRangeAt } from "../navigation";
-import { useTouchDevice, type TouchSelectionActions } from "../touch-selection";
+import { caretClientRect, clampOffset, resolveTextPointAt } from "../overlays";
+import { wordRangeAt } from "../overlays";
+import { useTouchDevice, type TouchSelectionActions } from "../overlays";
 import {
   HANDLE_TOUCH_LIFT_PX,
   TOUCH_CARET_HIT_SLOP_X,

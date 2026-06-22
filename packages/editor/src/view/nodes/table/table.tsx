@@ -22,10 +22,11 @@ import {
   readableTextColor,
   verticalAlignClass,
 } from "@quanghuy1242/idco-ui";
-import { type JsonValue, type StructuralNode } from "../../core";
-import { type StructuralNodeView } from "../structural-view";
-import { TableControls } from "../table-controls";
-import { TableInteractions } from "../table-interactions";
+import { type JsonValue, type StructuralNode } from "../../../core";
+import { tabWithinTable } from "../../../core/table/operations";
+import { type StructuralNodeView } from "../../spi";
+import { TableControls } from "./table-controls";
+import { TableInteractions } from "./table-interactions";
 
 /** Cell classes copied from the reader `RichTextTableCell` so live matches rest. */
 const CELL_CLASS =
@@ -82,6 +83,17 @@ function makeTableView(type: string): StructuralNodeView {
               <TableInteractions store={store} />
             </>
           )
+        : undefined,
+    // Tab/Shift-Tab walks to the next/previous cell when the caret is in a table
+    // (docs/022 §5). Registered through the structural `handleTab` SPI slot (note.md
+    // VP6) instead of being hardcoded in `text-block`, so this table-specific
+    // behavior lives with the table. `tabWithinTable` self-checks the caret and
+    // returns false when it is not in a table; register only on the canonical
+    // `table` view so the handler runs once (the `editor-table` alias shares the
+    // same store/selection check).
+    handleTab:
+      type === "table"
+        ? ({ store, forward }) => tabWithinTable(store, forward)
         : undefined,
     renderContainer: ({ node, registerBlock, children }) => {
       const colWidths = numberArray(node.attrs?.colWidths);

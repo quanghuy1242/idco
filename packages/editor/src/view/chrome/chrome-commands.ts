@@ -5,7 +5,7 @@
  * the command shape here once stops the controls from drifting — the same reason
  * the toolbar and context menu now share the mark/block-type registries.
  */
-import type { EditorCommand } from "../core";
+import type { EditorCommand } from "../../core";
 
 /**
  * The `set-block-type` command toggling a list item on or off. A list item flips

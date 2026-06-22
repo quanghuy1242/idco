@@ -21,8 +21,8 @@
  * so a model offset stays a plain index into the visible text.
  */
 import { createElement, type ReactNode } from "react";
-import type { ResolvedMark, TextLeafNode, TextMarkKind } from "../core";
-import { resolveLeafMarks, safeHref, segmentText } from "../core";
+import type { ResolvedMark, TextLeafNode, TextMarkKind } from "../../core";
+import { resolveLeafMarks, safeHref, segmentText } from "../../core";
 import {
   getMark,
   markNestingRank,
@@ -30,7 +30,7 @@ import {
   type LinkMode,
   type MarkDefinition,
   type MarkRenderArgs,
-} from "./mark-registry";
+} from "../spi";
 
 function markHref(mark: ResolvedMark): string {
   const href = mark.attrs?.href;

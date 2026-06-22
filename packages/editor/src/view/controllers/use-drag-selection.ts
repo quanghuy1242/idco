@@ -14,7 +14,7 @@ import {
   type EngineScheduler,
   type TextPoint,
 } from "../../core";
-import { clampOffset, resolveTextPointAt } from "../geometry";
+import { clampOffset, resolveTextPointAt } from "../overlays";
 import { cancelFrame, requestFrame } from "../raf";
 import { AUTOSCROLL_STEP_PX } from "./constants";
 import type { ViewRefs } from "./refs";

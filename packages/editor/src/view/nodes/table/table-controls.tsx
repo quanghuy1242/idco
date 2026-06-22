@@ -28,7 +28,7 @@ import {
   NavIcon,
   type ChromeSelectOption,
 } from "@quanghuy1242/idco-ui";
-import type { EditorStore, NodeId, StructuralNode } from "../core";
+import type { EditorStore, NodeId, StructuralNode } from "../../../core";
 import {
   deleteColumn,
   deleteRow,
@@ -43,7 +43,7 @@ import {
   toggleHeaderColumn,
   toggleHeaderRow,
   toggleRowNumbers,
-} from "../core/table/operations";
+} from "../../../core/table/operations";
 
 const MIN_WIDTH = 48;
 const BAND_LEFT = 28;

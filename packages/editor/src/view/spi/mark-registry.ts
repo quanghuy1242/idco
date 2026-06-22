@@ -17,7 +17,7 @@
  * core concern that cannot import this view registry, so it stays in core.
  */
 import type { ReactNode } from "react";
-import type { ResolvedMark, TextMarkKind } from "../core";
+import type { ResolvedMark, TextMarkKind } from "../../core";
 
 /** Whether links navigate (reader) or are inert (the editor owns clicks). */
 export type LinkMode = "inert" | "navigable";

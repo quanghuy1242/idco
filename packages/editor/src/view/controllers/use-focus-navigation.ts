@@ -13,8 +13,8 @@ import {
   type EditorStore,
   type NodeId,
 } from "../../core";
-import { caretClientRect, clampOffset, resolveTextPointAt } from "../geometry";
-import { pointForStoreOffset } from "../navigation";
+import { caretClientRect, clampOffset, resolveTextPointAt } from "../overlays";
+import { pointForStoreOffset } from "../overlays";
 import { requestFrame } from "../raf";
 import { CARET_REVEAL_MARGIN_PX, PAGE_SCROLL_FRACTION } from "./constants";
 import type { ViewRefs } from "./refs";

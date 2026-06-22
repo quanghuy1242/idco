@@ -21,18 +21,18 @@ import {
   type TextMark,
   type TextMarkKind,
 } from "../../packages/editor/src/core";
-import { renderLeafMarks } from "../../packages/editor/src/view/mark-render";
+import { renderLeafMarks } from "../../packages/editor/src/view/render";
 import {
   hostTextLength,
   modelOffsetFromDom,
   resolveOffsetToDom,
   textNodesOf,
-} from "../../packages/editor/src/view/geometry";
+} from "../../packages/editor/src/view/overlays";
 import {
   getMark,
   listMarks,
   registerMark,
-} from "../../packages/editor/src/view/mark-registry";
+} from "../../packages/editor/src/view/spi";
 
 let markSeq = 0;
 function mark(

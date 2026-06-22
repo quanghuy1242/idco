@@ -29,11 +29,11 @@ import {
   NavIcon,
   PopoverTrigger,
 } from "@quanghuy1242/idco-ui";
-import type { EditorStore } from "../core";
-import { listInsertableNodes } from "./node-view";
-import { listInsertableStructuralNodes } from "./structural-view";
-import { listMarks } from "./mark-registry";
-import { listBlockTypes } from "./block-type-registry";
+import type { EditorStore } from "../../core";
+import { listInsertableNodes } from "../spi";
+import { listInsertableStructuralNodes } from "../spi";
+import { listMarks } from "../spi";
+import { listBlockTypes } from "../spi";
 import { listToggleCommand } from "./chrome-commands";
 
 // The format marks and block types are read from the W4/W5 registries

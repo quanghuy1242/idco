@@ -16,7 +16,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { ChromeButton, NavIcon, PopoverTrigger } from "@quanghuy1242/idco-ui";
 import { Button as AriaButton } from "react-aria-components";
-import type { EditorStore, NodeId } from "../core";
+import type { EditorStore, NodeId } from "../../../core";
 import {
   cellCoords,
   mergeCells,
@@ -25,7 +25,7 @@ import {
   setCellVerticalAlign,
   tableGrid,
   unmergeCell,
-} from "../core/table/operations";
+} from "../../../core/table/operations";
 
 type Coords = { readonly row: number; readonly col: number };
 

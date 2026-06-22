@@ -15,7 +15,7 @@ import {
   type EditorStore,
   type NodeId,
 } from "../../packages/editor/src/core";
-import { applyEditContextText } from "../../packages/editor/src/view/navigation";
+import { applyEditContextText } from "../../packages/editor/src/view/overlays";
 
 function single(text: string): { store: EditorStore; id: NodeId } {
   const allocator = createIdAllocator("idco_client_p9");

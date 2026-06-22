@@ -23,7 +23,7 @@ import {
   selectionForGapNavigation,
   selectionForNavigation,
   verticalNavigation,
-} from "../../packages/editor/src/view/navigation";
+} from "../../packages/editor/src/view/overlays";
 
 function storeOf(
   nodes: readonly EditorNode[],

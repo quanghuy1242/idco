@@ -15,7 +15,7 @@ import {
   type CodeEditorLanguage,
 } from "@quanghuy1242/idco-ui";
 import { type EditorStore, type NodeId, type ObjectNode } from "../../core";
-import { type NodeView } from "../node-view";
+import { type NodeView } from "../spi";
 import { asRecord, currentObjectRecord, stringField } from "../object-data";
 
 /** A stable no-op for the read-only code surface's required `onChange`. */

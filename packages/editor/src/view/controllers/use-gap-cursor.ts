@@ -19,9 +19,9 @@ import {
   type NodeId,
   type TextPoint,
 } from "../../core";
-import { clampOffset, resolveTextPointAt } from "../geometry";
-import { gapAtY, gapCandidates, type RectLike } from "../gap-cursor";
-import { selectionForGapNavigation } from "../navigation";
+import { clampOffset, resolveTextPointAt } from "../overlays";
+import { gapAtY, gapCandidates, type RectLike } from "../overlays";
+import { selectionForGapNavigation } from "../overlays";
 import { GAP_NAV_KEYS } from "./constants";
 import type { ViewRefs } from "./refs";
 

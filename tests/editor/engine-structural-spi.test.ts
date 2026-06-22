@@ -25,8 +25,9 @@ import {
 } from "../../packages/editor/src/view";
 // The overlay enumerators are orchestrator-internal (only `react-view` consumes
 // them, like `getStructuralView`/`getNodeView`), so they are deep-imported here.
-import { listOverlayStructuralViews } from "../../packages/editor/src/view/structural-view";
-import { listOverlayNodeViews } from "../../packages/editor/src/view/node-view";
+import { listOverlayStructuralViews } from "../../packages/editor/src/view/spi";
+import { listOverlayNodeViews } from "../../packages/editor/src/view/spi";
+import { listTabHandlers } from "../../packages/editor/src/view/spi";
 
 function structuralNode(type: string, attrs: object = {}): StructuralNode {
   return {
@@ -190,5 +191,54 @@ describe("overlay SPI — renderOverlay slot (note.md W1)", () => {
     expect(
       listOverlayNodeViews().some((view) => view.type === "spi-object-overlay"),
     ).toBe(true);
+  });
+});
+
+describe("structural Tab SPI — handleTab slot (note.md VP6)", () => {
+  it("registers the table Tab handler once, on the canonical `table` view only", () => {
+    // The table claims Tab to walk cells (docs/022 §5); like renderOverlay it
+    // rides the canonical `table` view, not the `editor-table` alias, so the
+    // handler runs once.
+    expect(typeof getStructuralView("table")!.handleTab).toBe("function");
+    expect(getStructuralView("editor-table")!.handleTab).toBeUndefined();
+    const types = listTabHandlers().map((view) => view.type);
+    expect(types).toContain("table");
+    expect(types).not.toContain("editor-table");
+  });
+
+  it("enumerates a custom Tab handler, skips a view without one, and self-checks", () => {
+    // A handler self-checks whether the caret is in its container and returns
+    // false otherwise — `text-block` tries each, first true wins, else
+    // indent/outdent. Here the custom handler claims Tab only when forward.
+    const calls: boolean[] = [];
+    const withTab: StructuralNodeView = {
+      handleTab: ({ forward }) => {
+        calls.push(forward);
+        return forward;
+      },
+      renderContainer: ({ children }) => createElement("div", null, children),
+      renderResting: ({ children, renderSequence }) =>
+        createElement("div", null, renderSequence(children)),
+      type: "spi-tab-yes",
+    };
+    const withoutTab: StructuralNodeView = {
+      renderContainer: ({ children }) => createElement("div", null, children),
+      renderResting: ({ children, renderSequence }) =>
+        createElement("div", null, renderSequence(children)),
+      type: "spi-tab-no",
+    };
+    registerNode({ structuralView: withTab });
+    registerNode({ structuralView: withoutTab });
+
+    const types = listTabHandlers().map((view) => view.type);
+    expect(types).toContain("spi-tab-yes");
+    expect(types).not.toContain("spi-tab-no");
+
+    const handler = listTabHandlers().find((v) => v.type === "spi-tab-yes")!;
+    expect(handler.handleTab({ forward: true, store: {} as never })).toBe(true);
+    expect(handler.handleTab({ forward: false, store: {} as never })).toBe(
+      false,
+    );
+    expect(calls).toEqual([true, false]);
   });
 });

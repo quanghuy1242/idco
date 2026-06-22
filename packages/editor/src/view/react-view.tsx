@@ -42,17 +42,17 @@ import {
   type EngineScheduler,
   type NodeId,
 } from "../core";
-import { SelectionAnnouncer, SelectionOverlay } from "./selection-overlay";
+import { SelectionAnnouncer, SelectionOverlay } from "./overlays";
 import { registerBuiltInNodeViews } from "./nodes";
 import { useEditorOrder } from "./store-hooks";
-import { TouchSelectionLayer } from "./touch-selection";
+import { TouchSelectionLayer } from "./overlays";
 import { baseViewStyle, computeWindowListMeta } from "./styles";
 import { cancelFrame } from "./raf";
-import { EngineBlock } from "./block-dispatch";
-import { listOverlayStructuralViews } from "./structural-view";
-import { listOverlayNodeViews } from "./node-view";
-import { registerBuiltInMarks } from "./mark-render";
-import { registerBuiltInBlockTypes } from "./block-type-registry";
+import { EngineBlock } from "./render";
+import { listOverlayStructuralViews } from "./spi";
+import { listOverlayNodeViews } from "./spi";
+import { registerBuiltInMarks } from "./render";
+import { registerBuiltInBlockTypes } from "./spi";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_VIEWPORT_HEIGHT,

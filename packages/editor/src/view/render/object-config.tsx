@@ -6,10 +6,10 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Button, Input } from "@quanghuy1242/idco-ui";
-import { type EditorStore, type NodeId, type ObjectNode } from "../core";
-import { getNodeView } from "./node-view";
-import { asRecord, currentObjectRecord, stringField } from "./object-data";
-import { objectConfigFieldStyle } from "./styles";
+import { type EditorStore, type NodeId, type ObjectNode } from "../../core";
+import { getNodeView } from "../spi";
+import { asRecord, currentObjectRecord, stringField } from "../object-data";
+import { objectConfigFieldStyle } from "../styles";
 
 export function ObjectConfigPanel(props: {
   readonly node: ObjectNode;

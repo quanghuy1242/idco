@@ -10,7 +10,7 @@ import {
   gapCandidates,
   gapMarkerRect,
   type RectLike,
-} from "../../packages/editor/src/view/gap-cursor";
+} from "../../packages/editor/src/view/overlays";
 
 const block = (top: number, bottom: number): RectLike => ({
   bottom,

@@ -24,18 +24,18 @@ import {
   type NodeId,
   type TextLeafNode,
   type TextPoint,
-} from "../core";
+} from "../../core";
 import {
   install,
   releaseForcedInstall,
   syncPolyfillSelection,
-} from "../vendor/editcontext-polyfill";
+} from "../../vendor/editcontext-polyfill";
 import {
   caretClientRect,
   characterClientRects,
   clampOffset,
   offsetFromClientPoint,
-} from "./geometry";
+} from "../overlays";
 import {
   applyEditContextText,
   isCollapsedSelection,
@@ -45,12 +45,12 @@ import {
   selectionForNavigation,
   verticalNavigation,
   wordRangeAt,
-} from "./navigation";
-import { requestFrame } from "./raf";
-import { tabWithinTable } from "../core/table/operations";
+} from "../overlays";
+import { requestFrame } from "../raf";
+import { listTabHandlers } from "../spi";
 import { leafHasMarks, renderLeafMarks } from "./mark-render";
-import { ariaLabelForLeaf } from "./selection-overlay";
-import { blockStyleFor, listItemStyle, type ListItemMeta } from "./styles";
+import { ariaLabelForLeaf } from "../overlays";
+import { blockStyleFor, listItemStyle, type ListItemMeta } from "../styles";
 import type {
   CharacterBoundsUpdateEventLike,
   EditContextConstructor,
@@ -59,7 +59,7 @@ import type {
   TextBlockController,
   TextFormatUpdateEventLike,
   TextUpdateEventLike,
-} from "./types";
+} from "../types";
 
 export function EngineTextBlock(props: {
   readonly node: TextLeafNode;
@@ -574,11 +574,16 @@ export function EngineTextBlock(props: {
       }
       if (event.key === "Tab") {
         event.preventDefault();
-        // Inside a table cell, Tab walks to the next/previous cell (docs/022 §5);
-        // anywhere else it indents/outdents as before. `tabWithinTable` is a no-op
-        // returning false when the caret is not in a table.
-        if (!tabWithinTable(store, !event.shiftKey)) {
-          runEditCommand({ type: event.shiftKey ? "outdent" : "indent" });
+        // A structural container may claim Tab (a table walks to the next/previous
+        // cell, docs/022 §5); anywhere else it indents/outdents. The handlers
+        // (note.md VP6) self-check the caret, so this surface keeps no per-type
+        // knowledge — first handler to claim it wins, else default indent/outdent.
+        const forward = !event.shiftKey;
+        const claimed = listTabHandlers().some((view) =>
+          view.handleTab({ forward, store }),
+        );
+        if (!claimed) {
+          runEditCommand({ type: forward ? "indent" : "outdent" });
         }
         return;
       }

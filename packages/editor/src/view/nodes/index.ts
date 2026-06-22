@@ -12,8 +12,8 @@
  * A custom node calls `registerNode` itself and renders without editing any view
  * internals — that is the whole point of the SPI (docs/016 §10).
  */
-import { registerNodeView } from "../node-view";
-import { registerStructuralView } from "../structural-view";
+import { registerNodeView } from "../spi";
+import { registerStructuralView } from "../spi";
 import { codeBlockView } from "./code-block";
 import { mediaView } from "./media";
 import { embedView } from "./embed";

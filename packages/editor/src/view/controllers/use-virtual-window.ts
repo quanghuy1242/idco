@@ -8,7 +8,7 @@
 import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import { calculateVirtualRange } from "../../core/virtual-range";
 import type { EditorStore, NodeId } from "../../core";
-import { feedImeBounds } from "../selection-overlay";
+import { feedImeBounds } from "../overlays";
 import { requestFrame } from "../raf";
 import type { ViewRefs } from "./refs";
 

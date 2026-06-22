@@ -13,7 +13,7 @@ import {
   getBlockType,
   listBlockTypes,
   registerBlockType,
-} from "../../packages/editor/src/view/block-type-registry";
+} from "../../packages/editor/src/view/spi";
 
 describe("block-type registry (view SPI, note.md W5)", () => {
   it("exposes the six chooser entries in order, list item excluded", () => {

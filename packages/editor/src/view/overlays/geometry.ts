@@ -15,7 +15,7 @@
  * so a model offset stays a plain index into it. The unformatted case (one text
  * node) is just the one-element walk, so the fast path is preserved.
  */
-import type { EditorStore, NodeId } from "../core";
+import type { EditorStore, NodeId } from "../../core";
 
 export function isTextNode(node: Node): boolean {
   return node.nodeType === node.TEXT_NODE;

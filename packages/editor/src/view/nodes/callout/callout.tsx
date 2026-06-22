@@ -8,10 +8,10 @@
  * uses the real DaisyUI `alert`.
  */
 import { AlertGlyph, alertToneClass } from "@quanghuy1242/idco-ui";
-import { type StructuralNodeView } from "../structural-view";
-import { CalloutChrome } from "../callout-chrome";
-import { calloutTone } from "../resting-document";
-import { structuralContainerStyle } from "../styles";
+import { type StructuralNodeView } from "../../spi";
+import { CalloutChrome } from "./callout-chrome";
+import { calloutTone } from "../../render";
+import { structuralContainerStyle } from "../../styles";
 
 export const calloutStructuralView: StructuralNodeView = {
   // The insert menu inserts a callout through the generic structural command (note

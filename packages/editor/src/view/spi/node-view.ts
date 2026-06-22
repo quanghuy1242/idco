@@ -24,7 +24,7 @@ import {
   type ObjectNode,
   type EditorStore,
   type StructuralDefinition,
-} from "../core";
+} from "../../core";
 import {
   registerStructuralView,
   type StructuralNodeView,

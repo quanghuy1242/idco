@@ -21,7 +21,7 @@ import {
   type Step,
   type TextLeafNode,
   type TextPoint,
-} from "../core";
+} from "../../core";
 import { caretClientRect, clampOffset, pointToModelPosition } from "./geometry";
 
 export type TextDiff = {

@@ -24,10 +24,10 @@ import {
   type ReactNode,
 } from "react";
 import { AnchoredPopover, Button } from "@quanghuy1242/idco-ui";
-import type { EditorStore, EngineScheduler, TextMarkKind } from "../core";
+import type { EditorStore, EngineScheduler, TextMarkKind } from "../../core";
 import { selectionRects } from "./selection-overlay";
-import { useSelectionFrameVersion } from "./store-hooks";
-import type { RenderRegistry } from "./types";
+import { useSelectionFrameVersion } from "../store-hooks";
+import type { RenderRegistry } from "../types";
 
 export type TouchSelectionActions = {
   readonly copy: () => void;

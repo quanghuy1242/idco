@@ -19,7 +19,7 @@
  * view registry. This is the same core/view boundary the mark registry draws for
  * the bake annotation index (W4).
  */
-import type { TextLeafType } from "../core";
+import type { TextLeafType } from "../../core";
 
 /** One block-type chooser entry plus its aria role. */
 export type BlockTypeDefinition = {

@@ -17,11 +17,11 @@ import {
   type GapSelection,
   type NodeId,
   type TextLeafNode,
-} from "../core";
-import { blockTypeRole } from "./block-type-registry";
+} from "../../core";
+import { blockTypeRole } from "../spi";
 import { gapMarkerRect } from "./gap-cursor";
-import { getNodeView } from "./node-view";
-import { getStructuralView } from "./structural-view";
+import { getNodeView } from "../spi";
+import { getStructuralView } from "../spi";
 import {
   characterClientRects,
   makeRect,
@@ -29,16 +29,16 @@ import {
   textRangeClientRects,
   toDomRect,
 } from "./geometry";
-import { requestFrame } from "./raf";
-import { useSelectionFrameVersion } from "./store-hooks";
+import { requestFrame } from "../raf";
+import { useSelectionFrameVersion } from "../store-hooks";
 import {
   CARET_BLINK_KEYFRAMES,
   ENGINE_OBJECT_CHROME_CSS,
   ENGINE_SURFACE_SUPPRESS_CSS,
   ENGINE_TYPOGRAPHY_CSS,
   visuallyHiddenStyle,
-} from "./styles";
-import type { EditContextLike, RenderRegistry, SerializedRect } from "./types";
+} from "../styles";
+import type { EditContextLike, RenderRegistry, SerializedRect } from "../types";
 
 type OverlayRect = {
   readonly height: number;

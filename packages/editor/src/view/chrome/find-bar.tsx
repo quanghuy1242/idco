@@ -12,7 +12,7 @@
  */
 import { useCallback, useMemo, useRef, useState } from "react";
 import { AnchoredPopover, Button, Input } from "@quanghuy1242/idco-ui";
-import { pointAtOffset, type EditorStore, type NodeId } from "../core";
+import { pointAtOffset, type EditorStore, type NodeId } from "../../core";
 
 /** One find match: a text-leaf range, or a whole object block. */
 export type FindMatch =
