@@ -688,10 +688,7 @@ function enclosingCell(store: EditorStore): {
       const rowEntry = cellEntry && store.parentEntry(cellEntry.parent);
       if (!cellEntry || !rowEntry) return null;
       const table = store.getNode(rowEntry.parent);
-      if (
-        table?.kind !== "structural" ||
-        (table.type !== "table" && table.type !== "editor-table")
-      ) {
+      if (table?.kind !== "structural" || table.type !== "table") {
         return null;
       }
       return {
@@ -1274,10 +1271,7 @@ export function activeCellContext(
       const tableEntry = rowEntry && store.parentEntry(rowEntry.parent);
       if (!tableEntry) return null;
       const table = store.getNode(tableEntry.parent);
-      if (
-        table?.kind !== "structural" ||
-        (table.type !== "table" && table.type !== "editor-table")
-      ) {
+      if (table?.kind !== "structural" || table.type !== "table") {
         return null;
       }
       return {

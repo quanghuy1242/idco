@@ -20,7 +20,6 @@ import { embedView } from "./embed";
 import { postRefView } from "./post-ref";
 import { dividerView } from "./divider";
 import {
-  editorTableStructuralView,
   tableCellStructuralView,
   tableRowStructuralView,
   tableStructuralView,
@@ -53,7 +52,6 @@ export function registerBuiltInNodeViews(): void {
     calloutStructuralView,
     listStructuralView,
     tableStructuralView,
-    editorTableStructuralView,
     tableRowStructuralView,
     tableCellStructuralView,
   ]) {

@@ -72,6 +72,7 @@ import {
   isStructuralDefinitionType,
 } from "../registry";
 import {
+  canonicalFlatType,
   importFlatBlock,
   type FlatBlockImportContext,
 } from "../registry/flat-blocks";
@@ -297,9 +298,10 @@ function importCompatNode(
         attrs: result.attrs,
         children: result.children,
         id,
-        // `StructuralNodeType` is the registry-driven open set (docs/021 §8.1), so
-        // a registered type's string flows in without a cast.
-        type: node.type,
+        // Use the resolved definition's CANONICAL type, not the source node's:
+        // a legacy alias (`editor-table`) resolves to its canonical core (`table`)
+        // so the owned model only ever holds canonical types (docs/021 §8.1).
+        type: structuralDefinition.type,
       }),
     );
     return [id];
@@ -660,15 +662,16 @@ function isBlockChild(
   node: RichTextCompatNode,
   registry: BlockRegistry,
 ): boolean {
+  // Decode any legacy alias to canonical once (`editor-quote` → `quote`,
+  // `editor-list` → `list`), so this lists only canonical flat/list names — no
+  // `|| editor-*` duplication of the declarative `aliases` tables.
+  const flat = canonicalFlatType(node.type);
   return (
-    node.type === "paragraph" ||
-    node.type === "editor-paragraph" ||
-    node.type === "heading" ||
-    node.type === "editor-heading" ||
-    node.type === "quote" ||
-    node.type === "editor-quote" ||
-    node.type === "list" ||
-    node.type === "editor-list" ||
+    flat === "paragraph" ||
+    flat === "heading" ||
+    flat === "quote" ||
+    flat === "list" ||
+    // Structural alias resolution (`editor-table` → `table`) lives in the registry.
     isStructuralDefinitionType(node.type) ||
     // A registered object node — built-in OR a host's custom node — is a block
     // child; the single registry check (W7) replaces the old hardcoded built-in
@@ -745,16 +748,18 @@ export function createTextMark(args: {
   };
 }
 
-/** Normalize legacy/editor element aliases to the runtime text-leaf type names. */
+/**
+ * Normalize legacy/editor element aliases to the runtime text-leaf type names,
+ * decoding through the single `canonicalFlatType` resolver (so `editor-paragraph`
+ * → `paragraph` etc. is not re-listed here). Returns null for a non-text-leaf type.
+ */
 export function textNodeTypeFromCompat(type: string): TextLeafType | null {
-  if (type === "editor-paragraph") return "paragraph";
-  if (type === "editor-heading") return "heading";
-  if (type === "editor-quote") return "quote";
-  return type === "paragraph" ||
-    type === "heading" ||
-    type === "quote" ||
-    type === "listitem"
-    ? type
+  const canonical = canonicalFlatType(type);
+  return canonical === "paragraph" ||
+    canonical === "heading" ||
+    canonical === "quote" ||
+    canonical === "listitem"
+    ? canonical
     : null;
 }
 

@@ -42,8 +42,7 @@ type RangeState = {
 };
 
 const CELL_SELECTOR = '[data-engine-structural="tablecell"]';
-const TABLE_SELECTOR =
-  '[data-engine-structural="table"],[data-engine-structural="editor-table"]';
+const TABLE_SELECTOR = '[data-engine-structural="table"]';
 
 // A compact fill palette that reads on light and dark surfaces; "none" clears.
 const FILL_COLORS: readonly string[] = [

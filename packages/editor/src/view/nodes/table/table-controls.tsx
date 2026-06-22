@@ -173,9 +173,7 @@ export function TableControls(props: {
     function onMove(event: MouseEvent) {
       if (dragging.current || pinned.current) return;
       const wrappers = Array.from(
-        root!.querySelectorAll<HTMLElement>(
-          '[data-engine-structural="table"],[data-engine-structural="editor-table"]',
-        ),
+        root!.querySelectorAll<HTMLElement>('[data-engine-structural="table"]'),
       );
       const active = wrappers.find((wrapper) => {
         const found = tableUnder(wrapper);

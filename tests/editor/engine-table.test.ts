@@ -196,13 +196,15 @@ describe("table — structural model + insert (docs/022 §3, §4.1)", () => {
 
 describe("table — byte-stable compat round-trip (docs/022 §4.3)", () => {
   for (const type of ["table", "editor-table"] as const) {
-    it(`imports a legacy ${type} structurally and exports it with full fidelity`, () => {
+    it(`imports a legacy ${type} as the canonical table and exports it with full fidelity`, () => {
       const doc = legacyTableDoc(type);
       const store = createEditorStoreFromCompat(doc);
 
-      // The in-memory model is structural (table → row → cell → paragraph)…
+      // The in-memory model is structural (table → row → cell → paragraph) and the
+      // type is always the canonical `table` — the legacy `editor-table` alias is
+      // normalized on import, so the model never holds it (one name, everywhere).
       const table = structural(store, store.order[0]!);
-      expect(table.type).toBe(type);
+      expect(table.type).toBe("table");
       expect(table.attrs?.colWidths).toEqual([120, 200]);
       const firstCell = structural(
         store,
@@ -216,7 +218,10 @@ describe("table — byte-stable compat round-trip (docs/022 §4.3)", () => {
       const exported = compatFromEditorStore(store);
       const outTable = exported.root.children[0]!;
       expect(outTable.id).toBe("idco_node_t1");
-      expect(outTable.type).toBe(type);
+      // Export emits canonical `table` for both inputs: a legacy `editor-table`
+      // doc is upgraded on re-save (the legacy editor lives in its own package
+      // now, so we no longer round-trip its serialization name).
+      expect(outTable.type).toBe("table");
       expect(outTable.colWidths).toEqual([120, 200]);
       const rows = outTable.children ?? [];
       expect(rows.map((r) => r.id)).toEqual(["idco_node_r1", "idco_node_r2"]);

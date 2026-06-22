@@ -134,10 +134,11 @@ describe("structural SPI — a brand-new node via registerNode (docs/020 §4.2)"
 
 describe("overlay SPI — renderOverlay slot (note.md W1)", () => {
   it("registers the table overlay once, on the canonical `table` view only", () => {
-    // One pair of portals serves every table, so the overlay rides the canonical
-    // `table` view and not the `editor-table` alias — otherwise it mounts twice.
+    // One pair of portals serves every table. The legacy `editor-table` is no
+    // longer a registered view (it normalizes to `table` on import), so the
+    // overlay can only mount once, on `table`.
     expect(typeof getStructuralView("table")!.renderOverlay).toBe("function");
-    expect(getStructuralView("editor-table")!.renderOverlay).toBeUndefined();
+    expect(getStructuralView("editor-table")).toBeUndefined();
     const types = listOverlayStructuralViews().map((view) => view.type);
     expect(types).toContain("table");
     expect(types).not.toContain("editor-table");
@@ -196,11 +197,11 @@ describe("overlay SPI — renderOverlay slot (note.md W1)", () => {
 
 describe("structural Tab SPI — handleTab slot (note.md VP6)", () => {
   it("registers the table Tab handler once, on the canonical `table` view only", () => {
-    // The table claims Tab to walk cells (docs/022 §5); like renderOverlay it
-    // rides the canonical `table` view, not the `editor-table` alias, so the
-    // handler runs once.
+    // The table claims Tab to walk cells (docs/022 §5) on the canonical `table`
+    // view; `editor-table` is no longer a registered view (it normalizes to
+    // `table` on import), so the handler runs once.
     expect(typeof getStructuralView("table")!.handleTab).toBe("function");
-    expect(getStructuralView("editor-table")!.handleTab).toBeUndefined();
+    expect(getStructuralView("editor-table")).toBeUndefined();
     const types = listTabHandlers().map((view) => view.type);
     expect(types).toContain("table");
     expect(types).not.toContain("editor-table");

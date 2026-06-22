@@ -198,16 +198,20 @@ function rectangularRows(
   });
 }
 
-function tableDefinition(type: string): StructuralDefinition {
+function tableDefinition(): StructuralDefinition {
   return {
-    createSubtree: (allocator) => buildTableSubtree(allocator, type),
+    // The legacy Lexical serialization called the table `editor-table`; it imports
+    // as the canonical `table` (and re-saves as `table`), so the engine no longer
+    // carries a second `editor-table` type. One name, everywhere.
+    aliases: ["editor-table"],
+    createSubtree: (allocator) => buildTableSubtree(allocator, "table"),
     fromCompatNode: (node, ctx) => ({
       attrs: tableAttrs(node),
       // Rows import through the registry recursion (the `tablerow` definition),
       // padded to a rectangle first so a ragged source cannot break the invariant.
       children: ctx.importChildren(rectangularRows(node.children)),
     }),
-    type,
+    type: "table",
     // A table exports generically (attrs + recursed rows); no `toCompatNode`.
   };
 }
@@ -267,10 +271,5 @@ function tableCellDefinition(): StructuralDefinition {
 
 /** The built-in table family for `BUILT_IN_STRUCTURAL_DEFINITIONS` (docs/022 §3). */
 export function tableStructuralDefinitions(): readonly StructuralDefinition[] {
-  return [
-    tableDefinition("table"),
-    tableDefinition("editor-table"),
-    tableRowDefinition(),
-    tableCellDefinition(),
-  ];
+  return [tableDefinition(), tableRowDefinition(), tableCellDefinition()];
 }

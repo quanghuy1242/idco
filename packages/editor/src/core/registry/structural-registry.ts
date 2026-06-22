@@ -115,6 +115,16 @@ export type StructuralExportResult = {
  */
 export type StructuralDefinition = {
   readonly type: string;
+  /**
+   * Legacy serialization type names that import to this canonical type (e.g. the
+   * Lexical-era `editor-table` → `table`). Resolved on import by
+   * `getStructuralDefinition`, and the imported node is created with the canonical
+   * `type`, so the owned model never holds a legacy alias — the model is the single
+   * source of truth and downstream code matches one name. A re-save upgrades the
+   * legacy name to canonical (the legacy editor lives in its own package now, so
+   * round-trip fidelity to it is no longer required).
+   */
+  readonly aliases?: readonly string[];
   /** Build the initial subtree for the generic `insert-structural` command. */
   createSubtree(allocator: IdAllocator): StructuralSubtree;
   /** Import a legacy compat node into attrs + child ids (registry-driven). */
@@ -191,6 +201,14 @@ const BUILT_IN_BY_TYPE = new Map(
   ]),
 );
 
+// Legacy-alias → canonical definition, so `getStructuralDefinition("editor-table")`
+// resolves to the `table` core. Built once; aliases are static per definition.
+const BUILT_IN_BY_ALIAS = new Map(
+  BUILT_IN_STRUCTURAL_DEFINITIONS.flatMap((definition) =>
+    (definition.aliases ?? []).map((alias) => [alias, definition] as const),
+  ),
+);
+
 /**
  * Globally registered custom structural definitions (the third-party path). A
  * custom registration takes precedence over a built-in of the same type, matching
@@ -210,11 +228,22 @@ export function globalStructuralDefinitions(): readonly StructuralDefinition[] {
   return [...GLOBAL_STRUCTURAL_DEFINITIONS.values()];
 }
 
-/** The structural core for a type (custom first, then built-in), or undefined. */
+/**
+ * The structural core for a type, or undefined. Resolution order: a custom global
+ * by exact type, then a built-in by exact type, then a legacy alias (custom globals
+ * first, then built-ins) → canonical. Alias resolution lets `editor-table` import
+ * as `table` without `editor-table` being a registered type (see `aliases`).
+ */
 export function getStructuralDefinition(
   type: string,
 ): StructuralDefinition | undefined {
-  return GLOBAL_STRUCTURAL_DEFINITIONS.get(type) ?? BUILT_IN_BY_TYPE.get(type);
+  const direct =
+    GLOBAL_STRUCTURAL_DEFINITIONS.get(type) ?? BUILT_IN_BY_TYPE.get(type);
+  if (direct) return direct;
+  for (const definition of GLOBAL_STRUCTURAL_DEFINITIONS.values()) {
+    if (definition.aliases?.includes(type)) return definition;
+  }
+  return BUILT_IN_BY_ALIAS.get(type);
 }
 
 /** Whether a type has a registered structural core (compat import + nesting). */

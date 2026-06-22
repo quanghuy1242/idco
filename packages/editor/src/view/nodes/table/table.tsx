@@ -12,8 +12,9 @@
  * page cannot drift. Resting reuses the shared reader components
  * (`RichTextTable`/`Row`/`Cell`); live wraps the same frame but renders raw cells
  * carrying the engine's block hooks (`data-engine-block-id`, `registerBlock`) the
- * shared components do not expose. `editor-table` is the legacy serialization alias
- * (docs/022 §3); it renders identically.
+ * shared components do not expose. The legacy `editor-table` serialization name is
+ * normalized to the canonical `table` on import (the `table` core's `aliases`), so
+ * there is one table type and one view — no alias view, no per-instance branch.
  */
 import {
   RichTextTable,
@@ -54,94 +55,80 @@ function stringAttr(value: JsonValue | undefined): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
-/** A `table`/`editor-table` view; both render identically (docs/022 §3). */
-function makeTableView(type: string): StructuralNodeView {
-  return {
-    insert:
-      type === "table"
-        ? {
-            createCommand: () => ({
-              structuralType: "table",
-              type: "insert-structural",
-            }),
-            group: "Blocks",
-            icon: "Table",
-            keywords: ["table", "grid", "rows", "columns"],
-            label: "Table",
-          }
-        : undefined,
-    // The whole-table hover controls and the cell-range/cell-action layer are a
-    // single pair of portals that scan the surface for every table (both `table`
-    // and `editor-table`, docs/022 §6/§7), so they mount once for the whole view,
-    // not per node. Register that overlay only on the canonical `table` view so it
-    // is enumerated exactly once; `editor-table` shares the same running overlay.
-    renderOverlay:
-      type === "table"
-        ? ({ store, rootRef }) => (
-            <>
-              <TableControls rootRef={rootRef} store={store} />
-              <TableInteractions store={store} />
-            </>
-          )
-        : undefined,
-    // Tab/Shift-Tab walks to the next/previous cell when the caret is in a table
-    // (docs/022 §5). Registered through the structural `handleTab` SPI slot (note.md
-    // VP6) instead of being hardcoded in `text-block`, so this table-specific
-    // behavior lives with the table. `tabWithinTable` self-checks the caret and
-    // returns false when it is not in a table; register only on the canonical
-    // `table` view so the handler runs once (the `editor-table` alias shares the
-    // same store/selection check).
-    handleTab:
-      type === "table"
-        ? ({ store, forward }) => tabWithinTable(store, forward)
-        : undefined,
-    renderContainer: ({ node, registerBlock, children }) => {
-      const colWidths = numberArray(node.attrs?.colWidths);
-      const layout =
-        typeof node.attrs?.layout === "string" ? node.attrs.layout : undefined;
-      const numbered = node.attrs?.showRowNumbers === true;
-      // The whole-table chrome + the live insert/delete/resize affordances are a
-      // single hover overlay (`TableControls`, mounted once in the view), so the
-      // table itself only renders the measured grid with the engine block hooks.
-      return (
-        <div
-          data-engine-block-id={node.id}
-          data-engine-structural={type}
-          ref={(element) => registerBlock(node.id, element)}
+/**
+ * The `table` structural view (docs/022 §3). One canonical type: the legacy
+ * `editor-table` serialization name is normalized to `table` on import (see the
+ * `table` core's `aliases`), so the model never holds it and this view needs no
+ * per-instance identity branch.
+ */
+export const tableStructuralView: StructuralNodeView = {
+  insert: {
+    createCommand: () => ({
+      structuralType: "table",
+      type: "insert-structural",
+    }),
+    group: "Blocks",
+    icon: "Table",
+    keywords: ["table", "grid", "rows", "columns"],
+    label: "Table",
+  },
+  // The whole-table hover controls and the cell-range/cell-action layer are a
+  // single pair of portals that scan the surface for every table (docs/022 §6/§7),
+  // so they mount once for the whole view, not per node.
+  renderOverlay: ({ store, rootRef }) => (
+    <>
+      <TableControls rootRef={rootRef} store={store} />
+      <TableInteractions store={store} />
+    </>
+  ),
+  // Tab/Shift-Tab walks to the next/previous cell when the caret is in a table
+  // (docs/022 §5), registered through the structural `handleTab` SPI slot (note.md
+  // VP6) so this table-specific behavior lives with the table; `tabWithinTable`
+  // self-checks the caret and returns false when it is not in a table.
+  handleTab: ({ store, forward }) => tabWithinTable(store, forward),
+  renderContainer: ({ node, registerBlock, children }) => {
+    const colWidths = numberArray(node.attrs?.colWidths);
+    const layout =
+      typeof node.attrs?.layout === "string" ? node.attrs.layout : undefined;
+    const numbered = node.attrs?.showRowNumbers === true;
+    // The whole-table chrome + the live insert/delete/resize affordances are a
+    // single hover overlay (`TableControls`, mounted once in the view), so the
+    // table itself only renders the measured grid with the engine block hooks.
+    return (
+      <div
+        data-engine-block-id={node.id}
+        data-engine-structural="table"
+        ref={(element) => registerBlock(node.id, element)}
+      >
+        <RichTextTable
+          colWidths={colWidths}
+          layout={layout}
+          numbered={numbered}
         >
-          <RichTextTable
-            colWidths={colWidths}
-            layout={layout}
-            numbered={numbered}
-          >
-            {children}
-          </RichTextTable>
-        </div>
-      );
-    },
-    renderResting: ({ node, children, renderSequence }) => {
-      const colWidths = numberArray(node.attrs?.colWidths);
-      const layout =
-        typeof node.attrs?.layout === "string" ? node.attrs.layout : undefined;
-      const numbered = node.attrs?.showRowNumbers === true;
-      return (
-        <div data-engine-resting-block={node.id} key={node.id}>
-          <RichTextTable
-            colWidths={colWidths}
-            layout={layout}
-            numbered={numbered}
-          >
-            {renderSequence(children)}
-          </RichTextTable>
-        </div>
-      );
-    },
-    type,
-  };
-}
-
-export const tableStructuralView = makeTableView("table");
-export const editorTableStructuralView = makeTableView("editor-table");
+          {children}
+        </RichTextTable>
+      </div>
+    );
+  },
+  renderResting: ({ node, children, renderSequence }) => {
+    const colWidths = numberArray(node.attrs?.colWidths);
+    const layout =
+      typeof node.attrs?.layout === "string" ? node.attrs.layout : undefined;
+    const numbered = node.attrs?.showRowNumbers === true;
+    return (
+      <div data-engine-resting-block={node.id} key={node.id}>
+        <RichTextTable
+          colWidths={colWidths}
+          layout={layout}
+          numbered={numbered}
+        >
+          {renderSequence(children)}
+        </RichTextTable>
+      </div>
+    );
+  },
+  type: "table",
+};
 
 export const tableRowStructuralView: StructuralNodeView = {
   renderContainer: ({ node, registerBlock, children }) => (

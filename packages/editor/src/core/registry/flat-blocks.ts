@@ -120,9 +120,30 @@ function flatTextLeafSpec(type: string | undefined): FlatTextLeafSpec | null {
   return null;
 }
 
+// The `list` container (canonical) and its legacy serialization aliases. A list is
+// flattened into `listitem` runs on import (docs/018 §2.10), so it is not a
+// flat-leaf spec; its aliases live here, the single home for flat/list legacy names.
+const LIST_CONTAINER_TYPE = "list";
+const LIST_CONTAINER_ALIASES = ["editor-list"];
+
+/**
+ * Resolve a compat type to its canonical flat/list type (note.md alias-standardize):
+ * a flat-leaf alias (`editor-quote` → `quote`, `editor-listitem` → `listitem`) via
+ * the `aliases` table, or a list alias (`editor-list` → `list`); any other type is
+ * returned unchanged. This is the ONE place flat/list legacy names are decoded, so
+ * no caller hardcodes `|| editor-*` literals (the structural twin lives in
+ * `structural-registry`'s `aliases`).
+ */
+export function canonicalFlatType(type: string): string {
+  const spec = flatTextLeafSpec(type);
+  if (spec) return spec.type;
+  if (LIST_CONTAINER_ALIASES.includes(type)) return LIST_CONTAINER_TYPE;
+  return type;
+}
+
 /** Whether a compat node is a legacy `list` container (flattened on import). */
 function isCompatList(node: RichTextCompatNode): boolean {
-  return node.type === "list" || node.type === "editor-list";
+  return canonicalFlatType(node.type) === LIST_CONTAINER_TYPE;
 }
 
 /** A legacy `list`'s flavour from its `listType`/`tag` (default bullet). */
@@ -203,7 +224,7 @@ function flattenCompatList(
   for (const child of node.children ?? []) {
     if (isCompatList(child)) {
       ids.push(...flattenCompatList(child, ctx, depth + 1));
-    } else if (child.type === "listitem" || child.type === "editor-listitem") {
+    } else if (canonicalFlatType(child.type) === "listitem") {
       ids.push(...flattenCompatListItem(child, ctx, depth, listType));
     } else {
       // A stray non-item, non-list child: import it normally rather than drop it.
