@@ -26,11 +26,12 @@ import {
 } from "react";
 import type { OwnedEditorHandle } from "../core";
 import {
+  EditorToolbar,
   EngineContextMenu,
-  useContextMenu,
-  type ContextMenuController,
+  SelectionFlyout,
+  SlashMenu,
+  useCommandSurfaces,
 } from "./chrome";
-import { EditorToolbar } from "./chrome";
 import type { ToolbarCapabilities, ToolbarLayoutConfig } from "./spi";
 import { FindBar, useFindController, type FindController } from "./chrome";
 import { LinkPopover, useLinkInteraction } from "./chrome";
@@ -117,7 +118,23 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   );
 
   const linkInteraction = useLinkInteraction(store);
-  const contextMenu: ContextMenuController = useContextMenu(store);
+
+  // The flat command surfaces (context menu, selection flyout, slash menu) share one
+  // capability set + one coordinator (docs/024 §8). Defaults mirror the ribbon's so a
+  // host's `toolbarCapabilities` gates every surface identically.
+  const capabilities = useMemo(
+    () =>
+      ({
+        ai: false,
+        insertTable: true,
+        media: false,
+        review: false,
+        ...toolbarCapabilities,
+      }) as ToolbarCapabilities,
+    [toolbarCapabilities],
+  );
+  const surfaces = useCommandSurfaces(store, capabilities);
+  const { requestContextMenu, closeAll: closeSurfaces } = surfaces;
 
   // A click on an inert link mark opens the link editor over it (legacy
   // floating-link-editor parity); other clicks fall through to the editing
@@ -127,6 +144,17 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
       linkInteraction.openAt(event.target as HTMLElement);
     },
     [linkInteraction],
+  );
+
+  // Right-click: open the one scope-merged context menu when commands resolve,
+  // otherwise leave the native menu (docs/024 §6.4/§9).
+  const onContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      if (requestContextMenu(event.clientX, event.clientY)) {
+        event.preventDefault();
+      }
+    },
+    [requestContextMenu],
   );
 
   // Intercept Ctrl/Cmd+F at the surface so virtualization does not break find
@@ -179,21 +207,14 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     () =>
       hideToolbar ? null : (
         <EditorToolbar
-          capabilities={toolbarCapabilities}
+          capabilities={capabilities}
           focusEditor={focusEditor}
           layout={toolbarLayout}
           onFind={openFind}
           store={store}
         />
       ),
-    [
-      focusEditor,
-      hideToolbar,
-      openFind,
-      store,
-      toolbarCapabilities,
-      toolbarLayout,
-    ],
+    [capabilities, focusEditor, hideToolbar, openFind, store, toolbarLayout],
   );
 
   return (
@@ -212,7 +233,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
           className="relative"
           data-engine-surface=""
           onClick={onClick}
-          onContextMenu={contextMenu.onContextMenu}
+          onContextMenu={onContextMenu}
         >
           <FindBar controller={find} />
           <div className={proseClassName} data-engine-prose="">
@@ -223,9 +244,27 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
             interaction={linkInteraction}
             store={store}
           />
+          {/* The three flat command surfaces, all driven by the one coordinator so
+              only one is open at a time (docs/024 §8). */}
           <EngineContextMenu
-            controller={contextMenu}
+            close={closeSurfaces}
+            ctx={surfaces.ctx}
             focusEditor={focusEditor}
+            pos={surfaces.surface?.kind === "context" ? surfaces.surface : null}
+            store={store}
+          />
+          <SelectionFlyout
+            close={closeSurfaces}
+            ctx={surfaces.ctx}
+            focusEditor={focusEditor}
+            open={surfaces.surface?.kind === "flyout"}
+            store={store}
+          />
+          <SlashMenu
+            close={closeSurfaces}
+            ctx={surfaces.ctx}
+            focusEditor={focusEditor}
+            slash={surfaces.surface?.kind === "slash" ? surfaces.surface : null}
             store={store}
           />
         </div>

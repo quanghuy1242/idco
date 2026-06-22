@@ -63,13 +63,13 @@ const mediaAssets = [
     alt: "Launch dashboard screenshot",
     id: "media_launch_dashboard",
     label: "Launch dashboard",
-    previewUrl: "https://picsum.photos/seed/launch/640/360",
+    previewUrl: "https://payload-cdn.quanghuy.dev/zelda-botw-optimized.webp",
   },
   {
     alt: "Editor preview screenshot",
     id: "media_editor_preview",
     label: "Editor preview",
-    previewUrl: "https://picsum.photos/seed/editor/640/360",
+    previewUrl: "https://payload-cdn.quanghuy.dev/zelda-botw-optimized.webp",
   },
 ];
 

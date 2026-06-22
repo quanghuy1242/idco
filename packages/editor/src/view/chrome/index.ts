@@ -5,21 +5,19 @@
  * opposed to the document render itself. All read the SPI registries (`../spi`)
  * and dispatch store commands; none own document rendering or DOM geometry.
  *
- * - `editor-chrome.tsx`   — the main toolbar (`EditorToolbar`)
- * - `toolbar-builtins.tsx`— the built-in Home/Insert tabs+slots+actions (docs/023 §7)
- * - `context-menu.tsx`    — the right-click block/format menu
- * - `link-popover.tsx`    — click-to-edit link editing popover
- * - `find-bar.tsx`        — find-in-page bar + controller
- * - `chrome-commands.ts`  — store commands shared by toolbar + context menu (the
- *                           single source for list-toggle etc., note.md W6)
+ * - `surfaces/`           — the command-surface hosts + coordinator (docs/024 §5.8):
+ *                           ribbon, context menu, selection flyout, slash menu, the
+ *                           §8 coordinator, and the built-in command declarations
+ * - `link-popover.tsx`    — click-to-edit link editing popover (a child overlay)
+ * - `find-bar.tsx`        — find-in-page bar + controller (backs the ribbon's find)
+ * - `chrome-commands.ts`  — store commands shared by surfaces (the single source for
+ *                           list-toggle etc., note.md W6)
  *
  * Importers use `from "./chrome"` / `from "../chrome"` so the folder is the unit.
  * Per-block floating chrome (callout, table) is NOT here — it co-locates with its
  * node view under `nodes/` (note.md VP5).
  */
-export * from "./editor-chrome";
-export * from "./toolbar-builtins";
-export * from "./context-menu";
+export * from "./surfaces";
 export * from "./link-popover";
 export * from "./find-bar";
 export * from "./chrome-commands";

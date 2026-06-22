@@ -4,7 +4,7 @@
  * Layer 3 of the toolbar SPI (docs/023 §5.1): the renderer. It holds **zero**
  * command or layout knowledge — all of it flows in as data from the descriptor
  * registries (Layer 1) through the pure `computeToolbarLayout` (Layer 2). This
- * component only: derives the live `ToolbarActionContext` (selection facts +
+ * component only: derives the live `CommandContext` (selection facts +
  * capabilities) under the toolbar's selection+commit subscription, computes the
  * resolved layout, owns the active-tab state, and renders tabs (React Aria `Tabs`,
  * DaisyUI `tabs-border` underline style) + the active tab's slots + each item by
@@ -29,17 +29,10 @@
  * pre-existing link popover) and no allowlist is needed.
  *
  * Adding a control is registration, not an edit here: a host registers a
- * `ToolbarAction`/tab/slot (docs/023 §5.8) and it appears; this file never grows a
+ * `Command`/tab/slot (docs/023 §5.8) and it appears; this file never grows a
  * branch for it.
  */
-import {
-  Fragment,
-  useCallback,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { Fragment, useCallback, useState, type ReactNode } from "react";
 import { Button as AriaButton } from "react-aria-components";
 import {
   Button,
@@ -50,27 +43,23 @@ import {
   PopoverTrigger,
   Tabs,
 } from "@quanghuy1242/idco-ui";
+import type { EditorStore } from "../../../core";
+import { useStoreVersion } from "./use-store-version";
 import {
-  activeScope,
-  collectSelectionText,
-  type EditorStore,
-} from "../../core";
-import {
+  buildCommandContext,
   computeToolbarLayout,
   DEFAULT_TOOLBAR_LAYOUT,
   listBlockTypes,
-  listMarks,
+  type CommandContext,
   type ResolvedToolbarItem,
   type ResolvedToolbarSlot,
   type ResolvedToolbarTab,
-  type ToolbarActionContext,
   type ToolbarCapabilities,
   type ToolbarLayoutConfig,
-  type ToolbarSelectionFacts,
-} from "../spi";
+} from "../../spi";
 
 // The format marks, block-type chooser, and insert affordances project from the
-// W4/W5/SPI registries; every other control is a registered `ToolbarAction`
+// W4/W5/SPI registries; every other control is a registered `Command`
 // (docs/023). The renderer reads only the resolved layout, so the toolbar and the
 // context menu (which reads the same registries) cannot drift.
 
@@ -83,67 +72,9 @@ const DEFAULT_CAPABILITIES: ToolbarCapabilities = {
   review: false,
 };
 
-/**
- * Subscribe a component to selection + commit so toolbar query state stays live.
- * A hook-local counter is the snapshot: the store has no global revision and the
- * commit hot path must not gain one, so the subscription bumps the counter here.
- */
-function useToolbarVersion(store: EditorStore): number {
-  const versionRef = useRef(0);
-  return useSyncExternalStore(
-    (listener) => {
-      const bump = () => {
-        versionRef.current += 1;
-        listener();
-      };
-      const offSel = store.subscribeSelection(bump);
-      const offCommit = store.subscribeCommit(() => bump());
-      return () => {
-        offSel();
-        offCommit();
-      };
-    },
-    () => versionRef.current,
-    () => 0,
-  );
-}
-
 /** A thin divider between toolbar slots. */
 function Sep() {
   return <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-base-300" />;
-}
-
-/**
- * Derive the live selection facts (docs/023 §5.3) from the model. Real, not the
- * legacy hardcoded `hasSelectedText: false`: selection-scoped actions (comment,
- * AI-on-selection) will depend on these. Computed from `store.query` + the store
- * selection under the existing `useToolbarVersion` subscription, so no new machinery.
- */
-function selectionFacts(store: EditorStore): ToolbarSelectionFacts {
-  const sel = store.selection;
-  const blockTypeQuery = store.query({ type: "current-block-type" });
-  const blockType = typeof blockTypeQuery === "string" ? blockTypeQuery : null;
-  const activeMarks = new Set(
-    listMarks()
-      .filter(
-        (mark) =>
-          store.query({ mark: mark.kind, type: "is-mark-active" }) === true,
-      )
-      .map((mark) => mark.kind),
-  );
-  let hasSelection = false;
-  let selectedText = "";
-  if (sel?.type === "text") {
-    hasSelection =
-      sel.anchor.node !== sel.focus.node ||
-      sel.anchor.offset !== sel.focus.offset;
-    // `collectSelectionText` walks `orderedTextLeaves` (O(document)); a collapsed
-    // caret has no selected text, so skip the scan on the keystroke-commit hot path
-    // and only pay it for a real range.
-    if (hasSelection) selectedText = collectSelectionText(store, sel);
-  }
-  const inObject = sel ? activeScope(store, sel) !== store.bodyId : false;
-  return { activeMarks, blockType, hasSelection, inObject, selectedText };
 }
 
 export function EditorToolbar(props: {
@@ -159,7 +90,7 @@ export function EditorToolbar(props: {
 }) {
   const { store, focusEditor, onFind } = props;
   // Re-read query state whenever selection or content changes.
-  useToolbarVersion(store);
+  useStoreVersion(store);
 
   const run = useCallback(
     (action: () => void) => {
@@ -178,11 +109,7 @@ export function EditorToolbar(props: {
     ...DEFAULT_CAPABILITIES,
     ...props.capabilities,
   } as ToolbarCapabilities;
-  const ctx: ToolbarActionContext = {
-    capabilities,
-    selection: selectionFacts(store),
-    store,
-  };
+  const ctx: CommandContext = buildCommandContext(store, capabilities);
   // Find is a document-global utility, so it lives in the persistent `end` zone like
   // any other global control — but its handler is a host prop (`onFind`), not a store
   // command, so it can't be a self-registered action. Inject it as a `component` item

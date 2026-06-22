@@ -29,6 +29,7 @@ import type {
   NodeId,
   StructuralNode,
 } from "../../core";
+import type { Command, CommandContext } from "./command-registry";
 
 /** Arguments to a structural node's live (editing) container render. */
 export type StructuralContainerArgs = {
@@ -128,6 +129,18 @@ export type StructuralNodeView = {
    * Shift-Tab. Omit it for a container with no Tab behavior.
    */
   handleTab?(args: StructuralTabArgs): boolean;
+  /**
+   * Contribute scope-specific commands when the caret/selection sits inside this
+   * container (docs/024 §5.3/§7.4). The command surfaces enumerate the enclosing
+   * `scopePath` (`resolveCommandList`) and call this on each container, so a table
+   * cell contributes merge/fill/align and a table contributes insert/delete
+   * row+column + header toggles — folding the old bespoke table overlay menus
+   * (`table-interactions`/`table-controls`) into the one model, the same inversion
+   * `renderOverlay`/`handleTab`/`caretInk` use. Return plain `Command` descriptors
+   * tagged with the surfaces + group they belong to; a contributor must never call
+   * `resolveCommandList` itself (docs/024 §9). Omit for a container with no commands.
+   */
+  contributeCommands?(ctx: CommandContext): readonly Command[];
 };
 
 /** Arguments to a structural node's Tab-key handler (note.md VP6). */

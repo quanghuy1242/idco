@@ -158,7 +158,7 @@ const PAYLOAD_SAMPLE = {
         type: "upload",
         value: {
           alt: "A scenic landscape",
-          url: "https://picsum.photos/seed/idco-diagram/800/450",
+          url: "https://payload-cdn.quanghuy.dev/zelda-botw-optimized.webp",
         },
       },
       { type: "horizontalrule" },

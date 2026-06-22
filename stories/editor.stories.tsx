@@ -14,13 +14,13 @@ const mediaAssets = [
     alt: "Mountain sunrise",
     id: "media_sunrise",
     label: "Sunrise over the ridge",
-    previewUrl: "https://picsum.photos/seed/idco-sunrise/640/360",
+    previewUrl: "https://payload-cdn.quanghuy.dev/zelda-botw-optimized.webp",
   },
   {
     alt: "City skyline",
     id: "media_city",
     label: "Evening skyline",
-    previewUrl: "https://picsum.photos/seed/idco-city/640/360",
+    previewUrl: "https://payload-cdn.quanghuy.dev/zelda-botw-optimized.webp",
   },
 ];
 

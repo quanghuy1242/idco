@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 /**
- * Toolbar SPI — the ribbon-lite layout, action registry, capability gating,
- * migration parity, and the parameterized table insert (docs/023 §10).
+ * Ribbon SPI — the tab/slot layout, command registry, capability gating, migration
+ * parity, and the parameterized table insert (docs/023 §10, docs/024 §5.8).
  *
- * These prove the *mechanism*, not pixels (docs/023 §5.5): a feature's appearance
- * is asserted by calling the pure `computeToolbarLayout`, with a fake store for
- * structure and a real store for command dispatch. The rendered DOM behaviour
- * (Bold/Link/Bulleted clicks, the context menu, find) stays covered by
- * `engine-chrome.test.tsx`; the focus/overlay/keyboard concerns are e2e.
+ * These prove the ribbon *mechanism*, not pixels (docs/023 §5.5): a feature's
+ * appearance is asserted by calling the pure `computeToolbarLayout`, with a fake store
+ * for structure and a real store for command dispatch. docs/024 renamed the descriptor
+ * (`ToolbarAction → Command`, `surfaces` is now a placement map); the flat-surface
+ * resolver (`resolveCommandList`) is covered in `engine-command-surface.test.ts`.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -20,35 +20,36 @@ import {
   type StructuralNode,
 } from "../../packages/editor/src/core";
 import {
-  actionTargetsSurface,
+  commandTargetsSurface,
   computeToolbarLayout,
   DEFAULT_TOOLBAR_LAYOUT,
-  getToolbarAction,
-  listToolbarActions,
+  getCommand,
+  listCommands,
   registerBuiltInBlockTypes,
-  registerToolbarAction,
+  registerCommand,
   registerToolbarSlot,
   registerToolbarTab,
-  unregisterToolbarAction,
+  unregisterCommand,
   unregisterToolbarSlot,
   unregisterToolbarTab,
+  type Command,
+  type CommandContext,
+  type CommandScope,
   type ResolvedToolbarLayout,
-  type ToolbarAction,
-  type ToolbarActionContext,
   type ToolbarCapabilities,
 } from "../../packages/editor/src/view/spi";
 import { registerBuiltInMarks } from "../../packages/editor/src/view/render";
 import { registerBuiltInNodeViews } from "../../packages/editor/src/view/nodes";
-import { registerBuiltInToolbarActions } from "../../packages/editor/src/view/chrome";
+import { registerBuiltInCommands } from "../../packages/editor/src/view/chrome";
 
 // Populate every registry the layout reads: marks (home.format), block types
 // (home.text chooser), node views (the Insert `inserts` projection), and the
-// toolbar tabs/slots/actions themselves. All idempotent.
+// ribbon tabs/slots/commands themselves. All idempotent.
 beforeAll(() => {
   registerBuiltInMarks();
   registerBuiltInBlockTypes();
   registerBuiltInNodeViews();
-  registerBuiltInToolbarActions();
+  registerBuiltInCommands();
 });
 
 type QueryResult = string | boolean | null;
@@ -88,10 +89,18 @@ function fakeStore(
   } as unknown as EditorStore;
 }
 
+// The ribbon resolver does not read `scope`, so a root-scope literal suffices here.
+const FAKE_SCOPE: CommandScope = {
+  activeObject: null,
+  innermost: "body" as NodeId,
+  innermostKind: "root",
+  path: [],
+};
+
 function makeCtx(
   store: EditorStore,
   caps: Partial<ToolbarCapabilities> = {},
-): ToolbarActionContext {
+): CommandContext {
   return {
     capabilities: {
       ai: false,
@@ -100,6 +109,7 @@ function makeCtx(
       review: false,
       ...caps,
     } as ToolbarCapabilities,
+    scope: FAKE_SCOPE,
     selection: {
       activeMarks: new Set(),
       blockType: "paragraph",
@@ -177,7 +187,7 @@ function insertedTable(store: EditorStore): StructuralNode {
   return node;
 }
 
-describe("toolbar layout — Home + Insert resolve (docs/023 §5.5/§7)", () => {
+describe("ribbon layout — Home + Insert resolve (docs/023 §5.5/§7)", () => {
   it("resolves Home and Insert under first-release capabilities, Home default", () => {
     const layout = computeToolbarLayout(makeCtx(fakeStore()));
     const ids = layout.tabs.map((t) => t.id);
@@ -230,7 +240,6 @@ describe("toolbar layout — Home + Insert resolve (docs/023 §5.5/§7)", () => 
       "undo",
       "redo",
     ]);
-    // The persistent zone is tab-independent — global.history never shows in a tab.
     expect(layout.tabs.flatMap((t) => t.slots.map((s) => s.id))).not.toContain(
       "global.history",
     );
@@ -250,9 +259,10 @@ describe("toolbar layout — Home + Insert resolve (docs/023 §5.5/§7)", () => 
   });
 });
 
-describe("toolbar action availability + disabled (docs/023 §5.2)", () => {
-  it("removes an unavailable action from the layout entirely", () => {
-    registerToolbarAction({
+describe("ribbon command availability + disabled (docs/023 §5.2)", () => {
+  it("removes an unavailable command from the layout entirely", () => {
+    registerCommand({
+      group: "list",
       icon: "Plus",
       id: "spi-unavailable",
       isAvailable: () => false,
@@ -260,6 +270,7 @@ describe("toolbar action availability + disabled (docs/023 §5.2)", () => {
       label: "Nope",
       run: () => {},
       slot: "home.lists",
+      surfaces: { ribbon: "primary" },
     });
     const ids = slotItemIds(
       computeToolbarLayout(makeCtx(fakeStore())),
@@ -267,10 +278,10 @@ describe("toolbar action availability + disabled (docs/023 §5.2)", () => {
       "home.lists",
     );
     expect(ids).not.toContain("spi-unavailable");
-    unregisterToolbarAction("spi-unavailable");
+    unregisterCommand("spi-unavailable");
   });
 
-  it("keeps a disabled action visible but greyed (undo when !canUndo)", () => {
+  it("keeps a disabled command visible but greyed (undo when !canUndo)", () => {
     const off = computeToolbarLayout(
       makeCtx(fakeStore({ canUndo: false })),
     ).persistentStart.find((s) => s.id === "global.history")!;
@@ -285,58 +296,62 @@ describe("toolbar action availability + disabled (docs/023 §5.2)", () => {
   });
 });
 
-describe("toolbar action SPI contract (docs/023 §5.2/§10)", () => {
+describe("command SPI contract (docs/023 §5.2, docs/024 §5.2)", () => {
   it("is idempotent by id (re-register replaces)", () => {
-    registerToolbarAction({
+    registerCommand({
+      group: "history",
       icon: "Plus",
       id: "spi-dup",
       kind: "button",
       label: "First",
-      slot: "home.history",
+      surfaces: { ribbon: "primary" },
     });
-    registerToolbarAction({
+    registerCommand({
+      group: "history",
       icon: "Plus",
       id: "spi-dup",
       kind: "button",
       label: "Second",
-      slot: "home.history",
+      surfaces: { ribbon: "primary" },
     });
-    expect(getToolbarAction("spi-dup")?.label).toBe("Second");
-    expect(listToolbarActions().filter((a) => a.id === "spi-dup")).toHaveLength(
-      1,
-    );
-    unregisterToolbarAction("spi-dup");
+    expect(getCommand("spi-dup")?.label).toBe("Second");
+    expect(listCommands().filter((a) => a.id === "spi-dup")).toHaveLength(1);
+    unregisterCommand("spi-dup");
   });
 
-  it("lists actions in registration order", () => {
-    registerToolbarAction({
+  it("lists commands in registration order", () => {
+    registerCommand({
+      group: "history",
       icon: "Plus",
       id: "spi-order-a",
       kind: "button",
       label: "A",
-      slot: "home.history",
+      surfaces: { ribbon: "primary" },
     });
-    registerToolbarAction({
+    registerCommand({
+      group: "history",
       icon: "Plus",
       id: "spi-order-b",
       kind: "button",
       label: "B",
-      slot: "home.history",
+      surfaces: { ribbon: "primary" },
     });
-    const ids = listToolbarActions().map((a) => a.id);
+    const ids = listCommands().map((a) => a.id);
     expect(ids.indexOf("spi-order-a")).toBeLessThan(ids.indexOf("spi-order-b"));
-    unregisterToolbarAction("spi-order-a");
-    unregisterToolbarAction("spi-order-b");
+    unregisterCommand("spi-order-a");
+    unregisterCommand("spi-order-b");
   });
 
-  it("a custom action registered into a slot appears in the layout", () => {
-    registerToolbarAction({
+  it("a custom command registered into a ribbon slot appears in the layout", () => {
+    registerCommand({
+      group: "list",
       icon: "Plus",
       id: "spi-custom",
       kind: "button",
       label: "Custom",
       run: () => {},
       slot: "home.lists",
+      surfaces: { ribbon: "primary" },
     });
     expect(
       slotItemIds(
@@ -345,28 +360,31 @@ describe("toolbar action SPI contract (docs/023 §5.2/§10)", () => {
         "home.lists",
       ),
     ).toContain("spi-custom");
-    unregisterToolbarAction("spi-custom");
+    unregisterCommand("spi-custom");
   });
 
-  it("defaults surfaces to ['ribbon'] and excludes flyout-only actions", () => {
-    const ribbonOnly: ToolbarAction = {
+  it("the surfaces map gates ribbon participation; a flyout-only command is excluded", () => {
+    const ribbonOnly: Command = {
+      group: "indent",
       icon: "Plus",
       id: "spi-ribbon-default",
       kind: "button",
       label: "R",
       slot: "home.lists",
+      surfaces: { ribbon: "primary" },
     };
-    expect(actionTargetsSurface(ribbonOnly, "ribbon")).toBe(true);
-    expect(actionTargetsSurface(ribbonOnly, "flyout")).toBe(false);
+    expect(commandTargetsSurface(ribbonOnly, "ribbon")).toBe(true);
+    expect(commandTargetsSurface(ribbonOnly, "flyout")).toBe(false);
 
-    registerToolbarAction({
+    registerCommand({
+      group: "inlineFormat",
       icon: "Plus",
       id: "spi-flyout-only",
       kind: "button",
       label: "F",
       run: () => {},
       slot: "home.lists",
-      surfaces: ["flyout"],
+      surfaces: { flyout: "primary" },
     });
     expect(
       slotItemIds(
@@ -375,25 +393,27 @@ describe("toolbar action SPI contract (docs/023 §5.2/§10)", () => {
         "home.lists",
       ),
     ).not.toContain("spi-flyout-only");
-    unregisterToolbarAction("spi-flyout-only");
+    unregisterCommand("spi-flyout-only");
   });
 
   it("run(ctx) fires the expected store command", () => {
     const calls: unknown[] = [];
-    const action: ToolbarAction = {
+    const action: Command = {
+      group: "indent",
       icon: "Plus",
       id: "spi-run",
       kind: "button",
       label: "Run",
       run: (ctx) => ctx.store.command({ type: "outdent" }),
       slot: "home.lists",
+      surfaces: { ribbon: "primary" },
     };
     action.run!(makeCtx(fakeStore({ command: (c) => calls.push(c) })));
     expect(calls).toEqual([{ type: "outdent" }]);
   });
 });
 
-describe("toolbar capability gating (docs/023 §5.6)", () => {
+describe("ribbon capability gating (docs/023 §5.6)", () => {
   it("removes the Table picker when insertTable is false (Insert survives on blocks)", () => {
     const layout = computeToolbarLayout(
       makeCtx(fakeStore(), { insertTable: false }),
@@ -423,13 +443,15 @@ describe("toolbar capability gating (docs/023 §5.6)", () => {
       order: 99,
     });
     registerToolbarSlot({ id: "spi-host.s", order: 0, tab: "spi-host-tab" });
-    registerToolbarAction({
+    registerCommand({
+      group: "history",
       icon: "Plus",
       id: "spi-host-action",
       kind: "button",
       label: "Host action",
       run: () => {},
       slot: "spi-host.s",
+      surfaces: { ribbon: "primary" },
     });
 
     const off = computeToolbarLayout(makeCtx(fakeStore())).tabs.map(
@@ -442,45 +464,45 @@ describe("toolbar capability gating (docs/023 §5.6)", () => {
     ).tabs.map((t) => t.id);
     expect(on).toContain("spi-host-tab");
 
-    unregisterToolbarAction("spi-host-action");
+    unregisterCommand("spi-host-action");
     unregisterToolbarSlot("spi-host.s");
     unregisterToolbarTab("spi-host-tab");
   });
 });
 
-describe("toolbar migration parity (docs/023 §7.3)", () => {
-  it("the bulleted action toggles a list item on and back off", () => {
+describe("ribbon migration parity (docs/023 §7.3)", () => {
+  it("the bulleted command toggles a list item on and back off", () => {
     const { store, id } = realStore("list me");
-    const action = getToolbarAction("list-bulleted")!;
+    const action = getCommand("list-bulleted")!;
     action.run!(makeCtx(store));
     expect(store.requireTextNode(id).type).toBe("listitem");
     action.run!(makeCtx(store));
     expect(store.requireTextNode(id).type).toBe("paragraph");
   });
 
-  it("the numbered action makes a numbered list item", () => {
+  it("the numbered command makes a numbered list item", () => {
     const { store, id } = realStore("number me");
-    getToolbarAction("list-numbered")!.run!(makeCtx(store));
+    getCommand("list-numbered")!.run!(makeCtx(store));
     expect(store.requireTextNode(id).type).toBe("listitem");
     expect(store.query({ type: "current-list-type" })).toBe("number");
   });
 
   it("indent/outdent dispatch the same commands as before", () => {
     const indentCalls: unknown[] = [];
-    getToolbarAction("indent")!.run!(
+    getCommand("indent")!.run!(
       makeCtx(fakeStore({ command: (c) => indentCalls.push(c) })),
     );
     expect(indentCalls).toEqual([{ type: "indent" }]);
 
     const outdentCalls: unknown[] = [];
-    getToolbarAction("outdent")!.run!(
+    getCommand("outdent")!.run!(
       makeCtx(fakeStore({ command: (c) => outdentCalls.push(c) })),
     );
     expect(outdentCalls).toEqual([{ type: "outdent" }]);
   });
 
-  it("the link action reflects the active link state", () => {
-    const link = getToolbarAction("link")!;
+  it("the link command reflects the active link state", () => {
+    const link = getCommand("link")!;
     expect(link.kind).toBe("popover");
     expect(
       link.isActive!(makeCtx(fakeStore({ query: () => "https://x.test" }))),
@@ -490,8 +512,8 @@ describe("toolbar migration parity (docs/023 §7.3)", () => {
 });
 
 describe("parameterized table insert (docs/023 §7.2)", () => {
-  it("the table action is a capability-gated popover", () => {
-    const action = getToolbarAction("insert.table")!;
+  it("the table command is a capability-gated popover", () => {
+    const action = getCommand("insert.table")!;
     expect(action.kind).toBe("popover");
     expect(
       action.isAvailable!(makeCtx(fakeStore(), { insertTable: false })),

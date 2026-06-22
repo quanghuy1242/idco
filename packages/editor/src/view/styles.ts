@@ -98,7 +98,7 @@ export const ENGINE_TYPOGRAPHY_CSS =
   '[data-engine-view-root] [data-engine-heading="h4"]{font-size:1.1em;}' +
   // Quote: a left rule + faint base tint reading off DaisyUI base tokens (not a
   // washed-out opacity), so it matches the rest of the theme.
-  '[data-engine-view-root] [data-engine-block-type="quote"]{border-left:4px solid color-mix(in oklab, var(--color-base-content, currentColor) 25%, transparent);background:color-mix(in oklab, var(--color-base-content, currentColor) 4%, transparent);border-radius:0 6px 6px 0;font-style:italic;color:color-mix(in oklab, var(--color-base-content, currentColor) 80%, transparent);}' +
+  '[data-engine-view-root] [data-engine-block-type="quote"]{border-left:4px solid color-mix(in oklab, var(--color-base-content, currentColor) 25%, transparent);background:color-mix(in oklab, var(--color-base-content, currentColor) 4%, transparent);border-radius:0 6px 6px 0;font-style:italic;color:color-mix(in oklab, var(--color-base-content, currentColor) 80%, transparent);margin:0.4em 0;}' +
   // Callout: a tinted note box themed per `tone` with the same DaisyUI semantic
   // tokens the `Alert` component uses (info/success/warning/error), so it reads
   // as a callout while editing and matches the resting `alert` render (docs/018
@@ -106,7 +106,7 @@ export const ENGINE_TYPOGRAPHY_CSS =
   // children — paragraphs, lists), so the box is the container div, not a text
   // leaf; these rules reproduce the alert palette on it. The default (no/`info`
   // tone) uses the info token; padding gives the inner blocks gutter room.
-  '[data-engine-view-root] [data-engine-structural="callout"]{border-radius:var(--radius-box, 0.5rem);border:1px solid color-mix(in oklab, var(--color-info, #0ea5e9) 35%, transparent);background:color-mix(in oklab, var(--color-info, #0ea5e9) 10%, var(--color-base-100, transparent));color:var(--color-base-content, CanvasText);padding:8px 1em 8px 2.75rem;}' +
+  '[data-engine-view-root] [data-engine-structural="callout"]{border-radius:var(--radius-box, 0.5rem);border:1px solid color-mix(in oklab, var(--color-info, #0ea5e9) 35%, transparent);background:color-mix(in oklab, var(--color-info, #0ea5e9) 10%, var(--color-base-100, transparent));color:var(--color-base-content, CanvasText);padding:8px 1em 8px 2.75rem;margin:0.5em 0;}' +
   '[data-engine-view-root] [data-engine-callout-tone="success"]{border-color:color-mix(in oklab, var(--color-success, #16a34a) 35%, transparent);background:color-mix(in oklab, var(--color-success, #16a34a) 10%, var(--color-base-100, transparent));}' +
   '[data-engine-view-root] [data-engine-callout-tone="warning"]{border-color:color-mix(in oklab, var(--color-warning, #d97706) 35%, transparent);background:color-mix(in oklab, var(--color-warning, #d97706) 10%, var(--color-base-100, transparent));}' +
   '[data-engine-view-root] [data-engine-callout-tone="error"]{border-color:color-mix(in oklab, var(--color-error, #dc2626) 35%, transparent);background:color-mix(in oklab, var(--color-error, #dc2626) 10%, var(--color-base-100, transparent));}' +

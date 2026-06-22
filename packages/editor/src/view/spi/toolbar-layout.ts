@@ -2,7 +2,7 @@
  * View-layer toolbar layout — Layer 2 of the toolbar SPI (docs/023 §5.1/§5.5).
  *
  * Layer 1 is the descriptor registries (marks, block types, node inserts, and the
- * `toolbar-action-registry`); Layer 3 is the `EditorToolbar` renderer. This file is
+ * `command-registry`); Layer 3 is the `EditorToolbar` renderer. This file is
  * the layer between: the *product surface*. It owns
  *
  * - the tab / slot model (`ToolbarTab`, `ToolbarSlot`) and their registries, so a
@@ -16,7 +16,7 @@
  * The hard rule (docs/023 §5.1): the renderer holds zero command/layout knowledge;
  * all of it flows as data from here. That is what makes the toolbar pluggable.
  *
- * Placement model note (docs/023 §5.2/§5.4/§6.1): a `ToolbarAction` declares its
+ * Placement model note (docs/023 §5.2/§5.4/§6.1): a `Command` declares its
  * own home `slot` (it exists only as a toolbar control, so it has an obvious home),
  * while marks / block-types / inserts — which exist independent of the toolbar — are
  * placed by `ToolbarItem` entries in the layout config. An explicit `action`
@@ -35,12 +35,12 @@ import { getMark, listMarks, type MarkDefinition } from "./mark-registry";
 import { listInsertableStructuralNodes } from "./structural-view";
 import { getNodeView, listInsertableNodes } from "./node-view";
 import {
-  actionTargetsSurface,
-  getToolbarAction,
-  listToolbarActions,
-  type ToolbarAction,
-  type ToolbarActionContext,
-} from "./toolbar-action-registry";
+  commandTargetsSurface,
+  getCommand,
+  listCommands,
+  type Command,
+  type CommandContext,
+} from "./command-registry";
 
 /** A toolbar tab — the top-level task grouping (docs/023 §5.4). */
 export type ToolbarTab = {
@@ -48,7 +48,7 @@ export type ToolbarTab = {
   readonly label: string;
   readonly order: number;
   /** Hidden entirely when this returns false (e.g. no AI provider). */
-  isAvailable?(ctx: ToolbarActionContext): boolean;
+  isAvailable?(ctx: CommandContext): boolean;
 };
 
 /**
@@ -122,7 +122,7 @@ export type ToolbarItem =
       readonly id: string;
       readonly slot: string;
       readonly order?: number;
-      render(ctx: ToolbarActionContext): ReactNode;
+      render(ctx: CommandContext): ReactNode;
     };
 
 /**
@@ -217,14 +217,14 @@ export type ResolvedToolbarItem =
   | (ResolvedItemBase & {
       readonly kind: "action";
       readonly id: string;
-      readonly action: ToolbarAction;
+      readonly action: Command;
       readonly active: boolean;
       readonly disabled: boolean;
     })
   | (ResolvedItemBase & {
       readonly kind: "component";
       readonly id: string;
-      render(ctx: ToolbarActionContext): ReactNode;
+      render(ctx: CommandContext): ReactNode;
     });
 
 export type ResolvedToolbarSlot = {
@@ -309,13 +309,13 @@ function resolveInsert(
 
 /** Resolve a registered action into its render-ready item, or null if unavailable. */
 function resolveAction(
-  action: ToolbarAction,
-  ctx: ToolbarActionContext,
+  action: Command,
+  ctx: CommandContext,
 ): ResolvedToolbarItem | null {
   // Provenance gates availability (docs/023 §4.9): an unavailable action is removed
   // from the layout entirely, so an empty slot/tab around it can be dropped.
   if (action.isAvailable && !action.isAvailable(ctx)) return null;
-  if (!actionTargetsSurface(action, "ribbon")) return null;
+  if (!commandTargetsSurface(action, "ribbon")) return null;
   return {
     action,
     active: action.isActive?.(ctx) ?? false,
@@ -330,7 +330,7 @@ function resolveAction(
 /** Resolve one config item against the registries + context; null drops it. */
 function resolveConfigItem(
   item: ToolbarItem,
-  ctx: ToolbarActionContext,
+  ctx: CommandContext,
 ): ResolvedToolbarItem[] {
   // `order` is the in-slot sort key; config items carry no responsive priority
   // (priority 0), unlike actions which set their own `responsivePriority`.
@@ -421,7 +421,7 @@ function resolveConfigItem(
       return out;
     }
     case "action": {
-      const action = getToolbarAction(item.actionId);
+      const action = getCommand(item.actionId);
       if (!action) return [];
       const resolved = resolveAction(action, ctx);
       // An explicit placement overrides the action's own order with the item's.
@@ -449,7 +449,7 @@ function resolveConfigItem(
  * appearance is asserted by calling this, no DOM.
  */
 export function computeToolbarLayout(
-  ctx: ToolbarActionContext,
+  ctx: CommandContext,
   config: ToolbarLayoutConfig = DEFAULT_TOOLBAR_LAYOUT,
 ): ResolvedToolbarLayout {
   const hidden = new Set(config.hiddenIds ?? []);
@@ -479,7 +479,7 @@ export function computeToolbarLayout(
     }
     // Registered actions whose own slot is this one, except those an `action`
     // item already placed (here or elsewhere) and any hidden by id.
-    for (const action of listToolbarActions()) {
+    for (const action of listCommands()) {
       if (action.slot !== slot.id) continue;
       if (hidden.has(action.id)) continue;
       if (explicitlyPlacedActionIds.has(action.id)) continue;
@@ -542,9 +542,9 @@ export function computeToolbarLayout(
  * The built-in arrangement (docs/023 §6.3/§7). It places only the auto-projected
  * groups: the block-type chooser in `home.text` and the format-mark group in
  * `home.format`. Every other built-in control (undo/redo, lists, indent, link, the
- * table picker) is a registered `ToolbarAction` that self-places via its `slot`, so
+ * table picker) is a registered `Command` that self-places via its `slot`, so
  * it does not need a config entry here. The tabs and slots themselves are registered
- * by `registerBuiltInToolbarActions` (`chrome/toolbar-builtins`).
+ * by `registerBuiltInCommands` (`chrome/surfaces/command-builtins`).
  *
  * Insert places the Table dimension-picker action (via its `slot`) plus an `inserts`
  * projection of every *other* registered insertable (callout, code, media, embed,

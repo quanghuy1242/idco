@@ -130,6 +130,28 @@ export const mediaView: NodeView = {
   ariaLabel: "Image",
   ariaRole: "img",
   chromeMeta: { icon: "Image", label: "Image" },
+  // Object-scope command contribution (docs/024 §5.3/§7.4): right-clicking an image
+  // resolves the object scope and shows its `object`-group commands in the one context
+  // menu — where today an object falls back to the native menu. Image *settings* (alt,
+  // caption) stay the config form (`renderLive`/the gear); this is a *command*. The
+  // object id is the active/selected object from the resolved scope.
+  contributeCommands: (ctx) => {
+    const id =
+      ctx.scope.activeObject ??
+      (ctx.scope.innermostKind === "object" ? ctx.scope.innermost : null);
+    if (!id) return [];
+    return [
+      {
+        group: "object",
+        icon: "Trash2",
+        id: "media.remove",
+        kind: "button",
+        label: "Remove image",
+        run: (c) => c.store.command({ node: id, type: "remove-block" }),
+        surfaces: { contextMenu: "primary" },
+      },
+    ];
+  },
   insert: {
     createData: () => ({ alt: "", caption: "", src: "" }),
     group: "Media",

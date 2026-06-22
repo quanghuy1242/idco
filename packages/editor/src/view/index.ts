@@ -76,32 +76,38 @@ export {
   registerBlockType,
   type BlockTypeDefinition,
 } from "./spi";
-// Toolbar SPI (docs/023): the action/tab/slot registries + descriptor types are the
-// host extension surface; `computeToolbarLayout` and the `Resolved*` types stay
-// orchestrator-internal (§5.8), so they are deliberately not re-exported here.
+// Command-surface SPI (docs/024 §5.7): the command registry + tab/slot registries +
+// descriptor/context/group types are the host extension surface. `resolveCommandList`,
+// the `Resolved*` types, `computeToolbarLayout`, and the internal context builders
+// stay orchestrator-internal (deep-imported by the surface hosts + tests, docs/024
+// §5.7), so they are deliberately not re-exported here.
 export {
-  actionTargetsSurface,
+  COMMAND_GROUP_ORDER,
+  commandTargetsSurface,
   DEFAULT_TOOLBAR_LAYOUT,
-  getToolbarAction,
-  listToolbarActions,
+  getCommand,
+  listCommands,
   listToolbarSlots,
   listToolbarTabs,
-  registerToolbarAction,
+  registerCommand,
   registerToolbarSlot,
   registerToolbarTab,
-  unregisterToolbarAction,
+  unregisterCommand,
   unregisterToolbarSlot,
   unregisterToolbarTab,
-  type ToolbarAction,
-  type ToolbarActionContext,
-  type ToolbarActionKind,
-  type ToolbarActionRenderContext,
+  type Command,
+  type CommandContext,
+  type CommandGroup,
+  type CommandKind,
+  type CommandPlacement,
+  type CommandRenderContext,
+  type CommandScope,
+  type CommandSurface,
   type ToolbarCapabilities,
   type ToolbarItem,
   type ToolbarLayoutConfig,
   type ToolbarSelectionFacts,
   type ToolbarSlot,
-  type ToolbarSurface,
   type ToolbarTab,
 } from "./spi";
 export { sanitizeHtmlToCompat } from "./paste-html";

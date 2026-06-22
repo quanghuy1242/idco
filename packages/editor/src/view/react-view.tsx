@@ -53,7 +53,7 @@ import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
 import { registerBuiltInMarks } from "./render";
 import { registerBuiltInBlockTypes } from "./spi";
-import { registerBuiltInToolbarActions } from "./chrome";
+import { registerBuiltInCommands } from "./chrome";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_VIEWPORT_HEIGHT,
@@ -83,12 +83,12 @@ registerBuiltInMarks();
 // And the built-in block types (note.md W5), same rationale: the toolbar + context
 // menu read `listBlockTypes()`, and `selection-overlay` reads `blockTypeRole`.
 registerBuiltInBlockTypes();
-// And the built-in toolbar tabs/slots/actions (docs/023 §5.2/§9): this explicit
-// call — not a bare module-load side effect — is what keeps the package
-// `sideEffects: false` safe while guaranteeing `computeToolbarLayout` sees the Home
-// + Insert surface regardless of import order. Idempotent with the builtins module's
-// own self-call.
-registerBuiltInToolbarActions();
+// And the built-in commands — ribbon tabs/slots + the cross-surface commands
+// (docs/023 §5.2/§9, docs/024 §5.3): this explicit call — not a bare module-load side
+// effect — is what keeps the package `sideEffects: false` safe while guaranteeing the
+// resolvers see the built-in commands regardless of import order. Idempotent with the
+// builtins module's own self-call.
+registerBuiltInCommands();
 
 // The diagnostics + imperative-handle types live in the diagnostics controller;
 // re-export them here so the public view surface keeps the same names.

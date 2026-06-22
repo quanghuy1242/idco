@@ -15,6 +15,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, expect, it } from "vitest";
@@ -72,8 +73,11 @@ describe("editor chrome (Phase 8)", () => {
     act(() => {
       ref.current!.selectText(ids[0]!, 0, ids[0]!, 5);
     });
+    // A non-collapsed selection now also raises the selection flyout, which carries
+    // its own Bold (docs/024 §7.2). Scope to the ribbon so we drive the toolbar's.
+    const toolbar = screen.getByRole("toolbar", { name: "Formatting toolbar" });
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+      fireEvent.click(within(toolbar).getByRole("button", { name: "Bold" }));
     });
     await waitFor(() =>
       expect(
@@ -97,8 +101,10 @@ describe("editor chrome (Phase 8)", () => {
     act(() => {
       ref.current!.selectText(ids[0]!, 4, ids[0]!, 8);
     });
+    // Scope to the ribbon: the selection flyout also carries a Link (docs/024 §7.2).
+    const toolbar = screen.getByRole("toolbar", { name: "Formatting toolbar" });
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Link" }));
+      fireEvent.click(within(toolbar).getByRole("button", { name: "Link" }));
     });
     const input = await screen.findByRole("textbox", { name: "Link URL" });
     await act(async () => {

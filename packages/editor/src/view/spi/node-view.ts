@@ -29,6 +29,7 @@ import {
   registerStructuralView,
   type StructuralNodeView,
 } from "./structural-view";
+import type { Command, CommandContext } from "./command-registry";
 
 /** Arguments to a node's resting (baked) render. `baked` is always non-null. */
 export type NodeViewRestingArgs = {
@@ -159,6 +160,18 @@ export type NodeView = {
    * `react-view`.
    */
   renderOverlay?(args: NodeOverlayArgs): ReactNode;
+  /**
+   * Contribute scope-specific commands when this object is the active/selected
+   * scope (docs/024 §5.3/§7.4) — the object twin of `StructuralNodeView.contributeCommands`.
+   * The command surfaces enumerate the scope (`resolveCommandList`) and call this on
+   * each enclosing node, so an object adds its own right-click/flyout/slash commands
+   * (an image: replace, alt text) with zero edits to any surface — the same inversion
+   * `renderOverlay`/`caretInk` use. Return plain `Command` descriptors tagged with the
+   * surfaces + group they belong to; a contributor must never call `resolveCommandList`
+   * itself (docs/024 §9 — infinite loop). This is *commands*, not the config form: the
+   * settings gear stays `renderChrome`/`configFields`.
+   */
+  contributeCommands?(ctx: CommandContext): readonly Command[];
 };
 
 const NODE_VIEWS = new Map<string, NodeView>();

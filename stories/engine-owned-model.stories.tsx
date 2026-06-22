@@ -11,7 +11,7 @@ import {
   makeObjectNode,
   makeStructuralNode,
   makeTextNode,
-  registerToolbarAction,
+  registerCommand,
   registerToolbarSlot,
   registerToolbarTab,
   type BlockRegistry,
@@ -190,21 +190,28 @@ export const Phase8ToolbarEditor: Story = () => {
 function registerToolsTab(): void {
   registerToolbarTab({ id: "tools", label: "Tools", order: 10 });
   registerToolbarSlot({ id: "tools.insert", order: 0, tab: "tools" });
-  registerToolbarAction({
+  // One descriptor, two surfaces (docs/024 §5.2): the same command lives on the
+  // ribbon Tools tab *and* the slash menu (type "/star"), proving a host extends every
+  // surface by declaring `surfaces`, not by writing a fifth aggregation.
+  registerCommand({
+    group: "insert",
     icon: "Plus",
     id: "tools.insert-star",
+    keywords: ["star", "★"],
     kind: "button",
     label: "Insert star",
     run: (ctx) => ctx.store.command({ text: "★", type: "insert-text" }),
     slot: "tools.insert",
+    surfaces: { ribbon: "primary", slash: "primary" },
   });
 }
 
 /**
- * docs/023 — the toolbar SPI. The same seeded editor as Phase8, but a "Tools" tab
- * (registered through `registerToolbarTab`/`registerToolbarSlot`/
- * `registerToolbarAction`) now appears in the ribbon alongside Home and Insert,
- * proving a host extends the toolbar by registration alone.
+ * docs/023 + docs/024 — the command-surface SPI. The same seeded editor as Phase8, but
+ * a "Tools" tab (registered through `registerToolbarTab`/`registerToolbarSlot`/
+ * `registerCommand`) now appears in the ribbon alongside Home and Insert, and its
+ * "Insert star" command is also reachable from the slash menu (type `/star`) — proving a
+ * host extends every surface by registration alone (docs/024 §5.2/§6.1).
  */
 export const Phase8ToolbarSpiDemo: Story = () => {
   const store = useMemo(() => createFormattedRunStore(), []);
@@ -662,7 +669,7 @@ function createMixedBookStore() {
     objectNode(allocator, registry, "media", {
       alt: "Diagram",
       caption: "A baked media block",
-      src: "https://example.com/diagram.png",
+      src: "https://payload-cdn.quanghuy.dev/zelda-botw-optimized.webp",
     }),
     heading("Second section"),
     text("An embed block resting baked, activatable through its config panel."),

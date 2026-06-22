@@ -39,6 +39,12 @@ async function selectFirstBlock(
   );
 }
 
+/** The ribbon toolbar, used to disambiguate from the selection flyout (docs/024 §7.2),
+ *  which carries its own Bold/Link buttons over a selection. */
+function ribbon(page: Page) {
+  return page.getByRole("toolbar", { name: "Formatting toolbar" });
+}
+
 async function compatJson(page: Page): Promise<string> {
   return page.evaluate((key) => {
     const api = (
@@ -56,7 +62,7 @@ test("the bold toolbar button toggles a bold mark on the model selection", async
 }) => {
   await open(page);
   await selectFirstBlock(page, 0, 5);
-  await page.getByRole("button", { name: "Bold", exact: true }).click();
+  await ribbon(page).getByRole("button", { name: "Bold", exact: true }).click();
   // The model now carries a bold run: the compat projection has format bit 1.
   await expect
     .poll(async () => {
@@ -136,7 +142,7 @@ test("the find popover opens, searches the model, and stays open while navigatin
 test("the link popover sets a link on the selection", async ({ page }) => {
   await open(page);
   await selectFirstBlock(page, 0, 5);
-  await page.getByRole("button", { name: "Link", exact: true }).click();
+  await ribbon(page).getByRole("button", { name: "Link", exact: true }).click();
   const url = page.getByRole("textbox", { name: "Link URL" });
   await url.waitFor({ state: "visible" });
   await url.fill("https://idco.dev");
@@ -207,4 +213,85 @@ test("the Insert table dimension picker inserts a sized table (docs/023 §7.2)",
       return table?.children?.length ?? 0;
     })
     .toBe(3);
+});
+
+test("the selection flyout appears over a selection and applies bold (docs/024 §7.2)", async ({
+  page,
+}) => {
+  await open(page);
+  await selectFirstBlock(page, 0, 5);
+  // A settled non-collapsed selection raises the flyout (its own command bar).
+  const flyout = page.locator("[data-engine-flyout]");
+  await flyout.waitFor({ state: "visible" });
+  await flyout.getByRole("button", { name: "Bold", exact: true }).click();
+  await expect
+    .poll(async () => {
+      const doc = JSON.parse(await compatJson(page));
+      const para = doc.root.children[0];
+      return (para.children as { format?: number }[]).some(
+        (c) => ((c.format ?? 0) & 1) === 1,
+      );
+    })
+    .toBe(true);
+});
+
+test("a right-click closes the selection flyout (precedence, docs/024 §8)", async ({
+  page,
+}) => {
+  await open(page);
+  await selectFirstBlock(page, 0, 5);
+  await page.locator("[data-engine-flyout]").waitFor({ state: "visible" });
+  // The context menu (explicit) wins over the flyout (ambient): opening it closes
+  // the flyout, so the two never show at once.
+  await page
+    .locator("[data-engine-text-id]")
+    .first()
+    .click({ button: "right" });
+  await page
+    .locator("[data-engine-context-menu]")
+    .waitFor({ state: "visible" });
+  await expect(page.locator("[data-engine-flyout]")).toHaveCount(0);
+});
+
+test("the slash menu inserts a block from the committed input (docs/024 §7.3)", async ({
+  page,
+}) => {
+  await open(page);
+  // Focus the first block, go to its end, type a space then "/" so the slash sits at
+  // a valid trigger position (after whitespace), then filter to the table.
+  await page.locator("[data-engine-text-id]").first().click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" /table");
+  const menu = page.locator("[data-engine-slash]");
+  await menu.waitFor({ state: "visible" });
+  await menu.getByRole("option", { name: "Table" }).first().click();
+  // The slash insert dispatched the generic structural insert (default 3×3 table),
+  // and removed the typed "/table" in the same flow (docs/024 §7.3).
+  await expect
+    .poll(async () => {
+      const doc = JSON.parse(await compatJson(page));
+      return (doc.root.children as { type: string }[]).some(
+        (c) => c.type === "table",
+      );
+    })
+    .toBe(true);
+});
+
+test("right-click in a table cell shows table ops in one menu (docs/024 §6.4)", async ({
+  page,
+}) => {
+  await open(page);
+  // Insert a table via the ribbon, then right-click inside a cell.
+  await page.locator("[data-engine-text-id]").first().click();
+  await page.getByRole("tab", { name: "Insert" }).click();
+  await page.getByRole("button", { name: "Table", exact: true }).click();
+  await page.getByRole("button", { name: "2 by 3", exact: true }).click();
+  const cell = page.locator('[data-engine-structural="tablecell"]').first();
+  await cell.waitFor({ state: "visible" });
+  await cell.click();
+  await cell.click({ button: "right" });
+  // The one context menu now carries the table's scope-contributed structure ops.
+  await expect(
+    page.getByRole("menuitem", { name: "Insert row above" }),
+  ).toBeVisible();
 });

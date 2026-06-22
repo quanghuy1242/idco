@@ -8,8 +8,12 @@
  * fill color / vertical align. Targets are resolved *live at action time* — a
  * genuine ≥2-cell range the anchor is inside, else the anchor (hovered) cell — so
  * the button always acts on the cell it visually belongs to, and a stale range is
- * dropped as soon as the caret moves. Right-click stays the editor's
- * `EngineContextMenu` (one menu only). Pointer/layout-driven, so it is
+ * dropped as soon as the caret moves. The same cell ops are ALSO contributed to the
+ * right-click context menu (docs/024 §7.4, `table-commands`); both this hover popover
+ * and the context menu dispatch the same `core/table/operations`, so there is no drift
+ * — the user gets a discoverable-on-hover affordance plus a right-click path (the user
+ * asked to keep both). The drag range is published to the per-store `cell-range` channel
+ * so the context menu's "Merge cells" can target it. Pointer/layout-driven, so it is
  * typecheck/build-verified and exercised manually.
  */
 import { createPortal } from "react-dom";
@@ -26,6 +30,7 @@ import {
   tableGrid,
   unmergeCell,
 } from "../../../core/table/operations";
+import { setCellRange } from "./cell-range";
 
 type Coords = { readonly row: number; readonly col: number };
 
@@ -106,6 +111,13 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
   const pinnedRef = useRef<CellHit | null>(null);
   const anchorRef = useRef<CellHit | null>(null);
   rangeRef.current = range;
+
+  // Mirror the drag range into the per-store channel so the right-click context menu's
+  // "Merge cells" contribution can target it at menu-open time (docs/024 §7.4). The
+  // hover popover below uses its own `rangeRef`; this only feeds the context menu.
+  useEffect(() => {
+    setCellRange(store, range);
+  }, [store, range]);
 
   // The cell the button is attached to: the pinned cell while the menu is open,
   // else the hovered cell. Actions hit this cell (the one the button visually

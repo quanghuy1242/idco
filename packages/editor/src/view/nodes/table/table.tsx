@@ -28,6 +28,10 @@ import { tabWithinTable } from "../../../core/table/operations";
 import { type StructuralNodeView } from "../../spi";
 import { TableControls } from "./table-controls";
 import { TableInteractions } from "./table-interactions";
+import {
+  contributeCellCommands,
+  contributeTableCommands,
+} from "./table-commands";
 
 /** Cell classes copied from the reader `RichTextTableCell` so live matches rest. */
 const CELL_CLASS =
@@ -86,6 +90,11 @@ export const tableStructuralView: StructuralNodeView = {
   // VP6) so this table-specific behavior lives with the table; `tabWithinTable`
   // self-checks the caret and returns false when it is not in a table.
   handleTab: ({ store, forward }) => tabWithinTable(store, forward),
+  // The table's structure ops (insert/delete row+column, header toggles, row numbers,
+  // layout, remove) are scope contributions now (docs/024 §7.4), so right-clicking a
+  // cell shows them in the one context menu. The hover handles in `TableControls` stay
+  // for the genuinely-spatial insert/delete/resize gestures.
+  contributeCommands: contributeTableCommands,
   renderContainer: ({ node, registerBlock, children }) => {
     const colWidths = numberArray(node.attrs?.colWidths);
     const layout =
@@ -196,5 +205,9 @@ export const tableCellStructuralView: StructuralNodeView = {
     const background = stringAttr(node.attrs?.backgroundColor);
     return background ? readableTextColor(background) : undefined;
   },
+  // Cell ops (merge/unmerge/fill/align) are scope contributions now (docs/024 §7.4):
+  // the former floating `…` popover is gone; the cell-range drag that feeds "Merge"
+  // stays spatial in `TableInteractions`.
+  contributeCommands: contributeCellCommands,
   type: "tablecell",
 };
