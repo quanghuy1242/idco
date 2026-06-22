@@ -1,10 +1,13 @@
 import type { Story, StoryDefault } from "@ladle/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { CodeEditor, ConfirmDialog } from "@idco/ui";
 import {
   OwnedModelEditor,
   RestingDocument,
   createEditorStoreFromCompat,
   importPayloadLexical,
+  registerCommand,
+  unregisterCommand,
   type EditorStore,
   type UploadImage,
 } from "../packages/editor/src";
@@ -207,6 +210,33 @@ const fakeUpload: UploadImage = async (file) => {
 export const FullEditor: Story = () => {
   const { store, report } = usePhase8Store();
   const [saved, setSaved] = useState("clean");
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const [json, setJson] = useState("");
+  // Add a "Save" button next to undo/redo through the command SPI (docs/023/024):
+  // a `button` command in the persistent `global.history` slot. The `useState`
+  // initializer registers it during this story's first render — before the child
+  // editor's ribbon renders — so it is present on first paint (the same pattern the
+  // Tools-tab demo uses). Its `run` opens a read-only dialog with the editor's
+  // current JSON snapshot, read live from `ctx.store` at click time.
+  useState(() => {
+    registerCommand({
+      group: "history",
+      icon: "Save",
+      id: "story.save",
+      kind: "button",
+      label: "Save",
+      order: 2,
+      run: (ctx) => {
+        setJson(JSON.stringify(ctx.store.toSnapshot(), null, 2));
+        setJsonOpen(true);
+      },
+      slot: "global.history",
+      surfaces: { ribbon: "primary" },
+    });
+    return null;
+  });
+  // Drop the command on unmount so it does not leak into the other editor stories.
+  useEffect(() => () => unregisterCommand("story.save"), []);
   return (
     <div style={{ maxWidth: 900 }}>
       <OwnedModelEditor
@@ -222,6 +252,23 @@ export const FullEditor: Story = () => {
         uploadImage={fakeUpload}
         virtualize={false}
       />
+      <ConfirmDialog
+        confirmLabel="Close"
+        onConfirm={() => {}}
+        onOpenChange={setJsonOpen}
+        open={jsonOpen}
+        size="xl"
+        title="Document JSON (read-only)"
+      >
+        <CodeEditor
+          label="store.toSnapshot()"
+          language="json"
+          maxHeight="lg"
+          onChange={() => {}}
+          readOnly
+          value={json}
+        />
+      </ConfirmDialog>
       <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
         Try the table: hover it, then use the chrome's cell button (paint
         bucket) to merge a dragged cell range, fill a cell color, or set
