@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RichTextSectionHeightCache } from "../../packages/editor/src/legacy/model/height-cache";
+import { RichTextSectionHeightCache } from "../../packages/editor-legacy/src/model/height-cache";
 
 describe("engine height cache", () => {
   it("keys measured heights by section id and content signature", () => {

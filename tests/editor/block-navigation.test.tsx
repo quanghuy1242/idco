@@ -17,9 +17,9 @@ import {
 import {
   CodeBlockNode,
   RICH_TEXT_DECORATOR_NODES,
-} from "../../packages/editor/src/legacy/nodes";
-import { BlockNavigationPlugin } from "../../packages/editor/src/legacy/plugins/block-navigation-plugin";
-import { GapCursorPlugin } from "../../packages/editor/src/legacy/plugins/gap-cursor-plugin";
+} from "../../packages/editor-legacy/src/nodes";
+import { BlockNavigationPlugin } from "../../packages/editor-legacy/src/plugins/block-navigation-plugin";
+import { GapCursorPlugin } from "../../packages/editor-legacy/src/plugins/gap-cursor-plugin";
 
 function Capture({ onReady }: { onReady: (editor: LexicalEditor) => void }) {
   const [editor] = useLexicalComposerContext();

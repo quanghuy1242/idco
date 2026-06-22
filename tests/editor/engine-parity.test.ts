@@ -175,13 +175,17 @@ describe("parity checklist (AC4)", () => {
 });
 
 describe("opt-in export (AC5)", () => {
-  it("exposes the engine surface as an explicit export alongside the default editor", async () => {
+  it("exposes the engine surface on the root; the legacy editor lives in its own package", async () => {
     const pkg = await import("../../packages/editor/src");
-    // The opt-in engine surface.
+    // The owned engine surface is the root's only API.
     expect(typeof pkg.OwnedModelEditor).toBe("object"); // forwardRef object
     expect(typeof pkg.OwnedModelEditorView).toBe("object");
     expect(typeof pkg.createEditorStore).toBe("function");
-    // The default standard editor remains exported, unchanged (G6).
-    expect(typeof pkg.RichTextEditor).toBe("function");
+    // The legacy Lexical editor was extracted (note.md Legacy extraction track):
+    // it is no longer re-exported from the owned root, only from its own package,
+    // so the owned engine carries no Lexical.
+    expect("RichTextEditor" in pkg).toBe(false);
+    const legacy = await import("../../packages/editor-legacy/src");
+    expect(typeof legacy.RichTextEditor).toBe("function");
   });
 });

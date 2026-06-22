@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ensureDocumentNodeIds } from "@idco/editor";
-import { normalizeDocument } from "../../packages/editor/src/legacy/model/normalize";
-import { lexicalEditorState } from "../../packages/editor/src/legacy/model/serialize";
-import type { RichTextEditorDocument } from "@idco/editor";
+import { ensureDocumentNodeIds } from "@quanghuy1242/idco-editor-legacy";
+import { normalizeDocument } from "../../packages/editor-legacy/src/model/normalize";
+import { lexicalEditorState } from "../../packages/editor-legacy/src/model/serialize";
+import type { RichTextEditorDocument } from "@quanghuy1242/idco-editor-legacy";
 
 describe("engine stable node ids", () => {
   it("adds unique stable ids to top-level blocks", () => {

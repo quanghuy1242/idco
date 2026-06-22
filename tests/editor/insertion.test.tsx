@@ -16,8 +16,8 @@ import {
   INSERT_RICH_TEXT_NODE_COMMAND,
   RICH_TEXT_DECORATOR_NODES,
   RichTextNodePlugin,
-} from "../../packages/editor/src/legacy/nodes";
-import { EditorParagraphNode } from "../../packages/editor/src/legacy/nodes/identified-block-nodes";
+} from "../../packages/editor-legacy/src/nodes";
+import { EditorParagraphNode } from "../../packages/editor-legacy/src/nodes/identified-block-nodes";
 
 function Capture({ onReady }: { onReady: (editor: LexicalEditor) => void }) {
   const [editor] = useLexicalComposerContext();

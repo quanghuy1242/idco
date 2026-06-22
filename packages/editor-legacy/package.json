@@ -1,5 +1,5 @@
 {
-  "name": "@quanghuy1242/idco-editor",
+  "name": "@quanghuy1242/idco-editor-legacy",
   "version": "0.1.19",
   "type": "module",
   "sideEffects": false,
@@ -17,9 +17,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@quanghuy1242/idco-content-renderer": "workspace:^",
     "@quanghuy1242/idco-lib": "workspace:^",
     "@quanghuy1242/idco-ui": "workspace:^",
+    "@lexical/link": "0.45.0",
+    "@lexical/list": "0.45.0",
+    "@lexical/mark": "0.45.0",
+    "@lexical/markdown": "0.45.0",
+    "@lexical/react": "0.45.0",
+    "@lexical/rich-text": "0.45.0",
+    "@lexical/selection": "0.45.0",
+    "@lexical/table": "0.45.0",
+    "@lexical/utils": "0.45.0",
+    "lexical": "0.45.0",
     "react-aria-components": "1.17.0"
   },
   "peerDependencies": {

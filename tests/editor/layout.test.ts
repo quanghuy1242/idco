@@ -4,7 +4,7 @@ import {
   resizeColumnWidths,
   splitColumnWidths,
   tableSeedAvailableWidth,
-} from "../../packages/editor/src/legacy/model/layout";
+} from "../../packages/editor-legacy/src/model/layout";
 
 const sum = (widths: readonly number[]) => widths.reduce((a, b) => a + b, 0);
 

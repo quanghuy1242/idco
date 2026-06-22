@@ -24,9 +24,17 @@ function isEditorPackageSource(filename) {
   return filename.includes("/packages/editor/src/");
 }
 
+// The legacy Lexical editor was extracted to its own product-neutral package
+// (note.md Legacy extraction track). It is subject to the same @idco boundary,
+// and the Lexical-only update-listener rule moved here with the Lexical code.
+function isEditorLegacyPackageSource(filename) {
+  filename = normalizeFilename(filename);
+  return filename.includes("/packages/editor-legacy/src/");
+}
+
 function isEditorPerformanceSource(filename) {
   filename = normalizeFilename(filename);
-  return filename.endsWith("/packages/editor/src/legacy/plugins/editor-performance.ts");
+  return filename.endsWith("/packages/editor-legacy/src/plugins/editor-performance.ts");
 }
 
 function isEngineCoreSource(filename) {
@@ -51,7 +59,8 @@ function isIdcoPackageSource(filename) {
   return (
     isUiPackageSource(filename) ||
     isLibPackageSource(filename) ||
-    isEditorPackageSource(filename)
+    isEditorPackageSource(filename) ||
+    isEditorLegacyPackageSource(filename)
   );
 }
 
@@ -185,7 +194,7 @@ var editorNoDirectUpdateListenerRule = {
   meta: { type: "problem", docs: { description: "Lexical editor update listeners must use the editor performance scheduler contract" } },
   create: function (context) {
     var filename = context.filename || context.physicalFilename || "";
-    if (!isEditorPackageSource(filename) || isEditorPerformanceSource(filename)) return {};
+    if (!isEditorLegacyPackageSource(filename) || isEditorPerformanceSource(filename)) return {};
 
     return {
       CallExpression: function (node) {

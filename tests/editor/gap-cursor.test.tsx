@@ -31,13 +31,13 @@ import {
   CodeBlockNode,
   RICH_TEXT_DECORATOR_NODES,
   RichTextNodePlugin,
-} from "../../packages/editor/src/legacy/nodes";
-import { BlockControlsPlugin } from "../../packages/editor/src/legacy/plugins/block-controls-plugin";
-import { BlockNavigationPlugin } from "../../packages/editor/src/legacy/plugins/block-navigation-plugin";
+} from "../../packages/editor-legacy/src/nodes";
+import { BlockControlsPlugin } from "../../packages/editor-legacy/src/plugins/block-controls-plugin";
+import { BlockNavigationPlugin } from "../../packages/editor-legacy/src/plugins/block-navigation-plugin";
 import {
   GapCursorPlugin,
   SET_GAP_CURSOR_COMMAND,
-} from "../../packages/editor/src/legacy/plugins/gap-cursor-plugin";
+} from "../../packages/editor-legacy/src/plugins/gap-cursor-plugin";
 
 function Capture({ onReady }: { onReady: (editor: LexicalEditor) => void }) {
   const [editor] = useLexicalComposerContext();

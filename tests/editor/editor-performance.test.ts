@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEditorSchedulerTask } from "../../packages/editor/src/legacy/plugins/editor-performance";
+import { createEditorSchedulerTask } from "../../packages/editor-legacy/src/plugins/editor-performance";
 
 describe("editor performance scheduler", () => {
   it("coalesces debounced work to the latest pending payload and records dashboard metrics", async () => {

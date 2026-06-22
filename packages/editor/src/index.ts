@@ -3,8 +3,9 @@
  *
  * Curated and grouped so the **node SPI** — the one-call way to add a custom block
  * (docs/016) — is the headline, not buried in a wildcard re-export. The owned-model
- * engine is the supported API; the legacy Lexical editor is re-exported at the
- * bottom marked deprecated (prefer the `@quanghuy1242/idco-editor/legacy` entry).
+ * engine is the only API this package exposes; the legacy Lexical editor now lives
+ * in its own package (`@quanghuy1242/idco-editor-legacy`) so nothing here pulls
+ * Lexical (note.md Legacy extraction track).
  *
  * Deep engine internals (the step set, scheduler internals, position mapping, the
  * transaction builder, low-level offset helpers) are intentionally NOT on this
@@ -233,33 +234,7 @@ export { safeHref } from "./core";
 export { calculateVirtualRange } from "./core/virtual-range";
 
 // ============================================================================
-// DEPRECATED: the legacy Lexical editor. Prefer the owned-model engine above, or
-// import these from "@quanghuy1242/idco-editor/legacy" (docs/020 §8). Re-exported
-// here for the deprecation window so existing consumers keep compiling.
+// The legacy Lexical editor was extracted to its own package (note.md Legacy
+// extraction track). It is no longer re-exported here: import it directly from
+// `@quanghuy1242/idco-editor-legacy`, so the owned engine carries no Lexical.
 // ============================================================================
-export {
-  RichTextEditor,
-  ensureDocumentNodeIds,
-  ALIGNMENTS,
-  DEFAULT_ALLOWED_NODES,
-  TEXT_FORMAT,
-  capabilityFor,
-  CalloutNode,
-  CodeBlockNode,
-  EmbedNode,
-  MediaNode,
-  PostRefNode,
-  EditorHeadingNode,
-  TableOfContentsNode,
-  INSERT_RICH_TEXT_NODE_COMMAND,
-  type RichTextEditorProps,
-  type RichTextEditorDocument,
-  type RichTextEditorNode,
-  type RichTextEditorMediaOption,
-  type RichTextEditorPostOption,
-  type RichTextNodeId,
-  type RichTextAlignment,
-  type BlockKind,
-  type RichTextEditorBindings,
-  type RichTextEditorComment,
-} from "./legacy";

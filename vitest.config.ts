@@ -55,6 +55,12 @@ export default defineConfig({
         ),
       },
       {
+        find: "@quanghuy1242/idco-editor-legacy",
+        replacement: fileURLToPath(
+          new URL("./packages/editor-legacy/src/index.ts", import.meta.url),
+        ),
+      },
+      {
         find: "next/link",
         replacement: fileURLToPath(
           new URL("./.ladle/mocks/next-link.tsx", import.meta.url),

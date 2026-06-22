@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lexicalEditorState } from "../../packages/editor/src/legacy/model/serialize";
+import { lexicalEditorState } from "../../packages/editor-legacy/src/model/serialize";
 
 type LexNode = {
   type?: string;

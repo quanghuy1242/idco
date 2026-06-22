@@ -14,7 +14,7 @@ import {
 import {
   $createGlossaryNode,
   GlossaryNode,
-} from "../../packages/editor/src/legacy/nodes/glossary-node";
+} from "../../packages/editor-legacy/src/nodes/glossary-node";
 
 function Capture({ onReady }: { onReady: (editor: LexicalEditor) => void }) {
   const [editor] = useLexicalComposerContext();

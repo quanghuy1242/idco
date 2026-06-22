@@ -138,6 +138,27 @@ importers:
 
   packages/editor:
     dependencies:
+      '@quanghuy1242/idco-content-renderer':
+        specifier: workspace:^
+        version: link:../content-renderer
+      '@quanghuy1242/idco-lib':
+        specifier: workspace:^
+        version: link:../lib
+      '@quanghuy1242/idco-ui':
+        specifier: workspace:^
+        version: link:../ui
+      react:
+        specifier: ^19.0.0
+        version: 19.2.6
+      react-aria-components:
+        specifier: 1.17.0
+        version: 1.17.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.6(react@19.2.6)
+
+  packages/editor-legacy:
+    dependencies:
       '@lexical/link':
         specifier: 0.45.0
         version: 0.45.0
@@ -165,9 +186,6 @@ importers:
       '@lexical/utils':
         specifier: 0.45.0
         version: 0.45.0
-      '@quanghuy1242/idco-content-renderer':
-        specifier: workspace:^
-        version: link:../content-renderer
       '@quanghuy1242/idco-lib':
         specifier: workspace:^
         version: link:../lib

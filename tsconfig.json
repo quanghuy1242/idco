@@ -19,7 +19,11 @@
       "@quanghuy1242/idco-lib": ["./packages/lib/src/index.ts"],
       "@idco/content-renderer": ["./packages/content-renderer/src/index.tsx"],
       "@idco/editor": ["./packages/editor/src/index.ts"],
-      "@quanghuy1242/idco-editor": ["./packages/editor/src/index.ts"]
+      "@quanghuy1242/idco-editor": ["./packages/editor/src/index.ts"],
+      "@idco/editor-legacy": ["./packages/editor-legacy/src/index.ts"],
+      "@quanghuy1242/idco-editor-legacy": [
+        "./packages/editor-legacy/src/index.ts"
+      ]
     }
   },
   "include": ["packages", "tests", ".ladle/mocks", "vitest.config.ts"]

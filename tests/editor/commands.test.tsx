@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
-import { capabilityFor } from "../../packages/editor/src/legacy/model/capabilities";
+import { capabilityFor } from "../../packages/editor-legacy/src/model/capabilities";
 import {
   availableBlockStyles,
   buildCommandRegistry,
   groupedSurfaceCommands,
   surfaceCommands,
   type CommandContext,
-} from "../../packages/editor/src/legacy/model/commands";
-import { DEFAULT_ALLOWED_NODES } from "../../packages/editor/src/legacy/model/schema";
+} from "../../packages/editor-legacy/src/model/commands";
+import { DEFAULT_ALLOWED_NODES } from "../../packages/editor-legacy/src/model/schema";
 
 function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
   return {

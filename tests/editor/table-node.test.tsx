@@ -21,7 +21,7 @@ import {
   $setHeaderColumn,
   $setHeaderRow,
   EditorTableNode,
-} from "../../packages/editor/src/legacy/nodes/table-node";
+} from "../../packages/editor-legacy/src/nodes/table-node";
 
 function makeEditor(): LexicalEditor {
   return createEditor({

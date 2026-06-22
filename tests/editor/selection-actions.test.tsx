@@ -19,11 +19,11 @@ import {
 } from "lexical";
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_ALLOWED_NODES } from "@idco/editor";
+import { DEFAULT_ALLOWED_NODES } from "@quanghuy1242/idco-editor-legacy";
 import {
   enabledTextSelectionActions,
   readTextSelectionContext,
-} from "../../packages/editor/src/legacy/model/selection-actions";
+} from "../../packages/editor-legacy/src/model/selection-actions";
 
 function Capture({ onReady }: { onReady: (editor: LexicalEditor) => void }) {
   const [editor] = useLexicalComposerContext();

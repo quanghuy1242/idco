@@ -3,7 +3,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { renderRichTextDocument } from "@idco/content-renderer";
-import { capabilityFor, RichTextEditor } from "@idco/editor";
+import {
+  capabilityFor,
+  RichTextEditor,
+} from "@quanghuy1242/idco-editor-legacy";
 
 describe("editor foundation", () => {
   it("renders paragraph alignment from the document format", () => {

@@ -7,7 +7,7 @@ import {
   RichTextEditor,
   type RichTextEditorComment,
   type RichTextEditorDocument,
-} from "@idco/editor";
+} from "@quanghuy1242/idco-editor-legacy";
 
 // A document whose paragraph already carries a comment mark (highlight) on the
 // word "intro" — the shape the host stores once a comment is added.
