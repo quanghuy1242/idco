@@ -104,8 +104,19 @@ export function Tabs({
               key={item.id}
               id={item.id}
               href={href}
+              // DaisyUI dims a plain `.tab`, which reads as *disabled* next to the
+              // active one. Give an inactive-but-enabled tab explicit
+              // `text-base-content` so only a genuinely `tab-disabled` tab greys out
+              // (the active tab carries its own emphasis via `tab-active` + the
+              // variant's border/box/lift indicator).
               className={({ isSelected, isDisabled }) =>
-                `tab ${isSelected ? "tab-active" : ""} ${isDisabled ? "tab-disabled" : ""}`.trim()
+                `tab ${isSelected ? "tab-active" : ""} ${
+                  isDisabled
+                    ? "tab-disabled"
+                    : isSelected
+                      ? ""
+                      : "text-base-content"
+                }`.trim()
               }
               render={
                 typeof href === "string"

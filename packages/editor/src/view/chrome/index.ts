@@ -6,6 +6,7 @@
  * and dispatch store commands; none own document rendering or DOM geometry.
  *
  * - `editor-chrome.tsx`   — the main toolbar (`EditorToolbar`)
+ * - `toolbar-builtins.tsx`— the built-in Home/Insert tabs+slots+actions (docs/023 §7)
  * - `context-menu.tsx`    — the right-click block/format menu
  * - `link-popover.tsx`    — click-to-edit link editing popover
  * - `find-bar.tsx`        — find-in-page bar + controller
@@ -17,6 +18,7 @@
  * node view under `nodes/` (note.md VP5).
  */
 export * from "./editor-chrome";
+export * from "./toolbar-builtins";
 export * from "./context-menu";
 export * from "./link-popover";
 export * from "./find-bar";

@@ -93,7 +93,7 @@ Non-goals (explicitly out of this document):
 
 The owned editor renders three command surfaces, distinguished by what is selected when the author invokes a command (docs/006 §3.11):
 
-- The **ribbon** (this document) owns *creation* and *document-global* work — formatting the current selection/block, inserting objects, and future view/review/AI modes. It is the persistent toolbar.
+- The **ribbon** (this document) owns *creation* and *document-global* work — formatting the current selection/block, inserting objects, and future view/review/AI modes. It is the persistent toolbar. Within it, **task tabs** (Home/Insert/…) hold task-scoped controls, while a **persistent quick-access zone** in the tab strip holds document-global controls that apply on every tab — undo/redo and find (§7.1).
 - **Object chrome** owns configuring the *selected object* — already implemented as the structural `renderOverlay` SPI slot (docs/021, docs/022): the table's hover controls and the callout's tone chrome mount through it, not through the toolbar.
 - The **selection flyout** owns the *selected text run* — present in the legacy editor (docs/004), **not present** in the owned engine today (§3.5, §5.7).
 
@@ -255,9 +255,18 @@ export type ToolbarTab = {
 };
 
 export type ToolbarSlot = {
-  /** Dotted id "tab.group", e.g. "home.text", "insert.tables". */
+  /** Dotted id "tab.group", e.g. "home.text", "insert.tables", "global.history". */
   readonly id: string;
-  readonly tab: ToolbarTabId;
+  /** The tab this slot belongs to; omit for a `persistent` slot. */
+  readonly tab?: ToolbarTabId;
+  /**
+   * Render this slot in the persistent, tab-independent quick-access zone instead of
+   * a tab's command row: "start" left of the tab strip (the Microsoft Quick Access
+   * Toolbar position — undo/redo), "end" pushed to the right (find). A persistent
+   * slot shows on every tab; it is for document-global controls that do not belong
+   * to a task tab (§7.1).
+   */
+  readonly persistent?: "start" | "end";
   readonly order: number;
   /** Optional group label for dense/mobile presentation. */
   readonly label?: string;
@@ -266,29 +275,37 @@ export type ToolbarSlot = {
 /** A placement maps a registry source into a slot. The layout walks these. */
 export type ToolbarItem =
   | { readonly kind: "mark"; readonly markKind: TextMarkKind; readonly slot: string; readonly order?: number }
+  | { readonly kind: "marks"; readonly slot: string; readonly order?: number } // the whole toolbar-mark group, auto from the registry
   | { readonly kind: "blockType"; readonly slot: string; readonly order?: number } // the whole chooser as one control
   | { readonly kind: "insert"; readonly nodeType: string; readonly slot: string; readonly order?: number }
+  | { readonly kind: "inserts"; readonly slot: string; readonly order?: number; readonly exclude?: readonly string[] } // every other insertable, auto from the registry
   | { readonly kind: "action"; readonly actionId: string; readonly slot: string; readonly order?: number }
   | { readonly kind: "component"; readonly id: string; readonly slot: string; readonly order?: number; render(ctx: ToolbarActionContext): ReactNode };
 ```
 
-The five item kinds are the owned-engine translation of doc 006 §7.1's `ToolbarItem` union. `commandId`/`dataSource`/`providerAction` from 006 collapse into `action` (carrying inline command wiring) and `insert` (the node SPI's affordance); `component` is the escape hatch for arbitrary host React when no descriptor kind fits (a custom AI prompt box, a host status chip). The `blockType` item is a single control (the chooser dropdown), not one item per block type — the chooser owns its own internal list from `listBlockTypes()`.
+The item kinds are the owned-engine translation of doc 006 §7.1's `ToolbarItem` union. `commandId`/`dataSource`/`providerAction` from 006 collapse into `action` (carrying inline command wiring) and `insert` (the node SPI's affordance); `component` is the escape hatch for arbitrary host React when no descriptor kind fits (a custom AI prompt box, a host status chip). The `blockType` item is a single control (the chooser dropdown), not one item per block type — the chooser owns its own internal list from `listBlockTypes()`. Two **group** kinds, `marks` and `inserts`, auto-expand from their registries (`listMarks().filter(m => m.toolbar)` and `listInsertable*`, the latter with an `exclude` for node types placed elsewhere such as the table's own picker) so registering a new mark/node makes it appear with no config edit — preserving the pre-SPI auto-projection contract.
 
 ### 5.5 The Pure Layout Function
 
 ```ts
-export type ResolvedToolbarItem = { kind; control: /* normalized render spec */; disabled: boolean; priority: number };
+export type ResolvedToolbarItem = { kind; /* + per-kind data */; disabled: boolean; order: number; priority: number };
 export type ResolvedToolbarSlot = { id: string; label?: string; items: ResolvedToolbarItem[] };
 export type ResolvedToolbarTab = { id: ToolbarTabId; label: string; slots: ResolvedToolbarSlot[] };
-export type ResolvedToolbarLayout = { tabs: ResolvedToolbarTab[]; defaultTab: ToolbarTabId };
+export type ResolvedToolbarLayout = {
+  tabs: ResolvedToolbarTab[];
+  defaultTab: ToolbarTabId;
+  /** Tab-independent persistent slots, rendered in the tab strip (§7.1). */
+  persistentStart: ResolvedToolbarSlot[]; // left of the tabs (the QAT — undo/redo)
+  persistentEnd: ResolvedToolbarSlot[];   // pushed right (find)
+};
 
 export function computeToolbarLayout(
-  config: ToolbarLayoutConfig,
   ctx: ToolbarActionContext,
+  config?: ToolbarLayoutConfig, // defaults to DEFAULT_TOOLBAR_LAYOUT
 ): ResolvedToolbarLayout;
 ```
 
-`computeToolbarLayout` is **pure and DOM-free** (doc 006 §8.1): given a layout config and the context, it resolves tabs (drop those whose `isAvailable` is false), resolves slots, resolves each placement against its registry (`mark` → `getMark`, `blockType` → `listBlockTypes`, `insert` → the node/structural view, `action` → `getToolbarAction`), drops unavailable items, computes `disabled`, sorts by `order` then registration order, and drops now-empty slots and now-empty tabs. It answers every question doc 006 §8.1 lists (which tabs, default tab, which slots, which items, which are hidden by capability, which are disabled by selection, which labels can collapse) without measuring anything. This is the unit-testable heart of the SPI: a feature's appearance is asserted by calling this function, no DOM.
+`computeToolbarLayout` is **pure and DOM-free** (doc 006 §8.1): given the context and a layout config, it resolves tabs (drop those whose `isAvailable` is false), resolves each tab's slots, resolves each placement against its registry (`mark`/`marks` → `getMark`/`listMarks`, `blockType` → `listBlockTypes`, `insert`/`inserts` → the node/structural views, `action` → `getToolbarAction`, plus actions self-placed by their own `slot`), drops unavailable items, computes `disabled`, sorts by `order` then registration order, and drops now-empty slots and now-empty tabs. **Persistent slots** (those declaring `persistent: "start" | "end"`, §5.4) are resolved by the same logic but returned as `persistentStart` / `persistentEnd` separate from the tabs, so the renderer can paint them in the tab strip regardless of the active tab. `hiddenIds` drops a tab/slot/action/item **or** an individual auto-projected member (`mark:bold`, `insert:media`) by id. It answers every question doc 006 §8.1 lists (which tabs, default tab, which slots, which items, which are hidden by capability, which are disabled by selection, which labels can collapse) without measuring anything. This is the unit-testable heart of the SPI: a feature's appearance is asserted by calling this function, no DOM.
 
 ### 5.6 Capability Gating
 
@@ -319,11 +336,12 @@ This is a recorded design position, not deferred silence: the flyout is out of f
 
 New exports on `packages/editor/src/view/spi/index.ts` (and the curated root `packages/editor/src/index.ts`, per docs/020 §4.5):
 
-- Types: `ToolbarAction`, `ToolbarActionKind`, `ToolbarActionContext`, `ToolbarSelectionFacts`, `ToolbarCapabilities`, `ToolbarTab`, `ToolbarSlot`, `ToolbarItem`, `ToolbarLayoutConfig`, `ResolvedToolbarLayout`.
-- Functions: `registerToolbarAction`, `getToolbarAction`, `listToolbarActions`, `unregisterToolbarAction`, `registerToolbarTab`, `registerToolbarSlot`.
-- `computeToolbarLayout` stays orchestrator-internal (deep-imported by `EditorToolbar` and tests), mirroring how `listOverlayStructuralViews`/`listTabHandlers` are internal (note.md W1/VP6) — it is the engine's composition function, not host API.
+- Types: `ToolbarAction`, `ToolbarActionKind`, `ToolbarActionContext`, `ToolbarActionRenderContext`, `ToolbarSelectionFacts`, `ToolbarCapabilities`, `ToolbarSurface`, `ToolbarTab`, `ToolbarSlot`, `ToolbarItem`, `ToolbarLayoutConfig`.
+- Functions: `registerToolbarAction`, `getToolbarAction`, `listToolbarActions`, `unregisterToolbarAction`, `registerToolbarTab`, `listToolbarTabs`, `unregisterToolbarTab`, `registerToolbarSlot`, `listToolbarSlots`, `unregisterToolbarSlot`, `actionTargetsSurface`.
+- Value: `DEFAULT_TOOLBAR_LAYOUT` (so a host can spread/patch the built-in arrangement).
+- `computeToolbarLayout` and the `Resolved*` types (`ResolvedToolbarLayout`/`ResolvedToolbarTab`/`ResolvedToolbarSlot`/`ResolvedToolbarItem`) stay orchestrator-internal — reachable via the `view/spi` barrel for the renderer and tests, but NOT re-exported from `view/index.ts` or the curated root — mirroring how `listOverlayStructuralViews`/`listTabHandlers` are internal (note.md W1/VP6). They are the engine's composition output, not host API.
 
-`EditorToolbar`'s props gain `layout?: ToolbarLayoutConfig` and `capabilities?: Partial<ToolbarCapabilities>` (both optional; defaults reproduce the built-in Home+Insert surface). The existing props (`store`, `focusEditor`, `onFind?`, `className?`) are preserved so current call sites keep compiling.
+`EditorToolbar`'s props gain `layout?: ToolbarLayoutConfig` and `capabilities?: Partial<ToolbarCapabilities>` (both optional; defaults reproduce the built-in Home+Insert surface). The existing props (`store`, `focusEditor`, `onFind?`, `className?`) are preserved so current call sites keep compiling. `OwnedModelEditor` forwards these as `toolbarLayout?` / `toolbarCapabilities?` so a host using the bundled editor customizes the ribbon without dropping to the view layer.
 
 ## 6. Architecture Decisions
 
@@ -351,6 +369,8 @@ Why: two distinct extension needs exist. A *feature* (or host) that adds a contr
 
 Decision detail: the override is a *merge*, not a wholesale replace, by default — a host that only wants to add one slot should not have to re-declare Home. Provide both: `layout: { extends: "default", add: [...], hide: [...], reorder: [...] }` for the common case, and an explicit full-replacement form for a host that wants total control.
 
+Implemented (divergence from the merge-form recommendation): the `extends`/`add`/`reorder` merge DSL above was **not** built. In the owned engine the additive case it targets is already served by **registration** — a host adds a tab/slot/action with `registerToolbarTab`/`registerToolbarSlot`/`registerToolbarAction` and they self-place via their own `slot`/`tab`, so "add one slot without re-declaring Home" needs no `layout` at all. Removal is `ToolbarLayoutConfig.hiddenIds` (drops a tab/slot/action/item or an auto-projected member by id); total control is the full-replacement `layout`; reordering built-ins is via the `order` fields on the registered descriptors. The merge DSL would only add value for *declarative reordering of built-in items*, which no host needs yet — build it then, not speculatively. `ToolbarLayoutConfig` is therefore `{ items, hiddenIds?, defaultTab? }` (no `extends`/`add`/`reorder`).
+
 ### 6.4 Container-Query Responsive, Measured Overflow Last (Recommended)
 
 Recommended responsive staging (doc 006 §8.6), in order: (1) hide optional labels (icon-only + tooltip) via CSS container queries on the toolbar element; (2) collapse a whole slot into a single overflow `MenuTrigger` when its container width crosses a threshold, lowest `responsivePriority` first; (3) horizontal scroll of the active row as the final fallback. Measured JS collapse is used **only** for true overflow detection that container queries cannot express, never as the primary mechanism.
@@ -358,6 +378,8 @@ Recommended responsive staging (doc 006 §8.6), in order: (1) hide optional labe
 Why: doc 006 §8.9 explicitly warns that JS measurement causes layout thrash and fights the editor's focus model; container queries move the common cases (label hiding, group collapse) to the browser. The `responsivePriority` on each action is what makes collapse *semantic* (collapse the rarely-used group first) rather than collapsing whatever happens to be last in the DOM. The hard constraint from doc 006 §3.8/§7.2: collapse must preserve the active tab and never degrade into a generic `More` bucket that owns discovery — overflow is a width fallback for an already-designed slot, not a home for commands.
 
 Rejected: flex-wrap (today's behavior). It preserves access but destroys the designed structure (006 §2.1) and is exactly what this redesign removes.
+
+Implemented (subset): stage 1 (labels — most controls are icon-only by default) and stage 3 (the command row is `flex-nowrap overflow-x-auto`, so it horizontal-scrolls instead of wrapping). Stage 2 (measured slot→overflow `MenuTrigger` collapse) is **not** built; `responsivePriority` is carried on the descriptor and threaded through the resolved layout to reserve it, so adding the measured collapse later is renderer-only. The hard constraints already hold: the row never wraps to a second line and there is no generic `More` bucket. The persistent quick-access zone (§7.1) is excluded from collapse.
 
 ### 6.5 Rejected And Deferred Options
 
@@ -371,22 +393,23 @@ Rejected: flex-wrap (today's behavior). It preserves access but destroys the des
 
 ### 7.1 Home Tab
 
-Home edits the current text, block, and selection. Built-in default layout (doc 006 §4.2, minus alignment which the owned engine does not expose as a control today, and minus glossary/comment which are deferred surfaces):
+Home edits the current text, block, and selection. Undo/redo and find are **not** Home controls — they are document-global and live in the persistent quick-access zone (described below), so they show on every tab. Built-in Home layout (doc 006 §4.2, minus alignment which the owned engine does not expose as a control today, and minus glossary/comment which are deferred surfaces):
 
 ```txt
-Home:
-[Undo] [Redo] | [Block type v] | [B] [I] [U] [S] [Code] ... | [Bulleted] [Numbered] [Outdent] [Indent] | [Link]
+[↶ ↷] │ Home  Insert ……………………………………………………………… [🔍]
+        [Block type v] | [B] [I] [U] [S] [Code] … | [Bulleted] [Numbered] [Outdent] [Indent] | [Link]
 ```
 
 Slot mapping:
 
-- `home.history` — `Undo`/`Redo` actions (kind `button`, wired to the store's history commands). New actions; today the toolbar has no history buttons, so this is additive and optional (gate behind `isAvailable` if history commands are absent).
 - `home.text` — the block-type chooser (item kind `blockType`, the existing `listBlockTypes().filter(b => b.chooser)` control) placed first, matching doc 006 §4.2's "Text style before inline formatting."
-- `home.format` — the format marks (item kind `mark`, one per `listMarks().filter(m => m.toolbar)` entry: bold, italic, underline, strikethrough, code). Unchanged behavior, now placed by the layout rather than mapped inline.
+- `home.format` — the format marks (item kind `marks` auto-projecting `listMarks().filter(m => m.toolbar)`: bold, italic, underline, strikethrough, code). Unchanged behavior, now placed by the layout rather than mapped inline.
 - `home.lists` — bulleted/numbered list + outdent/indent, migrated from hardcoded JSX to registered actions (§7.3).
 - `home.annotate` — link (migrated action, §7.3). Glossary/comment are reserved for this slot later but not registered in first release.
 
-Home is always available (no capability gate). Its slots resolve from the registries plus four new built-in actions (undo, redo — optional; list-bulleted, list-numbered, outdent, indent, link — migrated).
+Home is always available (no capability gate). Its slots resolve from the registries plus the migrated list/indent/link actions.
+
+**Persistent quick-access zone (the QAT).** Undo/redo and find are document-global — they apply on every tab — so a `ToolbarSlot` may be declared `persistent: "start" | "end"` (no `tab`), and `computeToolbarLayout` returns those resolved slots as `persistentStart` / `persistentEnd` separate from the tabs. The renderer paints `start` to the left of the tab strip (the Microsoft Quick Access Toolbar position) and `end` pushed to the right, both visible regardless of the active tab. Built-ins: `global.history` (`persistent: "start"`) holds undo/redo (kind `button`, wired to the store's `undo()`/`redo()` methods + `canUndo`/`canRedo` for `isDisabled`); `global.utilities` (`persistent: "end"`) holds find. Find's control is injected by `EditorToolbar` as a `component` item when the host wires `onFind` (its handler is a host prop, not a store command), so its placement is SPI-driven (ordered in the zone, hideable by id) while the find controller stays in the host. This generalizes the zone: a host adds a global control (Save, Comments) by registering a `persistent` slot/action, never by editing the renderer. This is the §7.1 refinement over the original draft, which placed undo/redo in a Home `home.history` slot — wrong, because they would then vanish when the author switched to Insert.
 
 ### 7.2 Insert Tab And The Table Dimension Picker
 
@@ -427,8 +450,8 @@ After migration, `editor-chrome.tsx` contains no literal control JSX — only th
 
 This is the highest-risk area (doc 006 §8.9) and it is in the first release because Home's link action and Insert's table picker both open React Aria overlays that portal outside the toolbar DOM, and the owned engine paints its own caret through an EditContext host whose focus must survive.
 
-- **Saved selection.** Before any `popover`/`dropdown` action opens, the toolbar captures the model selection; on apply, the action restores it so "insert at cursor" and "apply to selection" survive the overlay taking focus. The owned engine already keeps the model selection alive across focus loss (docs/011 §8.6); the SPI's requirement is that every `popover` action's `render` uses that saved selection on apply rather than reading the (now-blurred) live selection. This generalizes what `link-popover.tsx` does today.
-- **Control-surface allowlist.** The editor greys out / disables formatting when focus leaves its known control surfaces. The toolbar's React Aria overlays portal outside the toolbar element, so the allowlist must include them, or opening the table picker would flip the editor to "not editable" and disable the very toolbar that opened it. This is an existing concern for `link-popover`/`context-menu`/`find-bar`; the SPI requires that any registered `popover`/`dropdown` action's portal is treated as part of the editor focus model. The cleanest mechanism is a stable `data-engine-toolbar-overlay` marker the focus model recognizes, set by the renderer on every action overlay, so host-registered actions inherit the behavior without each host re-solving focus.
+- **Saved selection.** When a `popover`/`dropdown` action opens, the model selection it reads on apply is the one that was alive when it opened, so "insert at cursor" / "apply to selection" survive the overlay taking focus. The owned engine already keeps the model selection alive across focus loss (docs/011 §8.6), so this needs **no extra saved-selection machinery**: the action's `render` simply reads `ctx.store.selection`/dispatches on apply (the table picker dispatches `insert-structural` at the surviving caret; the link form reads `active-link-href`). This is what `link-popover.tsx` already relies on.
+- **Control-surface focus — resolved, no allowlist needed (implementation finding).** The design anticipated a control-surface allowlist so a toolbar overlay would not flip the editor to "not editable." On building it, the owned engine turned out to gate **only the painted caret** on focus-within (a cosmetic `useEditorFocusWithin` in `selection-overlay`), never command dispatch or the model. So opening a toolbar popover never disables the editor or the toolbar; the only effect is the painted caret hiding while a *modal* React Aria popover holds focus — identical to the pre-existing `link-popover` behavior, and acceptable. No allowlist and no `data-engine-toolbar-overlay` marker were added (an earlier draft proposed the marker; it was dead code and removed). If a future control needs the caret to stay painted while open, it should open a non-modal popover (`isNonModal`, as the find bar does) rather than reintroduce an allowlist.
 - **ARIA composition.** A React Aria `Tabs` whose panels contain a React Aria `Toolbar` (roving tabindex) must not fight the outer toolbar's key handling (doc 006 §8.9). The renderer must verify the tab strip and the active command row compose correctly: tab switching is one of the `Tabs` roles; arrow-key control traversal is the inner `Toolbar`'s roving tabindex; they must not both claim the same keys. This is a renderer-layer obligation, validated by keyboard e2e (§10).
 - **Live selection facts.** `ToolbarSelectionFacts` (§5.3) must be real, not the legacy hardcoded `hasSelectedText: false`. The link action's enable state and any future selection-scoped action depend on it. It is computed under the existing `useToolbarVersion` subscription so it costs no new re-render machinery.
 
@@ -457,9 +480,9 @@ Design-level acceptance (proving the model, not pixels):
 - **Action SPI contract tests** assert: `registerToolbarAction` is idempotent by id; `listToolbarActions` returns registration order; a custom action registered into a slot appears in `computeToolbarLayout` output; `surfaces` defaults to `["ribbon"]`; `run(ctx)` fires the expected `store.command` (assert against a fake store).
 - **Capability tests** assert: flipping `capabilities.insertTable` to false drops the Insert tab; a host-defined capability key gates a host-defined action/tab.
 - **Migration parity tests** assert the three migrated buttons behave identically: bullet/numbered toggle the same commands and reflect active state; outdent/indent dispatch the same commands; link opens the editor, reads `active-link-href`, and applies `set-link`/`clear-link`.
-- **Table picker tests** assert: the dimension picker inserts a table of the chosen rows×cols (parameterized insert), at the saved selection, and the toolbar is not disabled while the picker is open.
-- **Keyboard/focus e2e** (chromium/webkit/firefox, extending `engine-toolbar.spec.ts`): tab switching via `Tabs` roles; arrow-key control traversal via the inner `Toolbar`; opening the link and table overlays does not blur-disable the editor; saved selection is restored on apply; no double-key behavior.
-- **Responsive e2e**: narrowing the surface hides labels (icon-only + tooltip), then collapses the lowest-priority slot into overflow, then horizontal-scrolls — and never wraps into a second row or surfaces a generic `More` that owns Insert.
+- **Table picker tests** assert: the dimension picker inserts a table of the chosen rows×cols (parameterized insert), at the model selection that survives the popover's focus, and the toolbar is not disabled while the picker is open.
+- **Keyboard/focus e2e** (chromium/webkit/firefox, extending `engine-toolbar.spec.ts`): tab switching via `Tabs` roles; opening the link and table overlays does not disable the editor or the toolbar; the surviving model selection is used on apply.
+- **Responsive (shipped subset)**: the command row is `flex-nowrap` + `overflow-x-auto`, so under width pressure it horizontal-scrolls rather than wrapping into a second line, and most controls are already icon-only (label-hiding is the default). Measured slot→overflow-menu collapse (§6.4 middle stage) is NOT built; `responsivePriority` is on the descriptor reserving it. The persistent zones never collapse (they hold the few always-needed globals).
 - **Regression**: existing `engine-chrome.test.tsx` and `engine-toolbar.spec.ts` stay green or are deliberately updated to the new structure; full `pnpm check` passes.
 
 ## 11. Definition Of Done
@@ -467,9 +490,10 @@ Design-level acceptance (proving the model, not pixels):
 - The toolbar renders from a resolved layout produced by a pure `computeToolbarLayout`; `EditorToolbar` contains no literal control JSX and no fixed group order.
 - `registerToolbarAction` exists and is the path for non-mark/block/insert controls; list, indent, and link are registered actions, not inline JSX, with byte-identical behavior.
 - Home and Insert tabs render with their first-release slots; Insert ships the Table dimension picker backed by a parameterized insert; Data/View/Review/AI are registrable but resolve empty and do not render.
-- A host can add a tab, slot, or action by registration, and can rearrange the surface via the `layout` override (merge form), without editing `editor-chrome.tsx`.
-- `ToolbarSelectionFacts` are real (no hardcoded `hasSelectedText: false`); every `popover` action saves and restores the model selection; every toolbar overlay is in the editor's control-surface focus allowlist.
-- Responsive behavior collapses by semantic slot (labels → slot overflow → scroll), preserves the active tab, and never wraps or degrades into a generic `More`.
+- Undo/redo and find render in the persistent quick-access zone (`persistent` slots → `persistentStart`/`persistentEnd`), visible on every tab, not trapped in a task tab.
+- A host can add a tab, slot, or action by registration (each self-places); remove built-ins via `hiddenIds`; or supply a full-replacement `layout`. (The §6.3 `extends`/`reorder` merge-form DSL is **not** built — registration covers the additive case and `hiddenIds` the subtractive — recorded as a deliberate divergence; build it only if a host needs declarative reordering of built-ins.) None of this edits `editor-chrome.tsx`.
+- `ToolbarSelectionFacts` are real (no hardcoded `hasSelectedText: false`); a `popover` action reads the model selection on apply (which survives the overlay's focus, so no extra saved-selection machinery); opening a toolbar overlay never disables the editor or toolbar (only the painted caret is focus-gated — §8, no allowlist).
+- Responsive: the command row never wraps into a second row (it scrolls); controls are icon-only by default. Measured slot→overflow collapse is reserved (`responsivePriority`) but not built; it must never degrade into a generic `More` that owns discovery.
 - The `sideEffects`/module-load registration hazard (§9) is resolved by wiring `registerBuiltInToolbarActions` into `react-view.tsx`'s registration block (alongside the node/mark/block-type registrars); the package stays `"sideEffects": false` and is not flipped to `true`.
 - Layout function, action SPI, capability gating, and migration parity are unit-tested; focus/overlay/keyboard and responsive behavior are e2e-verified across chromium/webkit/firefox; `pnpm check` is green.
 - New exports are limited to registration functions and descriptor types; `computeToolbarLayout` stays internal.
@@ -478,6 +502,6 @@ Design-level acceptance (proving the model, not pixels):
 
 The owned editor's toolbar becomes a three-layer, ribbon-lite surface. Layer 1 is the descriptor registries — the existing mark, block-type, and node-insert registries plus a new `toolbar-action-registry` — each descriptor carrying its own store-command wiring and metadata. Layer 2 is a pure, DOM-free `computeToolbarLayout` that places those descriptors into capability-gated tabs and slots and returns a fully resolved, ordered structure. Layer 3 is `EditorToolbar`, which renders that structure with React Aria + DaisyUI, owning only responsive collapse and overlay focus — no command or layout knowledge.
 
-First release ships Home (block-type chooser, format marks, lists, indent, link — the last three migrated off hardcoded JSX onto the action SPI) and Insert (Table only, via a dimension picker backed by a parameterized structural insert). Data, View, Review, and AI exist in the type and layout model but resolve empty and do not render, so each is added later by registration and a capability flag, never by rewriting the toolbar.
+First release ships Home (block-type chooser, format marks, lists, indent, link — the last three migrated off hardcoded JSX onto the action SPI) and Insert (Table via a dimension picker backed by a parameterized structural insert, plus the auto-projected `inserts` group so the other registered blocks stay reachable). Document-global controls — undo/redo and find — live in the **persistent quick-access zone** (`persistent: "start" | "end"` slots, resolved into `persistentStart`/`persistentEnd`), so they show on every tab rather than being trapped in Home; a host adds its own global control (Save, Comments) by registering a persistent slot/action. Data, View, Review, and AI exist in the type and layout model but resolve empty and do not render, so each is added later by registration and a capability flag, never by rewriting the toolbar.
 
 The design preserves the engine's three orthogonal surfaces: the ribbon owns creation and selection/text editing; object chrome (the existing `renderOverlay` slot) owns configuring a selected object; and a future selection flyout — reserved by the `surfaces` field but not built here — will own the selected text run by projecting the same registries into a floating host. The hardest part, and the reason focus/overlay integration is in the first release rather than deferred, is that the link and table overlays exercise the saved-selection, control-surface-allowlist, and nested-ARIA concerns now; the SPI is only as good as that integration, so it is built and verified with the first two tabs, not assumed.

@@ -9,6 +9,7 @@ import {
 } from "../model";
 import { bakeObjectData } from "../bake";
 import { getStructuralDefinition } from "../registry";
+import type { StructuralInsertParams } from "../registry";
 import type { EditorStore, TransactionBuilder } from "../store";
 import {
   childrenOf,
@@ -125,10 +126,11 @@ export function compileInsertBlocks(
 export function compileInsertStructural(
   store: EditorStore,
   structuralType: string,
+  params?: StructuralInsertParams,
 ): TransactionBuilder | null {
   const definition = getStructuralDefinition(structuralType);
   if (!definition) return null;
-  const subtree = definition.createSubtree(store.allocator);
+  const subtree = definition.createSubtree(store.allocator, params);
   const tr = store.transaction();
   const point = insertionPointForInsert(tr, store);
   placeSubtree(tr, store, point, subtree.root, subtree.descendants);

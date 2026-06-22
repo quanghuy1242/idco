@@ -7,6 +7,7 @@ import {
   type TextMarkKind,
 } from "../model";
 import type { MarkdownShortcut } from "../markdown-shortcuts";
+import type { StructuralInsertParams } from "../registry";
 import type { EditorStore, TransactionBuilder } from "../store";
 import {
   compileDelete,
@@ -95,7 +96,16 @@ export type EditorCommand =
       readonly type: "insert-blocks";
       readonly nodes: readonly EditorNode[];
     }
-  | { readonly type: "insert-structural"; readonly structuralType: string }
+  | {
+      readonly type: "insert-structural";
+      readonly structuralType: string;
+      /**
+       * Author-chosen dimensions for a parameterized insert (docs/023 §7.2),
+       * passed verbatim to the type's `createSubtree`. Omitted for the default
+       * insert; the table's dimension picker sets `{ rows, cols }`.
+       */
+      readonly params?: StructuralInsertParams;
+    }
   | {
       readonly type: "insert-structural-child";
       readonly scope: NodeId;
@@ -152,7 +162,7 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
       : null,
   "insert-structural": (store, command) =>
     command.type === "insert-structural"
-      ? compileInsertStructural(store, command.structuralType)
+      ? compileInsertStructural(store, command.structuralType, command.params)
       : null,
   "insert-structural-child": (store, command) =>
     command.type === "insert-structural-child"

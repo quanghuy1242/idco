@@ -73,6 +73,7 @@ export type {
   StructuralDefinition,
   StructuralExportContext,
   StructuralExportResult,
+  StructuralInsertParams,
   StructuralSubtree,
 } from "./registry";
 export {

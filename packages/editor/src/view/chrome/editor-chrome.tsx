@@ -1,45 +1,87 @@
 /**
- * Editor chrome: the formatting toolbar, block-type and insert menus, and the
- * link editor (docs/010 Phase 8 AC2/AC9).
+ * Editor chrome: the ribbon-lite formatting toolbar (docs/023).
  *
- * Built with `@idco/ui` (React Aria behavior + DaisyUI styling + lucide icons),
- * per docs/010 §7.1 — no hand-rolled menus, icon controls for the format/insert
- * actions, and a labeled block-type dropdown (icon + current style name + chevron)
- * matching the legacy Lexical toolbar's shape.
- * Every control operates on the engine's *model* selection through
- * `store.command`/`store.query`, never the DOM: a toggle reads `is-mark-active`
- * and dispatches `toggle-mark`; the block-type menu dispatches `set-block-type`;
- * the insert menu dispatches `insert-object` for each registered node's `insert`
- * affordance (docs/016 §6.2).
+ * Layer 3 of the toolbar SPI (docs/023 §5.1): the renderer. It holds **zero**
+ * command or layout knowledge — all of it flows in as data from the descriptor
+ * registries (Layer 1) through the pure `computeToolbarLayout` (Layer 2). This
+ * component only: derives the live `ToolbarActionContext` (selection facts +
+ * capabilities) under the toolbar's selection+commit subscription, computes the
+ * resolved layout, owns the active-tab state, and renders tabs (React Aria `Tabs`,
+ * DaisyUI `tabs-border` underline style) + the active tab's slots + each item by
+ * `kind`. It owns responsive collapse (no-wrap horizontal scroll so the row never
+ * wraps into a second line, docs/023 §6.4) and overlay focus, nothing else.
  *
- * Focus integration (docs/017 §3.5/§3.6): the engine owns focus via the EditContext host
- * and the model selection survives focus loss (011 §8.6), so toolbar presses do
- * not blur the editing surface (a capture-phase `mousedown` preventDefault on the
- * bar), and after a command we return focus to the block the selection now names
- * via `focusEditor`.
+ * Built with `@idco/ui` (React Aria behavior + DaisyUI styling + lucide icons): no
+ * hand-rolled menus/popovers/tabs. Every control operates on the engine's *model*
+ * selection through `store.command`/`store.query`, never the DOM (docs/010 §7.1).
+ *
+ * Focus integration (docs/017 §3.5/§3.6, docs/023 §8): the engine owns focus via
+ * the EditContext host and the model selection survives focus loss (011 §8.6), so a
+ * toolbar press does not blur the editing surface (a capture-phase `mousedown`
+ * preventDefault on the bar), and after a command we return focus to the block the
+ * selection now names via `focusEditor`. A `popover` action needs no saved-selection
+ * machinery: the model selection it reads on apply is the one alive across the
+ * overlay's focus, so an "insert at cursor" / "apply to selection" lands correctly.
+ * docs/023 §8 anticipated a control-surface allowlist so a toolbar overlay would not
+ * disable the editor; the owned engine gates only the *painted caret* on focus-within
+ * (cosmetic — `selection-overlay`), never command dispatch or the model, so the caret
+ * simply hides while a modal React Aria popover holds focus (identical to the
+ * pre-existing link popover) and no allowlist is needed.
+ *
+ * Adding a control is registration, not an edit here: a host registers a
+ * `ToolbarAction`/tab/slot (docs/023 §5.8) and it appears; this file never grows a
+ * branch for it.
  */
-import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import {
+  Fragment,
+  useCallback,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { Button as AriaButton } from "react-aria-components";
 import {
   Button,
-  Input,
   Menu,
   MenuItem,
   MenuTrigger,
   NavIcon,
   PopoverTrigger,
+  Tabs,
 } from "@quanghuy1242/idco-ui";
-import type { EditorStore } from "../../core";
-import { listInsertableNodes } from "../spi";
-import { listInsertableStructuralNodes } from "../spi";
-import { listMarks } from "../spi";
-import { listBlockTypes } from "../spi";
-import { listToggleCommand } from "./chrome-commands";
+import {
+  activeScope,
+  collectSelectionText,
+  type EditorStore,
+} from "../../core";
+import {
+  computeToolbarLayout,
+  DEFAULT_TOOLBAR_LAYOUT,
+  listBlockTypes,
+  listMarks,
+  type ResolvedToolbarItem,
+  type ResolvedToolbarSlot,
+  type ResolvedToolbarTab,
+  type ToolbarActionContext,
+  type ToolbarCapabilities,
+  type ToolbarLayoutConfig,
+  type ToolbarSelectionFacts,
+} from "../spi";
 
-// The format marks and block types are read from the W4/W5 registries
-// (`listMarks().filter((m) => m.toolbar)` and `listBlockTypes().filter((b) =>
-// b.chooser)`), so the toolbar and the context menu can no longer drift — both
-// read the one source, and adding a mark/block type is one registration.
+// The format marks, block-type chooser, and insert affordances project from the
+// W4/W5/SPI registries; every other control is a registered `ToolbarAction`
+// (docs/023). The renderer reads only the resolved layout, so the toolbar and the
+// context menu (which reads the same registries) cannot drift.
+
+// First-release capability defaults (docs/023 §5.6): the standard product ships
+// Insert→Table; media/review/ai are off so those tabs resolve empty and are dropped.
+const DEFAULT_CAPABILITIES: ToolbarCapabilities = {
+  ai: false,
+  insertTable: true,
+  media: false,
+  review: false,
+};
 
 /**
  * Subscribe a component to selection + commit so toolbar query state stays live.
@@ -66,9 +108,42 @@ function useToolbarVersion(store: EditorStore): number {
   );
 }
 
-/** A thin divider between toolbar groups. */
+/** A thin divider between toolbar slots. */
 function Sep() {
   return <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-base-300" />;
+}
+
+/**
+ * Derive the live selection facts (docs/023 §5.3) from the model. Real, not the
+ * legacy hardcoded `hasSelectedText: false`: selection-scoped actions (comment,
+ * AI-on-selection) will depend on these. Computed from `store.query` + the store
+ * selection under the existing `useToolbarVersion` subscription, so no new machinery.
+ */
+function selectionFacts(store: EditorStore): ToolbarSelectionFacts {
+  const sel = store.selection;
+  const blockTypeQuery = store.query({ type: "current-block-type" });
+  const blockType = typeof blockTypeQuery === "string" ? blockTypeQuery : null;
+  const activeMarks = new Set(
+    listMarks()
+      .filter(
+        (mark) =>
+          store.query({ mark: mark.kind, type: "is-mark-active" }) === true,
+      )
+      .map((mark) => mark.kind),
+  );
+  let hasSelection = false;
+  let selectedText = "";
+  if (sel?.type === "text") {
+    hasSelection =
+      sel.anchor.node !== sel.focus.node ||
+      sel.anchor.offset !== sel.focus.offset;
+    // `collectSelectionText` walks `orderedTextLeaves` (O(document)); a collapsed
+    // caret has no selected text, so skip the scan on the keystroke-commit hot path
+    // and only pay it for a real range.
+    if (hasSelection) selectedText = collectSelectionText(store, sel);
+  }
+  const inObject = sel ? activeScope(store, sel) !== store.bodyId : false;
+  return { activeMarks, blockType, hasSelection, inObject, selectedText };
 }
 
 export function EditorToolbar(props: {
@@ -77,15 +152,14 @@ export function EditorToolbar(props: {
   /** Open the find card (wired to the same Ctrl/Cmd+F controller). */
   readonly onFind?: () => void;
   readonly className?: string;
+  /** Replace/patch the built-in tab→slot→item arrangement (docs/023 §6.3). */
+  readonly layout?: ToolbarLayoutConfig;
+  /** Per-deployment capability flags (docs/023 §5.6); merged over the defaults. */
+  readonly capabilities?: Partial<ToolbarCapabilities>;
 }) {
   const { store, focusEditor, onFind } = props;
   // Re-read query state whenever selection or content changes.
   useToolbarVersion(store);
-  // Format buttons + block-type chooser come from the registries (W6), so they
-  // cannot drift from the context menu, which reads the same source.
-  const formatMarks = listMarks().filter((mark) => mark.toolbar);
-  const blockTypes = listBlockTypes().filter((entry) => entry.chooser);
-  const [linkValue, setLinkValue] = useState("");
 
   const run = useCallback(
     (action: () => void) => {
@@ -95,77 +169,71 @@ export function EditorToolbar(props: {
     [focusEditor],
   );
 
-  // Seed the link input from the active link when the popover opens; return focus
-  // to the editing surface when it closes (React Aria would otherwise restore
-  // focus to the trigger button, docs/017 §3.5).
-  const onLinkOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        const current = store.query({ type: "active-link-href" });
-        setLinkValue(typeof current === "string" ? current : "");
-      } else {
-        requestAnimationFrame(() => focusEditor());
+  // Build the live context and resolve the layout. computeToolbarLayout is pure, so
+  // the whole surface is a function of model state — the unit-testable heart.
+  // `as` reconciles the spread of an optional `Partial` (whose values are
+  // `boolean | undefined`) with the capability map's `[key: string]: boolean`
+  // index signature; every concrete key is still a boolean after the merge.
+  const capabilities = {
+    ...DEFAULT_CAPABILITIES,
+    ...props.capabilities,
+  } as ToolbarCapabilities;
+  const ctx: ToolbarActionContext = {
+    capabilities,
+    selection: selectionFacts(store),
+    store,
+  };
+  // Find is a document-global utility, so it lives in the persistent `end` zone like
+  // any other global control — but its handler is a host prop (`onFind`), not a store
+  // command, so it can't be a self-registered action. Inject it as a `component` item
+  // into the persistent `global.utilities` slot when the host wires find; this keeps
+  // its placement SPI-driven (ordered in the zone, hideable by id) while the find
+  // controller stays in the host (docs/023 §7.1). Omitted when `onFind` is absent, so
+  // the slot resolves empty and is dropped.
+  const baseConfig = props.layout ?? DEFAULT_TOOLBAR_LAYOUT;
+  const config: ToolbarLayoutConfig = onFind
+    ? {
+        ...baseConfig,
+        items: [
+          ...baseConfig.items,
+          {
+            id: "find",
+            kind: "component",
+            order: 0,
+            render: () => (
+              <Button
+                ariaLabel="Find in document"
+                iconName="Search"
+                onClick={onFind}
+                size="sm"
+                square
+                tooltip="Find (Ctrl/Cmd+F)"
+                variant="ghost"
+              />
+            ),
+            slot: "global.utilities",
+          },
+        ],
       }
-    },
-    [focusEditor, store],
-  );
+    : baseConfig;
+  const layout = computeToolbarLayout(ctx, config);
 
-  const applyLink = useCallback(() => {
-    const href = linkValue.trim();
-    if (href.length > 0) store.command({ href, type: "set-link" });
-    else store.command({ type: "clear-link" });
-  }, [linkValue, store]);
+  // Active tab is local UI state; if the resolved tab set no longer contains it
+  // (capabilities/layout changed), fall back to the layout's default so the row is
+  // never blank (docs/023 §6.4 "responsive preserves the active tab").
+  const [selectedTab, setSelectedTab] = useState(layout.defaultTab);
+  const activeTabId = layout.tabs.some((tab) => tab.id === selectedTab)
+    ? selectedTab
+    : layout.defaultTab;
+  const activeTab = layout.tabs.find((tab) => tab.id === activeTabId);
 
-  // The insert menu unifies structural inserts (callout) and object inserts
-  // (code/media/…) into one enumeration (docs/020 §7.1): structural first (so the
-  // callout stays first as before), then object nodes in registration order. Each
-  // entry carries its own dispatch so the menu keeps no per-type knowledge.
-  const insertEntries: readonly {
-    readonly id: string;
-    readonly label: string;
-    readonly icon: string;
-    readonly run: () => void;
-  }[] = [
-    ...listInsertableStructuralNodes().map((view) => ({
-      icon: view.insert.icon ?? "Plus",
-      id: view.type,
-      label: view.insert.label,
-      run: () => run(() => store.command(view.insert.createCommand())),
-    })),
-    ...listInsertableNodes().map((view) => ({
-      icon: view.insert.icon ?? "Plus",
-      id: view.type,
-      label: view.insert.label,
-      run: () =>
-        run(() =>
-          store.command({
-            data: view.insert.createData(),
-            objectType: view.type,
-            type: "insert-object",
-          }),
-        ),
-    })),
-  ];
-  const linkActive =
-    typeof store.query({ type: "active-link-href" }) === "string";
-  // The list control is a toggle: pressing it on a non-list block makes it a
-  // list item, and pressing it again on a list item returns it to a paragraph
-  // (a one-way `set-block-type` to listitem could turn lists on but never off).
-  const blockType = store.query({ type: "current-block-type" });
-  const listActive = blockType === "listitem";
-  // The list flavour of the current item (null when not a list): a bulleted item
-  // reads as "bullet", a numbered item as "number" (docs/018 §2.10). Each list
-  // button is an independent toggle on its own flavour.
-  const listType = store.query({ type: "current-list-type" });
-  const bulletActive = listType !== null && listType !== "number";
-  const numberActive = listType === "number";
-  // The block-type control shows the *current* style by name (a labeled dropdown
-  // like the legacy editor), not a generic icon. Heading level rides on the `tag`
-  // attr, so match on both type and tag to tell Heading 1/2/3 apart.
-  const focusNode =
-    store.selection?.type === "text"
-      ? store.getNode(store.selection.focus.node)
-      : null;
+  // The block-type chooser shows the *current* style by name. Heading level rides on
+  // the `tag` attr, so match on both type and tag to tell Heading 1/2/3 apart.
+  const blockTypes = listBlockTypes().filter((entry) => entry.chooser);
+  const sel = store.selection;
+  const currentBlockType = store.query({ type: "current-block-type" });
+  const listActive = currentBlockType === "listitem";
+  const focusNode = sel?.type === "text" ? store.getNode(sel.focus.node) : null;
   const currentTag =
     focusNode?.kind === "text" && typeof focusNode.attrs?.tag === "string"
       ? focusNode.attrs.tag
@@ -173,274 +241,221 @@ export function EditorToolbar(props: {
   const currentBlock =
     blockTypes.find(
       (choice) =>
-        choice.blockType === blockType &&
+        choice.blockType === currentBlockType &&
         (choice.tag ?? undefined) === currentTag,
     ) ??
     (listActive
       ? { icon: "List", label: "List item" }
       : { icon: "Pilcrow", label: "Paragraph" });
 
-  return (
-    <div
-      aria-label="Formatting toolbar"
-      className={`flex flex-wrap items-center gap-0.5 border-b border-base-300 bg-base-100 p-1 ${props.className ?? ""}`}
-      data-engine-toolbar=""
-      // Pressing a toolbar control must not blur the editing host; model
-      // selection survives focus loss, and we restore focus after the command.
-      onMouseDownCapture={(event) => event.preventDefault()}
-      role="toolbar"
-    >
-      <Button
-        ariaLabel="Undo"
-        disabled={!store.canUndo}
-        iconName="Undo2"
-        onClick={() => run(() => store.undo())}
-        size="sm"
-        square
-        tooltip="Undo"
-        variant="ghost"
-      />
-      <Button
-        ariaLabel="Redo"
-        disabled={!store.canRedo}
-        iconName="Redo2"
-        onClick={() => run(() => store.redo())}
-        size="sm"
-        square
-        tooltip="Redo"
-        variant="ghost"
-      />
-
-      <Sep />
-
-      <span data-engine-block-type-menu="">
-        <MenuTrigger placement="bottom start">
-          {/* Labeled block-type dropdown (icon + current style name + chevron),
-              matching the legacy toolbar — not an icon-only button. */}
-          <AriaButton
-            aria-label="Text style"
-            className="btn btn-sm btn-ghost w-40 justify-start gap-2"
-            data-engine-block-type-trigger=""
-            onMouseDown={(event) => event.preventDefault()}
-          >
-            <NavIcon name={currentBlock.icon} />
-            <span className="flex-1 truncate text-left">
-              {currentBlock.label}
-            </span>
-            <NavIcon name="ChevronDown" />
-          </AriaButton>
-          <Menu
-            className="w-56"
-            onAction={(key) => {
-              // Keyed by the registry's stable `blockType:tag` id, so order in
-              // the registry never changes what an item does.
-              const choice = blockTypes.find((c) => c.id === key);
-              if (choice) {
-                run(() =>
-                  store.command({
-                    blockType: choice.blockType,
-                    ...(choice.tag ? { tag: choice.tag } : {}),
-                    type: "set-block-type",
-                  }),
-                );
-              }
-            }}
-          >
-            {blockTypes.map((choice) => (
-              <MenuItem id={choice.id} key={choice.id} textValue={choice.label}>
-                {/* Each item previews its own style (Heading 1 large + bold, …),
-                    the legacy block-style menu's look. */}
-                <span className="flex items-center gap-3">
-                  <NavIcon name={choice.icon} />
-                  <span className={`leading-tight ${choice.preview}`}>
-                    {choice.label}
-                  </span>
-                </span>
-              </MenuItem>
-            ))}
-          </Menu>
-        </MenuTrigger>
-      </span>
-
-      <Sep />
-
-      {formatMarks.map((format) => {
-        const active = store.query({
-          mark: format.kind,
-          type: "is-mark-active",
-        });
+  const renderItem = (item: ResolvedToolbarItem): ReactNode => {
+    switch (item.kind) {
+      case "mark": {
+        const meta = item.mark.toolbar!;
         return (
           <span
-            data-engine-format={format.kind}
-            data-engine-format-active={active ? "true" : "false"}
-            key={format.kind}
+            data-engine-format={item.mark.kind}
+            data-engine-format-active={item.active ? "true" : "false"}
+            key={item.id}
           >
             <Button
-              ariaLabel={format.toolbar!.label}
-              iconName={format.toolbar!.icon}
+              ariaLabel={meta.label}
+              iconName={meta.icon}
               onClick={() =>
                 run(() =>
-                  store.command({ mark: format.kind, type: "toggle-mark" }),
+                  store.command({ mark: item.mark.kind, type: "toggle-mark" }),
                 )
               }
               size="sm"
               square
-              tooltip={format.toolbar!.label}
-              variant={active ? "primary" : "ghost"}
+              tooltip={meta.label}
+              variant={item.active ? "primary" : "ghost"}
             />
           </span>
         );
-      })}
-
-      <Sep />
-
-      <Button
-        ariaLabel="Bulleted list"
-        iconName="List"
-        onClick={() =>
-          run(() => store.command(listToggleCommand(bulletActive, "bullet")))
+      }
+      case "blockType":
+        return (
+          <span data-engine-block-type-menu="" key={item.id}>
+            <MenuTrigger placement="bottom start">
+              {/* Labeled dropdown (icon + current style name + chevron). */}
+              <AriaButton
+                aria-label="Text style"
+                className="btn btn-sm btn-ghost w-40 justify-start gap-2"
+                data-engine-block-type-trigger=""
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                <NavIcon name={currentBlock.icon} />
+                <span className="flex-1 truncate text-left">
+                  {currentBlock.label}
+                </span>
+                <NavIcon name="ChevronDown" />
+              </AriaButton>
+              <Menu
+                className="w-56"
+                onAction={(key) => {
+                  const choice = blockTypes.find((c) => c.id === key);
+                  if (choice) {
+                    run(() =>
+                      store.command({
+                        blockType: choice.blockType,
+                        ...(choice.tag ? { tag: choice.tag } : {}),
+                        type: "set-block-type",
+                      }),
+                    );
+                  }
+                }}
+              >
+                {blockTypes.map((choice) => (
+                  <MenuItem
+                    id={choice.id}
+                    key={choice.id}
+                    textValue={choice.label}
+                  >
+                    <span className="flex items-center gap-3">
+                      <NavIcon name={choice.icon} />
+                      <span className={`leading-tight ${choice.preview ?? ""}`}>
+                        {choice.label}
+                      </span>
+                    </span>
+                  </MenuItem>
+                ))}
+              </Menu>
+            </MenuTrigger>
+          </span>
+        );
+      case "insert":
+        return (
+          <Button
+            ariaLabel={item.label}
+            iconName={item.icon}
+            key={item.id}
+            onClick={() => run(() => item.run(store))}
+            size="sm"
+            square
+            tooltip={item.label}
+            variant="ghost"
+          />
+        );
+      case "action": {
+        const { action } = item;
+        if (action.kind === "popover" || action.kind === "dropdown") {
+          return (
+            <span data-engine-toolbar-action={action.id} key={item.id}>
+              <PopoverTrigger
+                ariaLabel={action.label}
+                onOpenChange={(open) => {
+                  // React Aria restores focus to the trigger on close; bounce it
+                  // back to the editing surface instead (docs/017 §3.5).
+                  if (!open) requestAnimationFrame(() => focusEditor());
+                }}
+                trigger={
+                  <Button
+                    ariaLabel={action.label}
+                    disabled={item.disabled}
+                    iconName={action.icon}
+                    size="sm"
+                    square
+                    tooltip={action.label}
+                    variant={item.active ? "primary" : "ghost"}
+                  />
+                }
+              >
+                {(close) => action.render?.({ ...ctx, close }) ?? null}
+              </PopoverTrigger>
+            </span>
+          );
         }
-        size="sm"
-        square
-        tooltip="Bulleted list"
-        variant={bulletActive ? "primary" : "ghost"}
-      />
-      <Button
-        ariaLabel="Numbered list"
-        iconName="ListOrdered"
-        onClick={() =>
-          run(() => store.command(listToggleCommand(numberActive, "number")))
-        }
-        size="sm"
-        square
-        tooltip="Numbered list"
-        variant={numberActive ? "primary" : "ghost"}
-      />
-      <Button
-        ariaLabel="Outdent"
-        iconName="IndentDecrease"
-        onClick={() => run(() => store.command({ type: "outdent" }))}
-        size="sm"
-        square
-        tooltip="Outdent"
-        variant="ghost"
-      />
-      <Button
-        ariaLabel="Indent"
-        iconName="IndentIncrease"
-        onClick={() => run(() => store.command({ type: "indent" }))}
-        size="sm"
-        square
-        tooltip="Indent"
-        variant="ghost"
-      />
-
-      <Sep />
-
-      <span data-engine-link-control="">
-        <PopoverTrigger
-          ariaLabel="Link editor"
-          onOpenChange={onLinkOpenChange}
-          trigger={
+        return (
+          <span data-engine-toolbar-action={action.id} key={item.id}>
             <Button
-              ariaLabel={linkActive ? "Edit link" : "Link"}
-              iconName={linkActive ? "Unlink" : "Link"}
+              ariaLabel={action.label}
+              disabled={item.disabled}
+              iconName={action.icon}
+              onClick={() => run(() => action.run?.(ctx))}
               size="sm"
               square
-              tooltip="Link"
-              variant={linkActive ? "primary" : "ghost"}
+              tooltip={action.label}
+              variant={item.active ? "primary" : "ghost"}
             />
-          }
+          </span>
+        );
+      }
+      case "component":
+        return <Fragment key={item.id}>{item.render(ctx)}</Fragment>;
+    }
+  };
+
+  // Render a run of slots (separated by dividers) — used for both the active tab's
+  // command row and the persistent quick-access zones.
+  const renderZone = (slots: readonly ResolvedToolbarSlot[]): ReactNode =>
+    slots.map((slot, index) => (
+      <Fragment key={slot.id}>
+        {index > 0 ? <Sep /> : null}
+        {slot.items.map((item) => renderItem(item))}
+      </Fragment>
+    ));
+
+  const tabItems = layout.tabs.map((tab: ResolvedToolbarTab) => ({
+    id: tab.id,
+    label: tab.label,
+  }));
+  const hasStart = layout.persistentStart.length > 0;
+  const hasEnd = layout.persistentEnd.length > 0;
+
+  return (
+    <div
+      aria-label="Formatting toolbar"
+      className={`border-b border-base-300 bg-base-100 ${props.className ?? ""}`}
+      data-engine-toolbar=""
+      // Pressing a toolbar control must not blur the editing host; model selection
+      // survives focus loss, and we restore focus after the command.
+      onMouseDownCapture={(event) => event.preventDefault()}
+      role="toolbar"
+    >
+      {/* Tab strip + the persistent quick-access zones: undo/redo (start) sit left of
+          the tabs in the QAT position, find (end) is pushed to the right. These show
+          on every tab (docs/023 §7.1). */}
+      <div className="flex items-center gap-1 px-1">
+        {hasStart ? (
+          <div className="flex items-center gap-0.5">
+            {renderZone(layout.persistentStart)}
+          </div>
+        ) : null}
+        {hasStart && tabItems.length > 0 ? <Sep /> : null}
+        {tabItems.length > 0 ? (
+          <Tabs
+            ariaLabel="Toolbar tabs"
+            items={tabItems}
+            onSelectionChange={setSelectedTab}
+            selectedKey={activeTabId}
+            size="sm"
+            variant="border"
+          />
+        ) : null}
+        {hasEnd ? (
+          <div className="ml-auto flex items-center gap-0.5">
+            {renderZone(layout.persistentEnd)}
+          </div>
+        ) : null}
+      </div>
+
+      {/* The active tab's command row. `flex-nowrap` + `overflow-x-auto` is the
+          responsive guarantee (docs/023 §6.4): the row scrolls under width pressure
+          rather than wrapping into a noisy second line. */}
+      {activeTab ? (
+        <div
+          aria-label={`${activeTab.label} controls`}
+          className="flex flex-nowrap items-center gap-0.5 overflow-x-auto p-1"
+          role="group"
         >
-          {(close) => (
-            <form
-              className="grid w-64 gap-2"
-              data-engine-link-editor=""
-              onSubmit={(event) => {
-                event.preventDefault();
-                applyLink();
-                close();
-              }}
-            >
-              <span className="text-xs font-medium opacity-70">Link URL</span>
-              <Input
-                ariaLabel="Link URL"
-                autoFocus
-                onChange={setLinkValue}
-                placeholder="https://example.com"
-                size="sm"
-                type="url"
-                value={linkValue}
-              />
-              <div className="flex items-center justify-end gap-2">
-                {linkActive ? (
-                  <Button
-                    ariaLabel="Remove link"
-                    onClick={() => {
-                      store.command({ type: "clear-link" });
-                      close();
-                    }}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    Remove
-                  </Button>
-                ) : null}
-                <Button
-                  ariaLabel="Apply link"
-                  size="sm"
-                  type="submit"
-                  variant="primary"
-                >
-                  Apply
-                </Button>
-              </div>
-            </form>
-          )}
-        </PopoverTrigger>
-      </span>
-
-      {/* The insert menu carries structural inserts (callout) and registered
-          object nodes (code/media/embed/…) from one unified enumeration. */}
-      <Sep />
-      <span data-engine-insert-menu="">
-        <MenuTrigger>
-          <Button
-            ariaLabel="Insert block"
-            iconName="Plus"
-            size="sm"
-            square
-            tooltip="Insert"
-            variant="ghost"
-          />
-          <Menu
-            onAction={(key) => {
-              insertEntries.find((entry) => entry.id === key)?.run();
-            }}
-          >
-            {insertEntries.map((entry) => (
-              <MenuItem id={entry.id} key={entry.id} textValue={entry.label}>
-                <NavIcon name={entry.icon} />
-                {entry.label}
-              </MenuItem>
-            ))}
-          </Menu>
-        </MenuTrigger>
-      </span>
-
-      {onFind ? (
-        <>
-          <Sep />
-          <Button
-            ariaLabel="Find in document"
-            iconName="Search"
-            onClick={onFind}
-            size="sm"
-            square
-            tooltip="Find (Ctrl/Cmd+F)"
-            variant="ghost"
-          />
-        </>
+          {activeTab.slots.map((slot, index) => (
+            <Fragment key={slot.id}>
+              {index > 0 ? <Sep /> : null}
+              {slot.items.map((item) => renderItem(item))}
+            </Fragment>
+          ))}
+        </div>
       ) : null}
     </div>
   );

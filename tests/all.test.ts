@@ -65,6 +65,7 @@ await import("./editor/engine-compat-links.test");
 await import("./editor/engine-mark-render.test");
 await import("./editor/engine-commands-phase8.test");
 await import("./editor/engine-chrome.test");
+await import("./editor/engine-toolbar-spi.test");
 await import("./editor/engine-payload-import.test");
 await import("./editor/engine-input-affordances.test");
 await import("./editor/engine-phase9-affordances.test");

@@ -11,6 +11,9 @@ import {
   makeObjectNode,
   makeStructuralNode,
   makeTextNode,
+  registerToolbarAction,
+  registerToolbarSlot,
+  registerToolbarTab,
   type BlockRegistry,
   type EditorDocumentSnapshot,
   type EditorNode,
@@ -172,6 +175,44 @@ export const Phase8ToolbarEditor: Story = () => {
       virtualize={false}
     />
   );
+};
+
+// --- Toolbar SPI demo (docs/023 §5.8) ---------------------------------------
+// The consumer's extension path: the framework ships the Home + Insert built-ins,
+// and a host adds to the ribbon by *registering descriptors* — no edit to the
+// editor. Here the demo registers a whole new "Tools" tab with a slot and an action
+// that inserts a star at the caret, the same contract as `registerNode`/`registerMark`.
+// Tabs/slots/actions are a global registry (a custom *tab* cannot be scoped through
+// the per-instance `layout` prop), so registration is done in a `useState`
+// initializer — it runs during this story's first render, before the child editor's
+// toolbar renders, and only when this story is actually opened (not at bundle load),
+// keeping it out of the other editor stories until then.
+function registerToolsTab(): void {
+  registerToolbarTab({ id: "tools", label: "Tools", order: 10 });
+  registerToolbarSlot({ id: "tools.insert", order: 0, tab: "tools" });
+  registerToolbarAction({
+    icon: "Plus",
+    id: "tools.insert-star",
+    kind: "button",
+    label: "Insert star",
+    run: (ctx) => ctx.store.command({ text: "★", type: "insert-text" }),
+    slot: "tools.insert",
+  });
+}
+
+/**
+ * docs/023 — the toolbar SPI. The same seeded editor as Phase8, but a "Tools" tab
+ * (registered through `registerToolbarTab`/`registerToolbarSlot`/
+ * `registerToolbarAction`) now appears in the ribbon alongside Home and Insert,
+ * proving a host extends the toolbar by registration alone.
+ */
+export const Phase8ToolbarSpiDemo: Story = () => {
+  const store = useMemo(() => createFormattedRunStore(), []);
+  useState(() => {
+    registerToolsTab();
+    return null;
+  });
+  return <OwnedModelEditor forcePolyfill store={store} virtualize={false} />;
 };
 
 export const Phase6MixedBook: Story = () => {

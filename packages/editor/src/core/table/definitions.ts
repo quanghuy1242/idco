@@ -91,39 +91,76 @@ function buildRow(
   return { descendants, paragraphIds: built.map((b) => b.paragraphId), row };
 }
 
+// Default table size when no dimension picker params arrive (the legacy 3×3 seed:
+// a header row + two body rows, three columns). Clamp bounds keep a picker from
+// seeding a pathological grid (a 0-row table is invalid; a huge one would jank).
+const DEFAULT_TABLE_ROWS = 3;
+const DEFAULT_TABLE_COLS = 3;
+const MAX_TABLE_ROWS = 50;
+const MAX_TABLE_COLS = 20;
+
+/** Read a positive integer dimension off the insert params, clamped to [1, max]. */
+function dimension(
+  value: JsonValue | undefined,
+  fallback: number,
+  max: number,
+) {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(max, Math.round(n)));
+}
+
 /**
- * A 3×3 seed with a header row and a header column (legacy `includeHeaders`
- * default; the corner cell carries both bits = 3), explicit `colWidths` so resize
- * is authoritative from the first drag, and `responsive` layout so a new table
- * fills its container. The caret lands in the first data cell (row 1, col 1).
+ * Seed a `rows × cols` table with a header row and a header column (legacy
+ * `includeHeaders` default; the corner cell carries both bits = 3), explicit
+ * `colWidths` so resize is authoritative from the first drag, and `responsive`
+ * layout so a new table fills its container. Without params it builds the legacy
+ * 3×3 (header + two body rows); the toolbar's Insert → Table dimension picker
+ * passes `{ rows, cols }` (docs/023 §7.2) — `rows` counts the header row, so a
+ * "4 × 2" pick is a header row plus three body rows of two columns each. The caret
+ * lands in the first data cell (the first body row), or the header's first cell
+ * when the author picked a single row.
  */
 function buildTableSubtree(
   allocator: IdAllocator,
   type: string,
+  params?: { readonly rows?: JsonValue; readonly cols?: JsonValue },
 ): StructuralSubtree {
-  const header = buildRow(allocator, [
-    { headerState: HEADER_ROW | HEADER_COLUMN, text: "Column 1" },
-    { headerState: HEADER_ROW, text: "Column 2" },
-    { headerState: HEADER_ROW, text: "Column 3" },
-  ]);
-  const bodyRows = [0, 1].map(() =>
-    buildRow(allocator, [
-      { headerState: HEADER_COLUMN, text: "" },
-      { text: "" },
-      { text: "" },
-    ]),
+  const rows = dimension(params?.rows, DEFAULT_TABLE_ROWS, MAX_TABLE_ROWS);
+  const cols = dimension(params?.cols, DEFAULT_TABLE_COLS, MAX_TABLE_COLS);
+  const header = buildRow(
+    allocator,
+    Array.from({ length: cols }, (_, col) => ({
+      headerState: col === 0 ? HEADER_ROW | HEADER_COLUMN : HEADER_ROW,
+      text: `Column ${col + 1}`,
+    })),
+  );
+  const bodyRows = Array.from({ length: rows - 1 }, () =>
+    buildRow(
+      allocator,
+      Array.from({ length: cols }, (_, col) => ({
+        ...(col === 0 ? { headerState: HEADER_COLUMN } : {}),
+        text: "",
+      })),
+    ),
   );
   const root = makeStructuralNode({
     attrs: {
-      colWidths: [DEFAULT_COL_WIDTH, DEFAULT_COL_WIDTH, DEFAULT_COL_WIDTH],
+      colWidths: Array.from({ length: cols }, () => DEFAULT_COL_WIDTH),
       layout: "responsive",
     },
     children: [header.row.id, ...bodyRows.map((r) => r.row.id)],
     id: allocator.createNodeId(),
     type,
   });
+  // Prefer the first body row's second cell (the old behavior); fall back to its
+  // first cell, then to the header when the table has no body rows (rows === 1).
+  const caret =
+    bodyRows[0]?.paragraphIds[1] ??
+    bodyRows[0]?.paragraphIds[0] ??
+    header.paragraphIds[0];
   return {
-    caret: bodyRows[0]!.paragraphIds[1] ?? bodyRows[0]!.paragraphIds[0],
+    caret,
     descendants: [
       header.row,
       ...header.descendants,
@@ -204,7 +241,8 @@ function tableDefinition(): StructuralDefinition {
     // as the canonical `table` (and re-saves as `table`), so the engine no longer
     // carries a second `editor-table` type. One name, everywhere.
     aliases: ["editor-table"],
-    createSubtree: (allocator) => buildTableSubtree(allocator, "table"),
+    createSubtree: (allocator, params) =>
+      buildTableSubtree(allocator, "table", params),
     fromCompatNode: (node, ctx) => ({
       attrs: tableAttrs(node),
       // Rows import through the registry recursion (the `tablerow` definition),

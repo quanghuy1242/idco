@@ -162,3 +162,49 @@ test("a real mouse caret then the block-type menu converts to a heading", async 
     })
     .toBe("heading");
 });
+
+test("the toolbar tabs switch the visible command row (docs/023)", async ({
+  page,
+}) => {
+  await open(page);
+  // Home is the default tab: its format marks (Bold) show, Insert's Table does not.
+  await expect(
+    page.getByRole("button", { name: "Bold", exact: true }),
+  ).toBeVisible();
+  // Switch to Insert: the Table tool appears, the Home-only Bold button is gone.
+  await page.getByRole("tab", { name: "Insert" }).click();
+  await expect(
+    page.getByRole("button", { name: "Table", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Bold", exact: true }),
+  ).toHaveCount(0);
+  // Switch back to Home: Bold returns (the active tab preserves its command row).
+  await page.getByRole("tab", { name: "Home" }).click();
+  await expect(
+    page.getByRole("button", { name: "Bold", exact: true }),
+  ).toBeVisible();
+});
+
+test("the Insert table dimension picker inserts a sized table (docs/023 §7.2)", async ({
+  page,
+}) => {
+  await open(page);
+  // Leave a caret in the first block, then open Insert → Table and pick 2 × 3.
+  await page.locator("[data-engine-text-id]").first().click();
+  await page.getByRole("tab", { name: "Insert" }).click();
+  await page.getByRole("button", { name: "Table", exact: true }).click();
+  // The grid cells are labelled "<cols> by <rows>"; picking "2 by 3" inserts a
+  // 3-row, 2-column table. That the insert lands at all proves the model selection
+  // survived the popover taking focus (the toolbar was not blur-disabled).
+  await page.getByRole("button", { name: "2 by 3", exact: true }).click();
+  await expect
+    .poll(async () => {
+      const doc = JSON.parse(await compatJson(page));
+      const table = (doc.root.children as { type: string }[]).find(
+        (c) => c.type === "table",
+      ) as { children?: unknown[] } | undefined;
+      return table?.children?.length ?? 0;
+    })
+    .toBe(3);
+});

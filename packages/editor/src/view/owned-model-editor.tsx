@@ -31,6 +31,7 @@ import {
   type ContextMenuController,
 } from "./chrome";
 import { EditorToolbar } from "./chrome";
+import type { ToolbarCapabilities, ToolbarLayoutConfig } from "./spi";
 import { FindBar, useFindController, type FindController } from "./chrome";
 import { LinkPopover, useLinkInteraction } from "./chrome";
 import {
@@ -50,6 +51,10 @@ export type OwnedModelEditorProps = OwnedModelEditorViewProps & {
   readonly uploadImage?: UploadImage;
   /** Autosave wiring (AC10). When set, edits persist debounced through `onSave`. */
   readonly autosave?: AutosaveOptions;
+  /** Replace/patch the built-in toolbar arrangement (docs/023 §6.3). */
+  readonly toolbarLayout?: ToolbarLayoutConfig;
+  /** Per-deployment toolbar capability flags (docs/023 §5.6). */
+  readonly toolbarCapabilities?: Partial<ToolbarCapabilities>;
 };
 
 export type OwnedModelEditorHandle = OwnedModelEditorViewHandle & {
@@ -66,6 +71,8 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     hideToolbar,
     proseClassName = "prose max-w-none",
     store,
+    toolbarCapabilities,
+    toolbarLayout,
     uploadImage,
     ...viewProps
   } = props;
@@ -172,12 +179,21 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     () =>
       hideToolbar ? null : (
         <EditorToolbar
+          capabilities={toolbarCapabilities}
           focusEditor={focusEditor}
+          layout={toolbarLayout}
           onFind={openFind}
           store={store}
         />
       ),
-    [focusEditor, hideToolbar, openFind, store],
+    [
+      focusEditor,
+      hideToolbar,
+      openFind,
+      store,
+      toolbarCapabilities,
+      toolbarLayout,
+    ],
   );
 
   return (

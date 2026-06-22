@@ -57,6 +57,19 @@ export type StructuralSubtree = {
 };
 
 /**
+ * Optional parameters a parameterized insert carries to `createSubtree` (docs/023
+ * §7.2). The generic structural insert is dimensionless by default — a callout
+ * inserts one empty paragraph, a table its default grid — but a control that lets
+ * the author choose dimensions (the toolbar's Insert → Table dimension picker)
+ * needs to pass them through. The `insert-structural` command carries this bag
+ * verbatim; each definition interprets only the keys it understands (the table
+ * reads `rows`/`cols`) and ignores the rest, so the field is additive and an
+ * existing definition that takes no second argument is unaffected. A bag, not a
+ * typed shape, because the params are per-type and the command stays generic.
+ */
+export type StructuralInsertParams = JsonObject;
+
+/**
  * The compat-import machinery a `StructuralDefinition` borrows from `compat.ts`,
  * so a definition decides *which* attrs/children to keep without owning the
  * recursion engine (which lives at the compat boundary). Mirrors how the object
@@ -125,8 +138,16 @@ export type StructuralDefinition = {
    * round-trip fidelity to it is no longer required).
    */
   readonly aliases?: readonly string[];
-  /** Build the initial subtree for the generic `insert-structural` command. */
-  createSubtree(allocator: IdAllocator): StructuralSubtree;
+  /**
+   * Build the initial subtree for the generic `insert-structural` command. The
+   * optional `params` (docs/023 §7.2) carry author-chosen dimensions — the table's
+   * dimension picker passes `{ rows, cols }`; a definition that takes no params
+   * just ignores the argument and seeds its default subtree.
+   */
+  createSubtree(
+    allocator: IdAllocator,
+    params?: StructuralInsertParams,
+  ): StructuralSubtree;
   /** Import a legacy compat node into attrs + child ids (registry-driven). */
   fromCompatNode(
     node: RichTextCompatNode,
