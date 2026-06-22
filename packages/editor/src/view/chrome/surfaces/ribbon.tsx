@@ -126,7 +126,6 @@ export function EditorToolbar(props: {
           {
             id: "find",
             kind: "component",
-            order: 0,
             render: () => (
               <Button
                 ariaLabel="Find in document"

@@ -440,9 +440,8 @@ describe("ribbon capability gating (docs/023 §5.6)", () => {
       id: "spi-host-tab",
       isAvailable: (ctx) => ctx.capabilities.myFeature === true,
       label: "Host",
-      order: 99,
     });
-    registerToolbarSlot({ id: "spi-host.s", order: 0, tab: "spi-host-tab" });
+    registerToolbarSlot({ id: "spi-host.s", tab: "spi-host-tab" });
     registerCommand({
       group: "history",
       icon: "Plus",

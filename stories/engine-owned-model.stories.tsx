@@ -188,8 +188,8 @@ export const Phase8ToolbarEditor: Story = () => {
 // toolbar renders, and only when this story is actually opened (not at bundle load),
 // keeping it out of the other editor stories until then.
 function registerToolsTab(): void {
-  registerToolbarTab({ id: "tools", label: "Tools", order: 10 });
-  registerToolbarSlot({ id: "tools.insert", order: 0, tab: "tools" });
+  registerToolbarTab({ id: "tools", label: "Tools" });
+  registerToolbarSlot({ id: "tools.insert", tab: "tools" });
   // One descriptor, two surfaces (docs/024 §5.2): the same command lives on the
   // ribbon Tools tab *and* the slash menu (type "/star"), proving a host extends every
   // surface by declaring `surfaces`, not by writing a fifth aggregation.

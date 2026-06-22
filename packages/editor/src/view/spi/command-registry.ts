@@ -140,10 +140,12 @@ export type Command = {
   readonly keywords?: readonly string[];
   /** Per-surface placement; an absent surface key means "not shown there". */
   readonly surfaces: Partial<Record<CommandSurface, CommandPlacement>>;
-  /** The ribbon slot this command lands in, e.g. "home.lists" (docs/023 §5.4). */
+  /**
+   * The ribbon slot this command lands in, e.g. "home.lists" (docs/023 §5.4).
+   * Position within the slot (and within its `group` on the flat surfaces) is
+   * registration order — register later to appear later; there is no order number.
+   */
   readonly slot?: string;
-  /** Order within the ribbon slot / its group; ties break by registration order. */
-  readonly order?: number;
   /** Lower collapses sooner under width pressure (docs/023 §6.4); default 0. */
   readonly responsivePriority?: number;
   /** Toggle highlight state; read through the store, never the DOM. */

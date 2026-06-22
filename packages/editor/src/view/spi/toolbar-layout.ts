@@ -42,11 +42,14 @@ import {
   type CommandContext,
 } from "./command-registry";
 
-/** A toolbar tab — the top-level task grouping (docs/023 §5.4). */
+/**
+ * A toolbar tab — the top-level task grouping (docs/023 §5.4). Tabs render in
+ * registration order (the registry is insertion-ordered): a host's tab appears
+ * after the built-ins because it registers later — no explicit order number.
+ */
 export type ToolbarTab = {
   readonly id: string;
   readonly label: string;
-  readonly order: number;
   /** Hidden entirely when this returns false (e.g. no AI provider). */
   isAvailable?(ctx: CommandContext): boolean;
 };
@@ -67,7 +70,6 @@ export type ToolbarSlot = {
   readonly tab?: string;
   /** Render this slot in the persistent tab-strip zone (left/right), not a tab. */
   readonly persistent?: "start" | "end";
-  readonly order: number;
   /** Optional group label for dense/mobile presentation. */
   readonly label?: string;
 };
@@ -86,19 +88,16 @@ export type ToolbarItem =
       readonly kind: "mark";
       readonly markKind: TextMarkKind;
       readonly slot: string;
-      readonly order?: number;
     }
-  | { readonly kind: "marks"; readonly slot: string; readonly order?: number }
+  | { readonly kind: "marks"; readonly slot: string }
   | {
       readonly kind: "blockType";
       readonly slot: string;
-      readonly order?: number;
     }
   | {
       readonly kind: "insert";
       readonly nodeType: string;
       readonly slot: string;
-      readonly order?: number;
     }
   | {
       // Auto-expand every registered insertable (structural + object) as individual
@@ -108,20 +107,17 @@ export type ToolbarItem =
       // Insert with no config edit (docs/023 §5.4 — the generic insert projection).
       readonly kind: "inserts";
       readonly slot: string;
-      readonly order?: number;
       readonly exclude?: readonly string[];
     }
   | {
       readonly kind: "action";
       readonly actionId: string;
       readonly slot: string;
-      readonly order?: number;
     }
   | {
       readonly kind: "component";
       readonly id: string;
       readonly slot: string;
-      readonly order?: number;
       render(ctx: CommandContext): ReactNode;
     };
 
@@ -187,8 +183,6 @@ export function unregisterToolbarSlot(id: string): void {
  * carries its render. `priority` drives responsive collapse order (docs/023 §6.4).
  */
 type ResolvedItemBase = {
-  /** In-slot sort key (the placement's `order`, ties break by registration). */
-  readonly order: number;
   /** Responsive-collapse rank (lower collapses sooner, docs/023 §6.4); not a sort key. */
   readonly priority: number;
 };
@@ -272,11 +266,6 @@ function itemId(item: ToolbarItem): string {
   }
 }
 
-/** Stable order key: declared `order` first, then 0 so registration order breaks ties. */
-function orderOf(value: { readonly order?: number }): number {
-  return value.order ?? 0;
-}
-
 /** Normalize one registered insert (structural or object) into a dispatch + label. */
 function resolveInsert(
   nodeType: string,
@@ -322,7 +311,6 @@ function resolveAction(
     disabled: action.isDisabled?.(ctx) ?? false,
     id: action.id,
     kind: "action",
-    order: action.order ?? 0,
     priority: action.responsivePriority ?? 0,
   };
 }
@@ -332,9 +320,9 @@ function resolveConfigItem(
   item: ToolbarItem,
   ctx: CommandContext,
 ): ResolvedToolbarItem[] {
-  // `order` is the in-slot sort key; config items carry no responsive priority
-  // (priority 0), unlike actions which set their own `responsivePriority`.
-  const order = orderOf(item);
+  // Config items carry no responsive priority (priority 0), unlike actions which
+  // set their own `responsivePriority`. In-slot position is registration/array
+  // order (no explicit sort key), so a host appends by registering later.
   switch (item.kind) {
     case "mark": {
       const mark = getMark(item.markKind);
@@ -348,7 +336,6 @@ function resolveConfigItem(
           id: `mark:${item.markKind}`,
           kind: "mark",
           mark,
-          order,
           priority: 0,
         },
       ];
@@ -367,7 +354,6 @@ function resolveConfigItem(
           id: `mark:${mark.kind}`,
           kind: "mark" as const,
           mark,
-          order,
           priority: 0,
         }));
     case "blockType":
@@ -376,7 +362,6 @@ function resolveConfigItem(
           disabled: false,
           id: "blockType",
           kind: "blockType",
-          order,
           priority: 0,
         },
       ];
@@ -390,7 +375,6 @@ function resolveConfigItem(
           id: `insert:${item.nodeType}`,
           kind: "insert",
           label: insert.label,
-          order,
           priority: 0,
           run: insert.run,
         },
@@ -413,7 +397,6 @@ function resolveConfigItem(
           id: `insert:${nodeType}`,
           kind: "insert",
           label: insert.label,
-          order,
           priority: 0,
           run: insert.run,
         });
@@ -424,15 +407,13 @@ function resolveConfigItem(
       const action = getCommand(item.actionId);
       if (!action) return [];
       const resolved = resolveAction(action, ctx);
-      // An explicit placement overrides the action's own order with the item's.
-      return resolved ? [{ ...resolved, order }] : [];
+      return resolved ? [resolved] : [];
     }
     case "component":
       return [
         {
           id: item.id,
           kind: "component",
-          order,
           priority: 0,
           render: item.render,
         },
@@ -444,9 +425,9 @@ function resolveConfigItem(
  * Resolve the ordered, gated layout (docs/023 §5.5). Pure and DOM-free: given the
  * context (store + selection facts + capabilities) and a config, it walks the
  * registered tabs and slots, resolves every placement against its registry, drops
- * unavailable items and now-empty slots/tabs, and sorts by `order` then
- * registration order. This is the unit-testable heart of the SPI — a feature's
- * appearance is asserted by calling this, no DOM.
+ * unavailable items and now-empty slots/tabs, and keeps everything in
+ * declaration/registration order (no explicit sort key). This is the unit-testable
+ * heart of the SPI — a feature's appearance is asserted by calling this, no DOM.
  */
 export function computeToolbarLayout(
   ctx: CommandContext,
@@ -470,8 +451,11 @@ export function computeToolbarLayout(
     itemsBySlot.set(item.slot, bucket);
   }
 
-  // Resolve one slot's items (config placements + self-placed registered actions),
-  // gated and sorted; null when the slot ends up empty so the caller can drop it.
+  // Resolve one slot's items in order: config placements first (in config-array
+  // order), then self-placed registered actions (in registration order). There is
+  // no explicit sort key — in-slot order is the order items were declared/registered
+  // (docs/023 §5.4); a host appends a control by registering it later. null when the
+  // slot ends up empty so the caller can drop it.
   const resolveSlot = (slot: ToolbarSlot): ResolvedToolbarSlot | null => {
     const resolved: ResolvedToolbarItem[] = [];
     for (const item of itemsBySlot.get(slot.id) ?? []) {
@@ -491,27 +475,28 @@ export function computeToolbarLayout(
     // group expansions — not just whole config items / actions, so a host can hide
     // one without dropping the group.
     const visible = resolved.filter((item) => !hidden.has(item.id));
-    visible.sort((a, b) => a.order - b.order);
     return visible.length > 0
       ? { id: slot.id, items: visible, label: slot.label }
       : null;
   };
 
   // Persistent (tab-independent) slots: resolved once and rendered in the tab strip,
-  // split by side. A `persistent` slot ignores `tab` (docs/023 §7.1).
+  // split by side, in slot-registration order. A `persistent` slot ignores `tab`
+  // (docs/023 §7.1).
   const persistentSlots = (side: "start" | "end"): ResolvedToolbarSlot[] =>
     listToolbarSlots()
       .filter((slot) => slot.persistent === side && !hidden.has(slot.id))
-      .sort((a, b) => a.order - b.order)
       .map(resolveSlot)
       .filter((slot): slot is ResolvedToolbarSlot => slot !== null);
   const persistentStart = persistentSlots("start");
   const persistentEnd = persistentSlots("end");
 
+  // Tabs and their slots render in registration order (the registries are
+  // insertion-ordered), so built-ins keep their authored sequence and a host tab
+  // appends after them.
   const tabs = listToolbarTabs()
     .filter((tab) => !hidden.has(tab.id))
-    .filter((tab) => tab.isAvailable?.(ctx) ?? true)
-    .sort((a, b) => a.order - b.order);
+    .filter((tab) => tab.isAvailable?.(ctx) ?? true);
 
   const resolvedTabs: ResolvedToolbarTab[] = [];
   for (const tab of tabs) {
@@ -520,7 +505,6 @@ export function computeToolbarLayout(
         (slot) =>
           slot.tab === tab.id && !slot.persistent && !hidden.has(slot.id),
       )
-      .sort((a, b) => a.order - b.order)
       .map(resolveSlot)
       .filter((slot): slot is ResolvedToolbarSlot => slot !== null);
 
@@ -558,8 +542,8 @@ export function computeToolbarLayout(
 export const DEFAULT_TOOLBAR_LAYOUT: ToolbarLayoutConfig = {
   defaultTab: "home",
   items: [
-    { kind: "blockType", order: 0, slot: "home.text" },
-    { kind: "marks", order: 0, slot: "home.format" },
-    { exclude: ["table"], kind: "inserts", order: 0, slot: "insert.blocks" },
+    { kind: "blockType", slot: "home.text" },
+    { kind: "marks", slot: "home.format" },
+    { exclude: ["table"], kind: "inserts", slot: "insert.blocks" },
   ],
 };

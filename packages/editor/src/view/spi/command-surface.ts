@@ -313,9 +313,10 @@ export function resolveCommandList(
   for (const group of COMMAND_GROUP_ORDER) {
     const items = byGroup.get(group);
     if (!items || items.length === 0) continue;
-    // Stable sort by `order` keeps the gather order (scope innermost-first, then
-    // registration) for equal-order ties (docs/024 §8).
-    items.sort((a, b) => (a.command.order ?? 0) - (b.command.order ?? 0));
+    // No sort: within a group, items keep their gather order — scope contributions
+    // first (innermost scope first, then each contributor's declared array order),
+    // then registry projections + registered commands in registration order (docs/024
+    // §8). A contributor arranges its own commands by the order it returns them.
     groups.push({ group, items });
   }
   return groups;

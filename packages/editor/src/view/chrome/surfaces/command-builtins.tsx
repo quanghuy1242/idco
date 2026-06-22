@@ -191,43 +191,40 @@ export function registerBuiltInCommands(): void {
   // Home and Insert ship with content; View/Review/Data/AI are registered so the
   // model knows them but ship no slots/commands and so resolve empty and are
   // dropped (docs/023 §7.4). Review/Data/AI gate on their capability to demo §5.6.
-  registerToolbarTab({ id: "home", label: "Home", order: 0 });
-  registerToolbarTab({ id: "insert", label: "Insert", order: 1 });
-  registerToolbarTab({ id: "view", label: "View", order: 2 });
+  registerToolbarTab({ id: "home", label: "Home" });
+  registerToolbarTab({ id: "insert", label: "Insert" });
+  registerToolbarTab({ id: "view", label: "View" });
   registerToolbarTab({
     id: "review",
     isAvailable: (ctx) => ctx.capabilities.review,
     label: "Review",
-    order: 3,
   });
   registerToolbarTab({
     id: "data",
     isAvailable: (ctx) => ctx.capabilities.media,
     label: "Data",
-    order: 4,
   });
   registerToolbarTab({
     id: "ai",
     isAvailable: (ctx) => ctx.capabilities.ai,
     label: "AI",
-    order: 5,
   });
 
   // Persistent (tab-independent) quick-access zone (docs/023 §7.1): undo/redo left
   // (the QAT position), find right. `find`'s control is injected by the ribbon
   // (its handler is a host prop), so only the slot is registered here.
-  registerToolbarSlot({ id: "global.history", order: 0, persistent: "start" });
-  registerToolbarSlot({ id: "global.utilities", order: 0, persistent: "end" });
+  registerToolbarSlot({ id: "global.history", persistent: "start" });
+  registerToolbarSlot({ id: "global.utilities", persistent: "end" });
 
-  // Home slots, left to right (docs/023 §7.1).
-  registerToolbarSlot({ id: "home.text", order: 1, tab: "home" });
-  registerToolbarSlot({ id: "home.format", order: 2, tab: "home" });
-  registerToolbarSlot({ id: "home.lists", order: 3, tab: "home" });
-  registerToolbarSlot({ id: "home.annotate", order: 4, tab: "home" });
+  // Home slots, left to right — registration order is render order (docs/023 §7.1).
+  registerToolbarSlot({ id: "home.text", tab: "home" });
+  registerToolbarSlot({ id: "home.format", tab: "home" });
+  registerToolbarSlot({ id: "home.lists", tab: "home" });
+  registerToolbarSlot({ id: "home.annotate", tab: "home" });
   // Insert slots (docs/023 §7.2): the table dimension picker, then a projection of
   // every other registered insertable (DEFAULT_TOOLBAR_LAYOUT's `inserts` note).
-  registerToolbarSlot({ id: "insert.tables", order: 0, tab: "insert" });
-  registerToolbarSlot({ id: "insert.blocks", order: 1, tab: "insert" });
+  registerToolbarSlot({ id: "insert.tables", tab: "insert" });
+  registerToolbarSlot({ id: "insert.blocks", tab: "insert" });
 
   // --- Global edit-ops (docs/024 §7.1) — the context menu's former literals ----
   // Clipboard goes through the same model serialization the native Ctrl+C/X/V path
@@ -310,7 +307,6 @@ export function registerBuiltInCommands(): void {
     isDisabled: (ctx) => !ctx.store.canUndo,
     kind: "button",
     label: "Undo",
-    order: 0,
     responsivePriority: 1,
     run: (ctx) => ctx.store.undo(),
     slot: "global.history",
@@ -323,7 +319,6 @@ export function registerBuiltInCommands(): void {
     isDisabled: (ctx) => !ctx.store.canRedo,
     kind: "button",
     label: "Redo",
-    order: 1,
     responsivePriority: 1,
     run: (ctx) => ctx.store.redo(),
     slot: "global.history",
@@ -343,7 +338,6 @@ export function registerBuiltInCommands(): void {
     },
     kind: "toggle",
     label: "Bulleted list",
-    order: 0,
     responsivePriority: 3,
     run: (ctx) => {
       const listType = ctx.store.query({ type: "current-list-type" });
@@ -361,7 +355,6 @@ export function registerBuiltInCommands(): void {
       ctx.store.query({ type: "current-list-type" }) === "number",
     kind: "toggle",
     label: "Numbered list",
-    order: 1,
     responsivePriority: 3,
     run: (ctx) => {
       const active =
@@ -377,7 +370,6 @@ export function registerBuiltInCommands(): void {
     id: "outdent",
     kind: "button",
     label: "Outdent",
-    order: 2,
     responsivePriority: 2,
     run: (ctx) => ctx.store.command({ type: "outdent" }),
     slot: "home.lists",
@@ -389,7 +381,6 @@ export function registerBuiltInCommands(): void {
     id: "indent",
     kind: "button",
     label: "Indent",
-    order: 3,
     responsivePriority: 2,
     run: (ctx) => ctx.store.command({ type: "indent" }),
     slot: "home.lists",
@@ -408,7 +399,6 @@ export function registerBuiltInCommands(): void {
       typeof ctx.store.query({ type: "active-link-href" }) === "string",
     kind: "popover",
     label: "Link",
-    order: 0,
     render: (ctx) => <LinkEditorBody ctx={ctx} />,
     responsivePriority: 2,
     slot: "home.annotate",
@@ -425,7 +415,6 @@ export function registerBuiltInCommands(): void {
     isAvailable: (ctx) => ctx.capabilities.insertTable,
     kind: "popover",
     label: "Table",
-    order: 0,
     render: (ctx) => <TableInsertBody ctx={ctx} />,
     slot: "insert.tables",
     surfaces: { ribbon: "primary" },

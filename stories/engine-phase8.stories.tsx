@@ -216,8 +216,9 @@ export const FullEditor: Story = () => {
   // a `button` command in the persistent `global.history` slot. The `useState`
   // initializer registers it during this story's first render — before the child
   // editor's ribbon renders — so it is present on first paint (the same pattern the
-  // Tools-tab demo uses). Its `run` opens a read-only dialog with the editor's
-  // current JSON snapshot, read live from `ctx.store` at click time.
+  // Tools-tab demo uses). It lands after undo/redo simply by registering after them
+  // (in-slot order is registration order — no order number to pick). Its `run` opens
+  // a read-only dialog with the editor's current JSON snapshot, read from `ctx.store`.
   useState(() => {
     registerCommand({
       group: "history",
@@ -225,7 +226,6 @@ export const FullEditor: Story = () => {
       id: "story.save",
       kind: "button",
       label: "Save",
-      order: 2,
       run: (ctx) => {
         setJson(JSON.stringify(ctx.store.toSnapshot(), null, 2));
         setJsonOpen(true);
