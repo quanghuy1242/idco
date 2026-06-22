@@ -130,6 +130,82 @@ describe("Phase 6 bake — pure compute", () => {
     ]);
     expect(index.text.map((entry) => entry.text)).toContain("Intro paragraph");
   });
+
+  it("anchors headings by NodeId (or pinned anchorId) and dedupes human slugs", () => {
+    const allocator = createIdAllocator("idco_client_toc_test");
+    const makeHeading = (
+      text: string,
+      attrs: Record<string, JsonValue>,
+    ): EditorNode =>
+      makeTextNode({
+        attrs,
+        content: allocator.createTextSlice(text),
+        id: allocator.createNodeId(),
+        type: "heading",
+      });
+    const first = makeHeading("Setup", { tag: "h2" });
+    const dup = makeHeading("Setup", { tag: "h2" });
+    const pinned = makeHeading("Done!", {
+      anchorId: "pinned-anchor",
+      tag: "h3",
+    });
+    const order = [first, dup, pinned];
+    const snapshot: EditorDocumentSnapshot = {
+      body: {
+        blocks: Object.fromEntries(order.map((n) => [n.id, n])) as Record<
+          NodeId,
+          EditorNode
+        >,
+        order: order.map((n) => n.id),
+      },
+      settings: {},
+      version: 1,
+    };
+    const { toc } = buildDocumentIndex(snapshot);
+    // The functional anchor is the NodeId by default; a pinned anchorId wins, so a
+    // `#${anchor}` link matches what the heading element renders (`headingAnchor`).
+    expect(toc.map((entry) => entry.anchor)).toEqual([
+      first.id,
+      dup.id,
+      "pinned-anchor",
+    ]);
+    // Human slugs are unique across the whole document — the duplicate is suffixed.
+    expect(toc.map((entry) => entry.slug)).toEqual([
+      "setup",
+      "setup-2",
+      "done",
+    ]);
+  });
+
+  it("skips empty headings (e.g. the head left by an offset-0 split)", () => {
+    const allocator = createIdAllocator("idco_client_toc_empty");
+    const empty = makeTextNode({
+      attrs: { tag: "h2" },
+      content: allocator.createTextSlice(""),
+      id: allocator.createNodeId(),
+      type: "heading",
+    });
+    const real = makeTextNode({
+      attrs: { tag: "h2" },
+      content: allocator.createTextSlice("Real section"),
+      id: allocator.createNodeId(),
+      type: "heading",
+    });
+    const order = [empty, real];
+    const snapshot: EditorDocumentSnapshot = {
+      body: {
+        blocks: Object.fromEntries(order.map((n) => [n.id, n])) as Record<
+          NodeId,
+          EditorNode
+        >,
+        order: order.map((n) => n.id),
+      },
+      settings: {},
+      version: 1,
+    };
+    const { toc } = buildDocumentIndex(snapshot);
+    expect(toc.map((entry) => entry.text)).toEqual(["Real section"]);
+  });
 });
 
 describe("Phase 6 object editing — re-bake + compat", () => {

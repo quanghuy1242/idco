@@ -198,6 +198,10 @@ export function continuationAttrs(
   if (!attrs) return undefined;
   const out: Record<string, JsonValue> = {};
   if (attrs.indent !== undefined) out.indent = attrs.indent;
+  // Carry the heading level onto a heading continuation (the offset-0 split that
+  // keeps the tail a heading). Deliberately NOT `anchorId`: the new heading gets a
+  // fresh NodeId anchor rather than duplicating the original's stable anchor.
+  if (type === "heading" && attrs.tag !== undefined) out.tag = attrs.tag;
   if (type === "listitem" && attrs.listType !== undefined) {
     out.listType = attrs.listType;
   }
@@ -226,8 +230,14 @@ export function splitLeafAt(
   const length = content.text.length;
   const tailSlice = sliceTextContent(content, at, length);
   const newId = tr.allocator.createNodeId();
+  // A heading split mid/end demotes the continuation to a paragraph (Enter at the
+  // end of a heading starts body text). But splitting at offset 0 moves the WHOLE
+  // heading text into the tail, so the tail must keep the heading type/level —
+  // otherwise pressing Enter at the start of a heading silently demotes its text to
+  // a paragraph. The head left behind is an empty heading, which the TOC index
+  // skips (bake.ts), so it does not pollute the contents list.
   const newType: TextLeafType =
-    splitNode.type === "heading" ? "paragraph" : splitNode.type;
+    splitNode.type === "heading" && at > 0 ? "paragraph" : splitNode.type;
   const tailMarks = clipMarks(splitNode.marks, content, at, length, -at);
   const newNode = makeTextNode({
     attrs: continuationAttrs(splitNode.attrs, newType),

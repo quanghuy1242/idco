@@ -231,12 +231,12 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
     "table-of-contents",
     (node) => ({
       data: {
-        maxLevel: numberValue(node.maxLevel) ?? 4,
-        minLevel: numberValue(node.minLevel) ?? 2,
+        // Default level window is H1–H3 (the common blog outline); the view's
+        // insert `createData` agrees so a menu-inserted and an imported TOC match.
+        maxLevel: numberValue(node.maxLevel) ?? 3,
+        minLevel: numberValue(node.minLevel) ?? 1,
         numbering: stringValue(node.numbering) ?? "none",
-        placement: stringValue(node.placement) ?? "inline",
-        side: stringValue(node.side) ?? "right",
-        style: stringValue(node.style) ?? "default",
+        style: stringValue(node.style) ?? "panel",
         title: stringValue(node.title) ?? "On this page",
       },
       status: statusValue(node.status) ?? "ready",

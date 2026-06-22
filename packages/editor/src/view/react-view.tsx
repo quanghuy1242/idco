@@ -65,7 +65,8 @@ import { useClipboard } from "./controllers/use-clipboard";
 import { useDragSelection } from "./controllers/use-drag-selection";
 import { useGapCursor } from "./controllers/use-gap-cursor";
 import { useTouchSelection } from "./controllers/use-touch-selection";
-import { useDocumentIndex } from "./controllers/use-document-index";
+import { useDocumentIndexController } from "./controllers/use-document-index";
+import { DocumentIndexProvider } from "./document-index";
 import {
   useEditorDiagnostics,
   type ObjectBlockDiagnostics,
@@ -240,7 +241,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     store,
     syncFocusToSelection,
   });
-  useDocumentIndex({ createBakeWorker, order, refs, store });
+  useDocumentIndexController({ createBakeWorker, refs, store });
   const { api } = useEditorDiagnostics({
     focusBlock,
     placeCaretAt,
@@ -350,27 +351,32 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
         style={{ ...baseViewStyle, padding: 16, ...style }}
         tabIndex={-1}
       >
-        {blocks}
-        <SelectionOverlay
-          registry={registryRef.current}
-          rootRef={rootRef}
-          scheduler={scheduler}
-          store={store}
-        />
-        {renderEngineOverlays(store, rootRef)}
-        {isTouchDevice && (
-          <TouchSelectionLayer
-            actions={touchActions}
-            caretActionsOpen={touchCaretActionsOpen}
-            containerRef={rootRef}
-            interacting={touchInteracting}
-            onCaretActionsOpenChange={setTouchCaretActionsOpen}
+        <DocumentIndexProvider
+          revealNode={scrollToBlock}
+          store={refs.documentIndexStoreRef.current}
+        >
+          {blocks}
+          <SelectionOverlay
             registry={registryRef.current}
+            rootRef={rootRef}
             scheduler={scheduler}
             store={store}
           />
-        )}
-        <SelectionAnnouncer scheduler={scheduler} store={store} />
+          {renderEngineOverlays(store, rootRef)}
+          {isTouchDevice && (
+            <TouchSelectionLayer
+              actions={touchActions}
+              caretActionsOpen={touchCaretActionsOpen}
+              containerRef={rootRef}
+              interacting={touchInteracting}
+              onCaretActionsOpenChange={setTouchCaretActionsOpen}
+              registry={registryRef.current}
+              scheduler={scheduler}
+              store={store}
+            />
+          )}
+          <SelectionAnnouncer scheduler={scheduler} store={store} />
+        </DocumentIndexProvider>
       </div>
     );
   }
@@ -408,27 +414,32 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           data-engine-view-spacer="top"
           style={{ height: windowRange.beforeHeight }}
         />
-        {blocks}
-        <SelectionOverlay
-          registry={registryRef.current}
-          rootRef={contentRef}
-          scheduler={scheduler}
-          store={store}
-        />
-        {renderEngineOverlays(store, contentRef)}
-        {isTouchDevice && (
-          <TouchSelectionLayer
-            actions={touchActions}
-            caretActionsOpen={touchCaretActionsOpen}
-            containerRef={contentRef}
-            interacting={touchInteracting}
-            onCaretActionsOpenChange={setTouchCaretActionsOpen}
+        <DocumentIndexProvider
+          revealNode={scrollToBlock}
+          store={refs.documentIndexStoreRef.current}
+        >
+          {blocks}
+          <SelectionOverlay
             registry={registryRef.current}
+            rootRef={contentRef}
             scheduler={scheduler}
             store={store}
           />
-        )}
-        <SelectionAnnouncer scheduler={scheduler} store={store} />
+          {renderEngineOverlays(store, contentRef)}
+          {isTouchDevice && (
+            <TouchSelectionLayer
+              actions={touchActions}
+              caretActionsOpen={touchCaretActionsOpen}
+              containerRef={contentRef}
+              interacting={touchInteracting}
+              onCaretActionsOpenChange={setTouchCaretActionsOpen}
+              registry={registryRef.current}
+              scheduler={scheduler}
+              store={store}
+            />
+          )}
+          <SelectionAnnouncer scheduler={scheduler} store={store} />
+        </DocumentIndexProvider>
       </div>
     </div>
   );

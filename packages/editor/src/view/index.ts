@@ -123,6 +123,16 @@ export {
   type RestingDocumentProps,
 } from "./render";
 export {
+  DocumentIndexProvider,
+  useDocumentIndex,
+  useDocumentReveal,
+} from "./document-index";
+export {
+  createDocumentIndexStore,
+  type DocumentIndexStore,
+  type MutableDocumentIndexStore,
+} from "./controllers/document-index-store";
+export {
   computeWindowListMeta,
   listItemStyle,
   type ListItemMeta,

@@ -16,6 +16,7 @@ import {
 } from "react";
 import {
   detectMarkdownShortcut,
+  headingAnchor,
   orderedTextLeaves,
   pointAtOffset,
   type EditorCommand,
@@ -679,7 +680,13 @@ export function EngineTextBlock(props: {
         node.type === "listitem" ? (listMeta?.listType ?? "bullet") : undefined
       }
       data-engine-text-id={node.id}
-      id={node.id}
+      // The engine resolves blocks by `data-engine-block-id`/`blockRefs` (above),
+      // never by DOM id, so a heading exposes its TOC anchor here — `node.id` by
+      // default, a pinned `attrs.anchorId` when set — matching `TocEntry.anchor`
+      // so a `#${anchor}` link lands on this element. Non-headings keep `node.id`.
+      id={
+        node.type === "heading" ? headingAnchor(node.id, node.attrs) : node.id
+      }
       onFocus={focusAtEnd}
       onKeyDown={handleKeyDown}
       onMouseDown={focusAtClick}

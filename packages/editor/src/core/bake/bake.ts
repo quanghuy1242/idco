@@ -50,6 +50,24 @@ export type TocEntry = {
   readonly id: NodeId;
   readonly level: number;
   readonly text: string;
+  /**
+   * The fragment id the heading is reachable at — the element id the heading
+   * renders (`text-block`/`RestingLeaf`) and the TOC links to as `#${anchor}`. A
+   * pinned `attrs.anchorId` wins; otherwise the heading's NodeId, which is unique
+   * by construction (clientId + monotonic clock, model.ts) and round-tripped
+   * through save/load (compat reuses an `idco_node_*` id), so it is a stable,
+   * document-unique anchor with *no* whole-document dedup pass needed. This is the
+   * functional in-editor/at-rest anchor.
+   */
+  readonly anchor: string;
+  /**
+   * A human-readable, document-unique slug derived from the heading text — the
+   * reader/published-URL form (docs/015). Deduped across the whole document right
+   * here, because `buildDocumentIndex` is the one place that sees every heading
+   * (the per-node view is scoped and cannot). The editor's working anchor stays
+   * `anchor` (NodeId-based); `slug` is what a reader emits for pretty `#…` URLs.
+   */
+  readonly slug: string;
 };
 
 /** One plain-text index entry for a top-level text block or object. */
@@ -132,14 +150,29 @@ export function buildDocumentIndex(
   const toc: TocEntry[] = [];
   const text: TextIndexEntry[] = [];
   const comments: CommentIndexEntry[] = [];
+  // Slug uniqueness is a whole-document property (two "Setup" headings), so it is
+  // resolved here, walking headings in document order, not in the per-node view.
+  const usedSlugs = new Set<string>();
   for (const id of snapshot.body.order) {
     const node = snapshot.body.blocks[id];
     if (!node) continue;
     if (node.kind === "text") {
       const content = node.content.text;
       text.push({ id, text: content, type: node.type });
-      if (node.type === "heading") {
-        toc.push({ id, level: headingLevel(node.attrs?.tag), text: content });
+      // Skip empty headings (e.g. the empty head left behind by an offset-0
+      // heading split, or a heading being typed): a heading with no text is not a
+      // navigable contents entry, so it must not appear in the TOC.
+      if (node.type === "heading" && content.trim().length > 0) {
+        toc.push({
+          // A pinned anchorId wins; otherwise the NodeId is the anchor (unique +
+          // persisted), so the link works without minting a slug for it. The view
+          // and the resting leaf render this same id (`headingAnchor`).
+          anchor: headingAnchor(id, node.attrs),
+          id,
+          level: headingLevel(node.attrs?.tag),
+          slug: allocateHeadingSlug(content, usedSlugs),
+          text: content,
+        });
       }
       for (const mark of node.marks) {
         if (mark.kind !== "comment" && mark.kind !== "glossary") continue;
@@ -213,8 +246,57 @@ export function runBakeWorkerJob(
   };
 }
 
+/**
+ * The fragment id a heading is anchored at (docs/016 §10 TOC contract): a pinned
+ * `attrs.anchorId` when present, otherwise the heading's NodeId. The index, the
+ * editing leaf (`text-block`), and the resting leaf (`RestingLeaf`) all call this
+ * so the element a TOC entry links to (`#${anchor}`) is rendered with exactly that
+ * id from every surface — they cannot drift. Accepts the loose attrs bag both the
+ * snapshot node and the store node carry.
+ */
+export function headingAnchor(
+  id: NodeId,
+  attrs: Readonly<Record<string, unknown>> | undefined,
+): string {
+  const anchorId = attrs?.anchorId;
+  return typeof anchorId === "string" && anchorId.length > 0 ? anchorId : id;
+}
+
 function headingLevel(tag: JsonValue | undefined): number {
   if (typeof tag !== "string") return 1;
   const match = /^h([1-6])$/i.exec(tag);
   return match ? Number(match[1]) : 1;
+}
+
+/**
+ * Derive a URL-fragment slug from heading text: lowercased, with every run of
+ * non-alphanumeric characters collapsed to a single hyphen and the ends trimmed.
+ * Unicode-aware (`\p{L}`/`\p{N}`) so non-Latin headings keep their letters rather
+ * than slugging to empty. An empty result (a heading of only punctuation/spaces)
+ * falls back to `"section"` so a slug always exists.
+ */
+function slugifyHeading(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "section";
+}
+
+/**
+ * Allocate a document-unique slug, suffixing `-2`, `-3`, … on collision. `used`
+ * accumulates across the single document-order walk in `buildDocumentIndex`, so
+ * the first heading with a given text keeps the bare slug and later duplicates are
+ * disambiguated deterministically by position.
+ */
+function allocateHeadingSlug(text: string, used: Set<string>): string {
+  const base = slugifyHeading(text);
+  let slug = base;
+  let suffix = 2;
+  while (used.has(slug)) {
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  used.add(slug);
+  return slug;
 }

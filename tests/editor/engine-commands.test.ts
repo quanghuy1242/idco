@@ -154,6 +154,49 @@ describe("owned-model commands (Phase 5.5)", () => {
     expect(resolvedRange(tail, tailMark)).toEqual([1, 6]);
   });
 
+  it("keeps the heading style on an offset-0 split, demotes only mid/end splits", () => {
+    const buildHeadingStore = (text: string) => {
+      const allocator = createIdAllocator(CLIENT);
+      const heading = makeTextNode({
+        attrs: { tag: "h2" },
+        content: allocator.createTextSlice(text),
+        id: allocator.createNodeId(),
+        type: "heading",
+      });
+      return createEditorStore({
+        allocator,
+        snapshot: {
+          body: { blocks: { [heading.id]: heading }, order: [heading.id] },
+          settings: {},
+          version: 1,
+        },
+      });
+    };
+
+    // Enter at the very start: the heading text must carry its style into the
+    // tail (the bug was demoting it to a paragraph). The empty head stays a
+    // heading; the TOC index skips empty headings so it never shows.
+    const atStart = buildHeadingStore("The Live Book");
+    caretAt(atStart, atStart.order[0]!, 0);
+    atStart.command({ type: "split-block" });
+    const head = atStart.requireTextNode(atStart.order[0]!);
+    const tail = atStart.requireTextNode(atStart.order[1]!);
+    expect(head.content.text).toBe("");
+    expect(head.type).toBe("heading");
+    expect(tail.content.text).toBe("The Live Book");
+    expect(tail.type).toBe("heading");
+    expect(tail.attrs?.tag).toBe("h2");
+    // The tail heading gets a fresh anchor, never the head's stable anchorId.
+    expect(tail.attrs?.anchorId).toBeUndefined();
+
+    // Enter at the end still starts body text (the common heading→paragraph flow).
+    const atEnd = buildHeadingStore("Title");
+    caretAt(atEnd, atEnd.order[0]!, 5);
+    atEnd.command({ type: "split-block" });
+    expect(atEnd.requireTextNode(atEnd.order[0]!).type).toBe("heading");
+    expect(atEnd.requireTextNode(atEnd.order[1]!).type).toBe("paragraph");
+  });
+
   it("merges backward into the previous block, preserving marks (AC1)", () => {
     const allocator = createIdAllocator(CLIENT);
     const a = makeTextNode({

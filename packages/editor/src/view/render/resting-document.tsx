@@ -13,11 +13,13 @@
  * the object resting render moves onto its L1 primitives. Until then this is the
  * shared resting primitive the editor uses.
  */
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import { type AlertTone } from "@quanghuy1242/idco-ui";
 import {
   bakeObjectData,
+  buildDocumentIndex,
   createDefaultBlockRegistry,
+  headingAnchor,
   type BlockRegistry,
   type EditorDocumentSnapshot,
   type EditorNode,
@@ -29,6 +31,8 @@ import { getNodeView } from "../spi";
 import { getStructuralView } from "../spi";
 import { renderLeafMarks } from "./mark-render";
 import { ENGINE_RESTING_TYPOGRAPHY_CSS, indentMarginStyle } from "../styles";
+import { DocumentIndexProvider } from "../document-index";
+import { createDocumentIndexStore } from "../controllers/document-index-store";
 
 /**
  * The single resting render of a heavy object's baked content — the source of
@@ -102,8 +106,14 @@ export function RestingLeaf(props: { readonly node: TextLeafNode }) {
   switch (node.type) {
     case "heading": {
       const Tag = headingTag(node);
+      // The anchor a TOC entry links to (`#${anchor}`); same id the editor leaf
+      // renders, so editor and reader cannot drift (docs/016 §10 TOC contract).
       return (
-        <Tag data-engine-resting-block={node.id} style={style}>
+        <Tag
+          data-engine-resting-block={node.id}
+          id={headingAnchor(node.id, node.attrs)}
+          style={style}
+        >
           {children}
         </Tag>
       );
@@ -300,12 +310,22 @@ export function RestingDocument(props: RestingDocumentProps) {
   const bodyNodes = snapshot.body.order
     .map((id) => snapshot.body.blocks[id as NodeId])
     .filter((node): node is EditorNode => Boolean(node));
+  // The reader holds the whole document, so it builds the index synchronously and
+  // hands a static store to the same read-side SPI the editor feeds from the
+  // worker. A TOC node renders its real list at rest from this, with no worker and
+  // no `revealNode` (the reader mounts every block, so a native `#hash` jumps).
+  const indexStore = useMemo(
+    () => createDocumentIndexStore(buildDocumentIndex(snapshot, registry)),
+    [snapshot, registry],
+  );
   return (
     <div className={className} data-engine-resting-document="">
       {/* Zero-specificity baseline so the published render is never unstyled when
           the host lacks a typography plugin; a real `prose` still overrides it. */}
       <style>{ENGINE_RESTING_TYPOGRAPHY_CSS}</style>
-      {renderBlockSequence(bodyNodes, snapshot, registry)}
+      <DocumentIndexProvider store={indexStore}>
+        {renderBlockSequence(bodyNodes, snapshot, registry)}
+      </DocumentIndexProvider>
     </div>
   );
 }

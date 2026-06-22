@@ -91,7 +91,12 @@ export type {
   TextIndexEntry,
   TocEntry,
 } from "./bake";
-export { bakeObjectData, buildDocumentIndex, runBakeWorkerJob } from "./bake";
+export {
+  bakeObjectData,
+  buildDocumentIndex,
+  headingAnchor,
+  runBakeWorkerJob,
+} from "./bake";
 export {
   resolveLeafMarks,
   segmentLeaf,

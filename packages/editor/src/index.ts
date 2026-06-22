@@ -88,6 +88,7 @@ export {
   BUILT_IN_OBJECT_DEFINITIONS,
   bakeObjectData,
   buildDocumentIndex,
+  headingAnchor,
   registerGlobalStructuralDefinition,
   globalStructuralDefinitions,
   getStructuralDefinition,
@@ -139,6 +140,17 @@ export {
   type FindMatch,
 } from "./view";
 export { UploadProvider, useUpload, type UploadImage } from "./view";
+// Read-side document SPI (note.md): a node view reads the whole-document index
+// reactively without reaching across the document. The provider + store back it;
+// the editor and reader both feed it. See `useDocumentIndex` / `useDocumentReveal`.
+export {
+  DocumentIndexProvider,
+  useDocumentIndex,
+  useDocumentReveal,
+  createDocumentIndexStore,
+  type DocumentIndexStore,
+  type MutableDocumentIndexStore,
+} from "./view";
 export { useAutosave, type AutosaveOptions, type AutosaveState } from "./view";
 export {
   computeWindowListMeta,

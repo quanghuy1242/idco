@@ -10,6 +10,10 @@ import { useRef } from "react";
 import type { BakeService, DocumentIndex, NodeId, TextPoint } from "../../core";
 import type { RenderRegistry } from "../types";
 import { DEFAULT_BLOCK_ESTIMATE } from "./constants";
+import {
+  createDocumentIndexStore,
+  type MutableDocumentIndexStore,
+} from "./document-index-store";
 
 /** Create the shared view refs once. The return type is the `ViewRefs` contract. */
 export function useViewRefs() {
@@ -57,12 +61,19 @@ export function useViewRefs() {
   const indexFromWorkerRef = useRef(false);
   const workerRoundTripsRef = useRef(0);
   const bakeServiceRef = useRef<BakeService | null>(null);
+  // The reactive twin of `documentIndexRef`: the controller publishes each landed
+  // index here so views (a TOC) re-render, while the ref stays a ref so the block
+  // list does not (note.md read-side SPI). Created once per view instance.
+  const documentIndexStoreRef = useRef<MutableDocumentIndexStore>(
+    createDocumentIndexStore(),
+  );
 
   return {
     autoscrollFrameRef,
     bakeServiceRef,
     contentRef,
     documentIndexRef,
+    documentIndexStoreRef,
     dragAnchorRef,
     dragMoveFrameRef,
     draggingRef,
