@@ -19,7 +19,12 @@ import {
   ChromeButton,
 } from "@quanghuy1242/idco-ui";
 import { type EditorStore, type NodeId, type ObjectNode } from "../../core";
-import { getNodeView } from "../spi";
+import { getNodeView, type NodeViewResourceConfigField } from "../spi";
+import {
+  referenceFieldOf,
+  useResolveReference,
+} from "../controllers/use-resolve";
+import { refField } from "../object-data";
 import { ObjectConfigPanel } from "./object-config";
 import { renderRestingObject } from "./resting-document";
 import { objectBlockStyle } from "../styles";
@@ -63,6 +68,10 @@ export function EngineObjectBlock(props: {
     () => store.activeObjectId === node.id,
     () => false,
   );
+  // Reference blocks revalidate their snapshot on mount and drive their status
+  // lifecycle (docs/026 §7.2/§7.5); the hook no-ops for non-reference objects.
+  useResolveReference(node, store);
+  const referenceField = referenceFieldOf(node.type);
   // The resting baked content height, captured at activation. The in-place live
   // editor opens at exactly this height so the block box does not shift (AC3).
   const restHeightRef = useRef(0);
@@ -199,6 +208,13 @@ export function EngineObjectBlock(props: {
       ) : (
         <BakedObjectView node={node} store={store} />
       )}
+      {!live && referenceField ? (
+        <ReferenceStateChrome
+          field={referenceField}
+          node={node}
+          store={store}
+        />
+      ) : null}
       {usesPopover ? (
         <AnchoredPopover
           ariaLabel={`Edit ${node.type}`}
@@ -308,4 +324,55 @@ function BakedObjectView(props: {
 }) {
   const { node, store } = props;
   return <>{renderRestingObject(node, store.registry)}</>;
+}
+
+/**
+ * The reference-block state affordance (docs/026 §7.1 / §7.3 / §14.9). The baked
+ * snapshot always renders behind it; this adds the three lifecycle states the
+ * snapshot alone cannot express, generically for any reference block (built-in or
+ * custom), so a block author never re-implements them:
+ *
+ * - `unresolved` + a ref → a quiet "Refreshing…" hint while the on-mount resolve
+ *   runs; the stale snapshot stays visible (SWR, §7.2).
+ * - `invalid` → "Couldn’t refresh" (a dangling ref or a failed resolve, §7.3); the
+ *   stale snapshot is kept and the affordance reopens the picker to repair it.
+ * - `unresolved` + no ref → "Pick a {label}", the empty-state call to action.
+ *
+ * A `ready`/`dirty` block shows nothing. The actionable variants open the config
+ * popover via `activateObject`; `onMouseDown` stop-prop keeps the press from also
+ * tripping an in-place object's activate-on-mousedown.
+ */
+function ReferenceStateChrome(props: {
+  readonly node: ObjectNode;
+  readonly store: EditorStore;
+  readonly field: NodeViewResourceConfigField;
+}) {
+  const { node, store, field } = props;
+  if (node.status === "ready" || node.status === "dirty") return null;
+  const hasRef = refField(node.data) !== "";
+  if (node.status === "unresolved" && hasRef) {
+    return (
+      <span
+        aria-live="polite"
+        className="badge badge-ghost badge-sm absolute bottom-1 left-1 z-10"
+        data-engine-reference-state="resolving"
+      >
+        Refreshing…
+      </span>
+    );
+  }
+  const invalid = node.status === "invalid";
+  return (
+    <button
+      className={`badge badge-sm absolute bottom-1 left-1 z-10 cursor-pointer ${
+        invalid ? "badge-warning" : "badge-outline"
+      }`}
+      data-engine-reference-state={invalid ? "invalid" : "empty"}
+      onClick={() => store.activateObject(node.id)}
+      onMouseDown={(event) => event.stopPropagation()}
+      type="button"
+    >
+      {invalid ? "Couldn’t refresh" : `Pick a ${field.label.toLowerCase()}`}
+    </button>
+  );
 }

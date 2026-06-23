@@ -69,6 +69,8 @@ await import("./editor/data-source-registry.test");
 await import("./editor/reference-data-shape.test");
 await import("./editor/post-ref-reference-block.test");
 await import("./editor/object-config-resource-field.test");
+await import("./editor/reference-status-lifecycle.test");
+await import("./editor/resolve-swr.test");
 await import("./editor/engine-structural-spi.test");
 await import("./editor/engine-block-type-spi.test");
 await import("./editor/engine-structural-child-commands.test");

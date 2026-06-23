@@ -40,7 +40,9 @@ import {
   type EditorNode,
   type EditorSelection,
   type IdAllocator,
+  type JsonValue,
   type NodeId,
+  type ObjectNodeStatus,
   type ParentEntry,
   type StructuralNode,
   type TextLeafNode,
@@ -64,6 +66,7 @@ import {
   type PointRedirect,
 } from "../model";
 import { createDefaultBlockRegistry, type BlockRegistry } from "../registry";
+import { bakeObjectData } from "../bake";
 import {
   cloneAttrsWithValue,
   type AddMarkStep,
@@ -492,6 +495,45 @@ export class EditorStore {
     this.#notifyActiveObject();
   }
 
+  /**
+   * Apply a resolve-driven update to a reference object — a fresh snapshot and/or
+   * a status transition — WITHOUT recording undo history (docs/026 §7.2/§14.6).
+   * Revalidation and the unresolved/invalid lifecycle are derived state, not user
+   * edits: undo must not step through a background refresh, and a virtualization
+   * remount must not push a transaction. The new `data` is baked here (so the
+   * resting snapshot stays in sync), but `status` is taken from the caller, not
+   * from the bake — this is the one place the engine overrides the bake-derived
+   * status with the resolve lifecycle (§7.5), so an empty reference reads
+   * `unresolved` and a failed refresh reads `invalid` even though the post-ref
+   * baker always succeeds. No-ops when data, bake, and status are all unchanged,
+   * so the resolve controller can call it on every mount idempotently.
+   */
+  resolveObject(node: NodeId, data: JsonValue, status: ObjectNodeStatus): void {
+    const current = this.getNode(node);
+    if (!current || current.kind !== "object") return;
+    const baked = bakeObjectData(this.registry, current.type, data);
+    const bakedTo: JsonValue | undefined = baked.baked ?? undefined;
+    const bakedFrom: JsonValue | undefined = current.baked ?? undefined;
+    if (
+      JSON.stringify(current.data) === JSON.stringify(data) &&
+      JSON.stringify(bakedFrom) === JSON.stringify(bakedTo) &&
+      current.status === status
+    ) {
+      return;
+    }
+    const tr = this.transaction();
+    tr.setObjectData({
+      bakedFrom,
+      bakedTo,
+      from: current.data,
+      node,
+      statusFrom: current.status,
+      statusTo: status,
+      to: data,
+    });
+    this.dispatch(tr, { recordHistory: false });
+  }
+
   /** The active IME preedit range, or null when no composition is in flight. */
   get composition(): CompositionRange | null {
     return this.#composition;
@@ -651,6 +693,7 @@ export class EditorStore {
    */
   dispatch(
     transaction: TransactionBuilder | TransactionDraft,
+    options?: { readonly recordHistory?: boolean },
   ): CommittedTransaction | null {
     const draft =
       transaction instanceof TransactionBuilder
@@ -661,7 +704,13 @@ export class EditorStore {
     // empty `steps`) is non-historic: recording it would make undo step back
     // through caret moves before reaching the last edit, and a caret move must
     // not clear the redo stack (docs/010 §10.5). Only real edits touch history.
-    const recordHistory = draft.steps.length > 0;
+    //
+    // A caller may also force `recordHistory: false` for a step-bearing
+    // transaction that is derived state, not a user edit — the reference-block
+    // resolve lifecycle (docs/026 §7.2/§14.6): a background snapshot refresh or an
+    // unresolved/invalid status change must not enter undo and must not clear redo,
+    // exactly like a caret move.
+    const recordHistory = options?.recordHistory ?? draft.steps.length > 0;
     const committed = this.#commit(draft, { recordHistory });
     if (recordHistory) this.#history.undone.length = 0;
     return committed;
