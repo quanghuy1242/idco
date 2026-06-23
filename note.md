@@ -2,7 +2,13 @@
 
 ## What this is
 
-A design note for the next toolbar UX iteration. Today each tab's command row is a flat run of square icon-only buttons (tooltip on hover). The goal is to optionally render a text label next to the icon, decided per group, and to degrade gracefully under width pressure by collapsing overflow into a dropdown rather than horizontal-scrolling the row. No implementation yet — this captures the findings, the chosen shape, and the gotchas.
+A design note for the next toolbar UX iteration. Today each tab's command row is a flat run of square icon-only buttons (tooltip on hover). The goal is to optionally render a text label next to the icon, decided per group, and to degrade gracefully under width pressure by collapsing overflow into a dropdown rather than horizontal-scrolling the row. The rest of this note captures the findings, the chosen shape, and the gotchas.
+
+## Status: implemented (2026-06-23)
+
+All of this note shipped. The slices: `ToolbarSlot.display` (`"icon" | "labelled" | "auto"`) carried onto the resolved slot; a pure per-kind `collapsible` derivation on every resolved item (`"menu-item" | "keep-inline" | "submenu"`, with `submenu` reserved); the `useResponsiveCollapse` hook + pure `computeCollapsedIds` extracted into `@idco/ui` (priority-ordered, mixed-item, hidden-measure + ResizeObserver + correction pass); the ribbon command row rebuilt as a React Aria `Toolbar` (roving focus) that labels/collapses per slot and falls back to horizontal scroll on mobile; mark + block-type `disabled` gating wired (greyed off a text leaf); and a `shortcut` field on marks/commands surfaced in tooltips + `aria-keyshortcuts`. The **Insert tab renders icon + label** (`insert.tables` → `labelled`, `insert.blocks` → `auto`). Tests: `computeCollapsedIds` unit coverage in `tests/ui/use-responsive-collapse.test.ts` and display/collapsible/gating/shortcut assertions in `tests/editor/engine-toolbar-spi.test.ts`; full `pnpm check` green.
+
+Two open follow-up questions resolved during the build: `auto` ships as the **two-tier** model (labelled → overflow menu, no icon-only middle tier) — the simpler sanctioned option, and the middle tier is the one that hurt touch discoverability anyway; and the `collapsible` derivation lives in **`computeToolbarLayout`** (pure + testable), not the renderer. Deliberate deferrals: the `"submenu"` collapse mode for popover/dropdown actions (they stay `keep-inline` for now), and code-block-specific mark gating (only the no-text-leaf case greys controls today).
 
 ## The three layers being touched
 
@@ -43,6 +49,10 @@ This fits the SPI philosophy: declared as data, set at registration, the rendere
 Under width pressure the row should collapse overflow into a dropdown menu, not horizontal-scroll. This replaces today's `flex-nowrap overflow-x-auto` strategy for the command row (ribbon.tsx:375).
 
 Cleanest mental model is a three-tier `auto` per slot: labelled when there is room, then icon-only (drop labels, keep tooltips) when tighter, then overflow the tail into one trailing Ellipsis menu when even icons do not fit. Tier 2 reuses the same measurement already taken to decide tier 1 (you must measure the labelled width to know whether labels fit).
+
+### Mobile is horizontal scroll, not collapse
+
+The three-tier degradation is a **desktop** behavior, gated above the mobile breakpoint. Below it (the `max-width: 767px` cutoff ResponsiveActions already uses at responsive-actions.tsx:111-114), do not collapse the command row into a dropdown — keep today's simple `overflow-x-auto` horizontal scroll (ribbon.tsx:375). Rationale: on touch there is no hover, so the icon-only middle tier would strip labels exactly where tooltips never fire, leaving bare glyphs the user cannot learn; and an overflow menu of formatting controls is a worse thumb target than a swipeable row. So the responsive matrix is: desktop under width pressure → labelled → icon-only → overflow menu; mobile → always horizontal-scroll the labelled-or-icon row. This inverts ResponsiveActions' mobile rule (which collapses *everything* on mobile) because a formatting row is scanned and swiped, not a short list of page actions. The measurement engine still only runs on desktop; the mobile branch is a CSS fallback with no measurement, which also sidesteps the Ladle measurement flakiness on the mobile story.
 
 ## Finding: the collapse engine already exists in `packages/ui`
 
@@ -98,12 +108,33 @@ Today the command row is `flex-nowrap overflow-x-auto` (ribbon.tsx:375) and scro
 - Re-measure on content change. The row's item set changes with selection (capability gating, marks resolving in/out). The measure effect must key off the resolved layout signature, like ResponsiveActions keys off `actionSignature` (responsive-actions.tsx:94-96).
 - Test story. Ladle measurement-driven UI has been flaky before (scroller/readyMs gotchas). An auto toolbar story needs a deterministic container width plus a fonts-ready wait, or it will be flaky.
 
+## UX gaps surfaced while grounding (adjacent, fold into the same epic)
+
+Grounding the label/collapse work against the live renderer turned up three real UX gaps that are cheap, already half-plumbed, and synergistic with this change. They are not "label + collapse" but they touch the same files and the same SPI, so they belong in the same epic rather than a later pass.
+
+### 1. `role="toolbar"` with no roving focus (accessibility correctness)
+
+ribbon.tsx:340 hand-sets `role="toolbar"`, which by ARIA contract promises arrow-key navigation between controls — and there is none. Every `Button` is independently tab-focusable, so a keyboard user tabs through ~12 stops to cross one tab's command row, and a screen reader announces a "toolbar" that does not behave like one. This is the RA `Toolbar` adoption the responsive finding listed as "orthogonal"; promote it from optional aside to in-scope, because it is a correctness issue (the role is already asserted) and it is cheapest to fold in while this file is already open. RA `Toolbar` gives roving tabindex + arrow-key nav for free; verify it does not fight the capture-phase `onMouseDownCapture` preventDefault (ribbon.tsx:339) or the hidden measure row.
+
+### 2. Mark and block-type gating is plumbed but dead
+
+The resolved item already carries a `disabled` field, but `resolveConfigItem` hardcodes `disabled: false` for every mark (toolbar-layout.ts:334) and for the block-type chooser (toolbar-layout.ts:362), and the mark `Button` does not even pass `disabled` (ribbon.tsx:187-199). So Bold stays clickable-looking inside a code block where inline marks are meaningless. Actions already gate through `isDisabled` (command-registry.ts:159); marks and block-types just never wire the equivalent query. Wiring it makes the controls reflect what actually applies to the selection — independent of labels, but it lands in the exact same resolve path.
+
+### 3. No keyboard-shortcut hints anywhere
+
+Marks have shortcuts (Ctrl/Cmd+B, etc.) but the mark and command descriptors carry **no shortcut metadata at all** — only `find` hardcodes the string `"Find (Ctrl/Cmd+F)"` (ribbon.tsx:136). Tooltips show the bare label (`tooltip={meta.label}`). Adding an optional `shortcut` to the descriptor and rendering it in the tooltip (plus `aria-keyshortcuts` on the control) is the highest discoverability-per-effort change here, and it composes directly with the label work — the same descriptor that gains a visible label can carry its shortcut.
+
+## Explicitly out of scope: contextual tabs
+
+No contextual/auto-following tab (the Word "Picture Format on selection" pattern). `ToolbarTab.isAvailable` gates visibility but tabs deliberately do not auto-activate on selection. This is intended, not a gap: objects already carry their own **inline** chrome — the node SPI ships a default settings gear, a custom `chromeControl` (the code block's language selector), a `chromeMeta` badge, and view-level `renderOverlay` floating surfaces (node-view.ts:41-159), and structural nodes contribute selection controls through `renderOverlay` + `contributeCommands` (the table's hover row/column controls, structural-view.ts:62-119). The contextual affordance lives next to the object, where the selection is, not in a far-away ribbon tab. A contextual ribbon tab would duplicate that inline chrome and split one object's controls across two places.
+
 ## Recommendation / next step
 
 Extract a small `useResponsiveCollapse` measurement hook in `packages/ui` from responsive-actions.tsx (hidden-measure + ResizeObserver + `nextCollapseCount` + correction pass), parameterized by per-item width and a priority order. Then the editor's `display:"auto"` slot feeds it `responsivePriority` and renders the overflow tail into the `Menu` ribbon.tsx already imports — with the `collapsible` kind-derivation handling popover/component/blockType items. React Aria's role is the `Menu` (overflow) and optionally `Toolbar` (roving focus); the collapse engine is ours, already written.
 
 Open follow-up choices for when work resumes:
 
-- Whether to adopt the RA `Toolbar` component now (gains arrow-key roving focus) or keep the hand-set `role="toolbar"` and do collapse only.
-- Whether `auto` is the three-tier model or a simpler two-tier (labelled → overflow menu, skipping the icon-only middle tier).
+- Whether `auto` is the three-tier model or a simpler two-tier (labelled → overflow menu, skipping the icon-only middle tier) — this is now a *desktop-only* question; mobile is settled as horizontal scroll.
 - Where the `collapsible` derivation lives — in `computeToolbarLayout` (so it stays pure and testable) versus in the renderer.
+
+(The RA `Toolbar` adoption is no longer an open "whether" — it moved into the in-scope UX-gaps section above as item 1, the accessibility-correctness fix.)

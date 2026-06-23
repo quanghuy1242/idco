@@ -72,6 +72,15 @@ export type ToolbarSlot = {
   readonly persistent?: "start" | "end";
   /** Optional group label for dense/mobile presentation. */
   readonly label?: string;
+  /**
+   * How this slot's controls present (note.md "Decision: the knob lives on the slot").
+   * `"icon"` (default) is the dense icon-only run with hover tooltips; `"labelled"`
+   * renders icon + text statically; `"auto"` renders labelled and, under desktop width
+   * pressure, collapses its lowest-priority collapsible controls into a trailing
+   * overflow menu (mobile falls back to horizontal scroll). The renderer reads this
+   * blind — a host flips one group from `icon` to `auto` without touching the renderer.
+   */
+  readonly display?: "icon" | "labelled" | "auto";
 };
 
 /**
@@ -185,6 +194,16 @@ export function unregisterToolbarSlot(id: string): void {
 type ResolvedItemBase = {
   /** Responsive-collapse rank (lower collapses sooner, docs/023 §6.4); not a sort key. */
   readonly priority: number;
+  /**
+   * How this item behaves when its `auto` slot runs out of room (note.md §b — derived
+   * per kind, pure + testable, not host config). `"menu-item"` collapses cleanly into a
+   * flat overflow `MenuItem` (mark / insert / button action). `"keep-inline"` never
+   * leaves the row — a popover/dropdown trigger (a popover-inside-a-menu is awkward),
+   * the wide block-type chooser, or an opaque host `component` that cannot become a
+   * MenuItem; it always reserves its inline width. `"submenu"` is reserved for a future
+   * popover-as-submenu collapse and is not emitted yet.
+   */
+  readonly collapsible: "menu-item" | "keep-inline" | "submenu";
 };
 
 export type ResolvedToolbarItem =
@@ -224,6 +243,8 @@ export type ResolvedToolbarItem =
 export type ResolvedToolbarSlot = {
   readonly id: string;
   readonly label?: string;
+  /** Carried from `ToolbarSlot.display` (default "icon") so the renderer reads it blind. */
+  readonly display: "icon" | "labelled" | "auto";
   readonly items: readonly ResolvedToolbarItem[];
 };
 
@@ -308,11 +329,28 @@ function resolveAction(
   return {
     action,
     active: action.isActive?.(ctx) ?? false,
+    // A popover/dropdown action keeps its trigger inline (a popover nested in a menu is
+    // awkward, note.md §b); a plain toggle/button action collapses to a flat MenuItem.
+    collapsible:
+      action.kind === "popover" || action.kind === "dropdown"
+        ? "keep-inline"
+        : "menu-item",
     disabled: action.isDisabled?.(ctx) ?? false,
     id: action.id,
     kind: "action",
     priority: action.responsivePriority ?? 0,
   };
+}
+
+/**
+ * Whether inline format marks have anything to apply to (note.md §2 — the `disabled`
+ * field was plumbed but hardcoded false). A mark / the block-type chooser is greyed
+ * when the selection is not on a text leaf (`blockType === null`, e.g. an object is
+ * selected), so the control reflects the selection instead of looking live with no
+ * effect. Code-block-specific gating is a deliberate follow-up, not done here.
+ */
+function textControlsDisabled(ctx: CommandContext): boolean {
+  return ctx.selection.blockType === null;
 }
 
 /** Resolve one config item against the registries + context; null drops it. */
@@ -332,7 +370,8 @@ function resolveConfigItem(
           active:
             ctx.store.query({ mark: item.markKind, type: "is-mark-active" }) ===
             true,
-          disabled: false,
+          collapsible: "menu-item",
+          disabled: textControlsDisabled(ctx),
           id: `mark:${item.markKind}`,
           kind: "mark",
           mark,
@@ -350,7 +389,8 @@ function resolveConfigItem(
           active:
             ctx.store.query({ mark: mark.kind, type: "is-mark-active" }) ===
             true,
-          disabled: false,
+          collapsible: "menu-item" as const,
+          disabled: textControlsDisabled(ctx),
           id: `mark:${mark.kind}`,
           kind: "mark" as const,
           mark,
@@ -359,7 +399,8 @@ function resolveConfigItem(
     case "blockType":
       return [
         {
-          disabled: false,
+          collapsible: "keep-inline",
+          disabled: textControlsDisabled(ctx),
           id: "blockType",
           kind: "blockType",
           priority: 0,
@@ -370,6 +411,7 @@ function resolveConfigItem(
       if (!insert) return [];
       return [
         {
+          collapsible: "menu-item",
           disabled: false,
           icon: insert.icon,
           id: `insert:${item.nodeType}`,
@@ -392,6 +434,7 @@ function resolveConfigItem(
         const insert = resolveInsert(nodeType);
         if (!insert) continue;
         out.push({
+          collapsible: "menu-item",
           disabled: false,
           icon: insert.icon,
           id: `insert:${nodeType}`,
@@ -412,6 +455,7 @@ function resolveConfigItem(
     case "component":
       return [
         {
+          collapsible: "keep-inline",
           id: item.id,
           kind: "component",
           priority: 0,
@@ -476,7 +520,12 @@ export function computeToolbarLayout(
     // one without dropping the group.
     const visible = resolved.filter((item) => !hidden.has(item.id));
     return visible.length > 0
-      ? { id: slot.id, items: visible, label: slot.label }
+      ? {
+          display: slot.display ?? "icon",
+          id: slot.id,
+          items: visible,
+          label: slot.label,
+        }
       : null;
   };
 

@@ -148,6 +148,12 @@ export type Command = {
   readonly slot?: string;
   /** Lower collapses sooner under width pressure (docs/023 §6.4); default 0. */
   readonly responsivePriority?: number;
+  /**
+   * Human keyboard-shortcut hint surfaced in the ribbon tooltip + `aria-keyshortcuts`
+   * (note.md §3). Display-only discoverability string (e.g. "Ctrl/Cmd+Z"); the real
+   * binding lives in the keymap. Omit for a command with no shortcut.
+   */
+  readonly shortcut?: string;
   /** Toggle highlight state; read through the store, never the DOM. */
   isActive?(ctx: CommandContext): boolean;
   /**

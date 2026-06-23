@@ -99,9 +99,21 @@ function renderAnnotationMark({ mark, child, key }: MarkRenderArgs): ReactNode {
 // registration here (or a host's `registerMark`), not edits across the render
 // switch, the toolbar, and the context menu.
 const BUILT_IN_MARKS: readonly MarkDefinition[] = [
-  elementMark("bold", "strong", 4, { icon: "Bold", label: "Bold" }),
-  elementMark("italic", "em", 5, { icon: "Italic", label: "Italic" }),
-  elementMark("underline", "u", 6, { icon: "Underline", label: "Underline" }),
+  elementMark("bold", "strong", 4, {
+    icon: "Bold",
+    label: "Bold",
+    shortcut: "Ctrl/Cmd+B",
+  }),
+  elementMark("italic", "em", 5, {
+    icon: "Italic",
+    label: "Italic",
+    shortcut: "Ctrl/Cmd+I",
+  }),
+  elementMark("underline", "u", 6, {
+    icon: "Underline",
+    label: "Underline",
+    shortcut: "Ctrl/Cmd+U",
+  }),
   elementMark("strikethrough", "s", 7, {
     icon: "Strikethrough",
     label: "Strikethrough",

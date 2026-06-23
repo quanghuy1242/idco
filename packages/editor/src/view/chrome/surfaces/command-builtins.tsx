@@ -222,9 +222,20 @@ export function registerBuiltInCommands(): void {
   registerToolbarSlot({ id: "home.lists", tab: "home" });
   registerToolbarSlot({ id: "home.annotate", tab: "home" });
   // Insert slots (docs/023 §7.2): the table dimension picker, then a projection of
-  // every other registered insertable (DEFAULT_TOOLBAR_LAYOUT's `inserts` note).
-  registerToolbarSlot({ id: "insert.tables", tab: "insert" });
-  registerToolbarSlot({ id: "insert.blocks", tab: "insert" });
+  // every other registered insertable (DEFAULT_TOOLBAR_LAYOUT's `inserts` note). The
+  // Insert tab renders icon + label, not bare icons (note.md "Decision: the knob lives
+  // on the slot"): its block glyphs (callout / code / media / embed / divider / TOC /
+  // post-ref) are exactly the ambiguous ones where a label is the discoverability win,
+  // unlike Home's universally legible Bold/Italic. `insert.tables` is the single
+  // keep-inline Table picker so it shows a static "Table" label; `insert.blocks` is
+  // `auto`, so it labels every block and collapses the tail into the overflow menu under
+  // desktop width pressure (mobile horizontal-scrolls instead).
+  registerToolbarSlot({
+    display: "labelled",
+    id: "insert.tables",
+    tab: "insert",
+  });
+  registerToolbarSlot({ display: "auto", id: "insert.blocks", tab: "insert" });
 
   // --- Global edit-ops (docs/024 §7.1) — the context menu's former literals ----
   // Clipboard goes through the same model serialization the native Ctrl+C/X/V path
@@ -309,6 +320,7 @@ export function registerBuiltInCommands(): void {
     label: "Undo",
     responsivePriority: 1,
     run: (ctx) => ctx.store.undo(),
+    shortcut: "Ctrl/Cmd+Z",
     slot: "global.history",
     surfaces: { ribbon: "primary" },
   });
@@ -321,6 +333,7 @@ export function registerBuiltInCommands(): void {
     label: "Redo",
     responsivePriority: 1,
     run: (ctx) => ctx.store.redo(),
+    shortcut: "Ctrl/Cmd+Shift+Z",
     slot: "global.history",
     surfaces: { ribbon: "primary" },
   });
@@ -401,6 +414,7 @@ export function registerBuiltInCommands(): void {
     label: "Link",
     render: (ctx) => <LinkEditorBody ctx={ctx} />,
     responsivePriority: 2,
+    shortcut: "Ctrl/Cmd+K",
     slot: "home.annotate",
     surfaces: { contextMenu: "primary", flyout: "primary", ribbon: "primary" },
   });

@@ -29,6 +29,7 @@ await import("./ui/inline.test");
 await import("./ui/mobile-filter-menu.test");
 await import("./ui/nav-icons.test");
 await import("./ui/responsive-actions.test");
+await import("./ui/use-responsive-collapse.test");
 await import("./ui/responsive-breadcrumb.test");
 await import("./ui/scope-picker-trigger.test");
 await import("./ui/tabs.test");

@@ -34,6 +34,12 @@ export type MarkRenderArgs = {
 export type MarkToolbarMeta = {
   readonly icon: string;
   readonly label: string;
+  /**
+   * Human keyboard-shortcut hint shown in the toolbar tooltip + `aria-keyshortcuts`
+   * (note.md §3). Display-only — the actual binding lives in the keymap; this is the
+   * discoverability string (e.g. "Ctrl/Cmd+B"). Omit for a mark with no shortcut.
+   */
+  readonly shortcut?: string;
 };
 
 /** One mark's contract: how it renders, how it nests, and its optional toolbar. */

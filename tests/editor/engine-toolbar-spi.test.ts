@@ -548,3 +548,90 @@ describe("parameterized table insert (docs/023 §7.2)", () => {
     );
   });
 });
+
+/** The resolved slot object (carries `display` + items with `collapsible`/`disabled`). */
+function slotOf(layout: ResolvedToolbarLayout, tabId: string, slotId: string) {
+  return tab(layout, tabId)?.slots.find((s) => s.id === slotId);
+}
+
+describe("ribbon presentation — slot display + collapse derivation (note.md)", () => {
+  it("carries the slot's display onto the resolved slot (default icon)", () => {
+    const layout = computeToolbarLayout(makeCtx(fakeStore()));
+    // Home format ships no display → defaults to icon; Insert blocks is auto.
+    expect(slotOf(layout, "home", "home.format")?.display).toBe("icon");
+    expect(slotOf(layout, "insert", "insert.blocks")?.display).toBe("auto");
+    expect(slotOf(layout, "insert", "insert.tables")?.display).toBe("labelled");
+  });
+
+  it("derives collapsible per kind: marks/inserts are menu-item, chooser/popover keep-inline", () => {
+    const layout = computeToolbarLayout(makeCtx(fakeStore()));
+    const mark = slotOf(layout, "home", "home.format")?.items[0];
+    expect(mark?.collapsible).toBe("menu-item");
+
+    const chooser = slotOf(layout, "home", "home.text")?.items[0];
+    expect(chooser?.kind).toBe("blockType");
+    expect(chooser?.collapsible).toBe("keep-inline");
+
+    const inserts = slotOf(layout, "insert", "insert.blocks")?.items ?? [];
+    expect(inserts.length).toBeGreaterThan(0);
+    expect(inserts.every((item) => item.collapsible === "menu-item")).toBe(
+      true,
+    );
+
+    // The Table dimension picker is a popover action → never collapses to a MenuItem.
+    const table = slotOf(layout, "insert", "insert.tables")?.items.find(
+      (item) => item.id === "insert.table",
+    );
+    expect(table?.collapsible).toBe("keep-inline");
+  });
+});
+
+describe("ribbon gating — marks/chooser reflect the selection (note.md §2)", () => {
+  function ctxWithBlockType(blockType: string | null): CommandContext {
+    const ctx = makeCtx(fakeStore());
+    return {
+      ...ctx,
+      selection: { ...ctx.selection, blockType },
+    };
+  }
+
+  /** Read the mark + chooser `disabled` flags from a resolved layout, kind-narrowed. */
+  function gatingFlags(layout: ResolvedToolbarLayout) {
+    const mark = slotOf(layout, "home", "home.format")?.items[0];
+    const chooser = slotOf(layout, "home", "home.text")?.items[0];
+    expect(mark?.kind).toBe("mark");
+    expect(chooser?.kind).toBe("blockType");
+    return {
+      chooser: chooser?.kind === "blockType" ? chooser.disabled : undefined,
+      mark: mark?.kind === "mark" ? mark.disabled : undefined,
+    };
+  }
+
+  it("enables marks + chooser when the caret is on a text leaf", () => {
+    const flags = gatingFlags(
+      computeToolbarLayout(ctxWithBlockType("paragraph")),
+    );
+    expect(flags.mark).toBe(false);
+    expect(flags.chooser).toBe(false);
+  });
+
+  it("disables marks + chooser when no text leaf is selected (blockType null)", () => {
+    const flags = gatingFlags(computeToolbarLayout(ctxWithBlockType(null)));
+    expect(flags.mark).toBe(true);
+    expect(flags.chooser).toBe(true);
+  });
+});
+
+describe("ribbon shortcuts — discoverability metadata (note.md §3)", () => {
+  it("exposes a shortcut on built-in marks (Bold) and commands (Undo)", () => {
+    const layout = computeToolbarLayout(makeCtx(fakeStore()));
+    const bold = slotOf(layout, "home", "home.format")?.items.find(
+      (item) => item.id === "mark:bold",
+    );
+    expect(bold?.kind === "mark" && bold.mark.toolbar?.shortcut).toBe(
+      "Ctrl/Cmd+B",
+    );
+    expect(getCommand("undo")?.shortcut).toBe("Ctrl/Cmd+Z");
+    expect(getCommand("link")?.shortcut).toBe("Ctrl/Cmd+K");
+  });
+});

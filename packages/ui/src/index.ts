@@ -14,6 +14,7 @@ export * from "./filter-dropdown";
 export * from "./mobile-filter-menu";
 export * from "./responsive-breadcrumb";
 export * from "./responsive-actions";
+export * from "./use-responsive-collapse";
 export * from "./scope-picker-trigger";
 export * from "./tabs";
 export * from "./confirm-dialog";

@@ -24,6 +24,8 @@ type ButtonProps = {
   readonly attached?: ButtonAttachedSide;
   readonly children?: ReactNode;
   readonly ariaLabel?: string;
+  /** Keyboard-shortcut hint announced to AT (e.g. "Ctrl+B"); pairs with `tooltip`. */
+  readonly ariaKeyShortcuts?: string;
   readonly onClick?: () => void;
   readonly iconName?: string;
   readonly iconPosition?: "left" | "right";
@@ -84,6 +86,7 @@ export function Button({
   attached,
   children,
   ariaLabel,
+  ariaKeyShortcuts,
   onClick,
   iconName,
   iconPosition = "left",
@@ -102,6 +105,7 @@ export function Button({
       isDisabled={disabled}
       onPress={onClick}
       aria-label={ariaLabel}
+      aria-keyshortcuts={ariaKeyShortcuts}
       className={buttonClass(
         variant,
         size,
