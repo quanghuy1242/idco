@@ -8,6 +8,7 @@
  */
 import { useRef } from "react";
 import type { BakeService, DocumentIndex, NodeId, TextPoint } from "../../core";
+import type { OffsetModel } from "../../core/offset-model";
 import type { RenderRegistry } from "../types";
 import { DEFAULT_BLOCK_ESTIMATE } from "./constants";
 import {
@@ -21,7 +22,10 @@ export function useViewRefs() {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const heightCacheRef = useRef<Map<NodeId, number>>(new Map());
   const estimateRef = useRef<number>(DEFAULT_BLOCK_ESTIMATE);
-  const estimateLockedRef = useRef<boolean>(false);
+  // The persistent virtualization geometry (docs/025 §5.2), shared so scroll-to-
+  // block and off-window reveal query the treap's prefix in O(log n) instead of
+  // an O(n) flat walk over the height cache. Owned/maintained by useVirtualWindow.
+  const offsetModelRef = useRef<OffsetModel | null>(null);
   const pendingScrollRef = useRef<{
     readonly id: NodeId;
     readonly attempts: number;
@@ -77,8 +81,8 @@ export function useViewRefs() {
     dragAnchorRef,
     dragMoveFrameRef,
     draggingRef,
-    estimateLockedRef,
     estimateRef,
+    offsetModelRef,
     goalColumnRef,
     heightCacheRef,
     indexFromWorkerRef,

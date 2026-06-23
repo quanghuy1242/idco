@@ -271,7 +271,27 @@ export {
   type WrapPairShortcut,
 } from "./core";
 export { safeHref } from "./core";
-export { calculateVirtualRange } from "./core/virtual-range";
+export {
+  calculateVirtualRange,
+  rangeFromModel,
+  type VirtualRange,
+  type VirtualRangeInput,
+  type VirtualRangeQuery,
+} from "./core/virtual-range";
+export {
+  BlockEstimator,
+  FlatOffsetModel,
+  metricsForNode,
+  reconcileOffsetModel,
+  TreapOffsetModel,
+  type BlockEstimatorOptions,
+  type BlockMetrics,
+  type OffsetModel,
+} from "./core/offset-model";
+export {
+  anchorScrollAdjustment,
+  isFlingVelocity,
+} from "./view/controllers/anchor";
 
 // ============================================================================
 // The legacy Lexical editor was extracted to its own package (note.md Legacy

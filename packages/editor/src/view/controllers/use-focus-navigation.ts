@@ -48,9 +48,29 @@ export function useFocusNavigation(args: {
     registryRef,
     heightCacheRef,
     estimateRef,
+    offsetModelRef,
     pendingScrollRef,
     goalColumnRef,
   } = refs;
+
+  // Pixel offset of block `index`'s top edge. Uses the shared offset model's
+  // O(log n) prefix (docs/025 §5.2) so scroll-to-block and off-window reveal do
+  // not walk the height cache O(n) — the cliff docs/025 set out to remove. Falls
+  // back to a flat walk only if the model is somehow absent (non-virtualized
+  // callers never reach these paths).
+  const prefixOffset = useCallback(
+    (index: number): number => {
+      const model = offsetModelRef.current;
+      if (model) return model.prefix(index);
+      let offset = 0;
+      for (let i = 0; i < index; i += 1) {
+        offset +=
+          heightCacheRef.current.get(store.order[i]!) ?? estimateRef.current;
+      }
+      return offset;
+    },
+    [offsetModelRef, heightCacheRef, estimateRef, store],
+  );
 
   const selectText = useCallback(
     (
@@ -103,13 +123,10 @@ export function useFocusNavigation(args: {
           ?.scrollIntoView({ block: "start" });
         return;
       }
-      let offset = 0;
-      for (let i = 0; i < index; i += 1) {
-        offset +=
-          heightCacheRef.current.get(store.order[i]!) ?? estimateRef.current;
-      }
-      // First jump uses estimated offset; the measure effect then corrects it
-      // to the target's real layout position, iterating until stable (AC3).
+      const offset = prefixOffset(index);
+      // First jump uses the seeded/measured model offset; the measure effect then
+      // corrects it to the target's real layout position, iterating until stable
+      // (AC3) — and content-aware seeds make that converge faster (docs/025 §5.4).
       pendingScrollRef.current = { attempts: 0, id };
       if (rootRef.current) rootRef.current.scrollTop = offset;
       setScrollTop(offset);
@@ -118,8 +135,7 @@ export function useFocusNavigation(args: {
       store,
       virtualize,
       registryRef,
-      heightCacheRef,
-      estimateRef,
+      prefixOffset,
       pendingScrollRef,
       rootRef,
       setScrollTop,
@@ -186,11 +202,7 @@ export function useFocusNavigation(args: {
       // mounts near the viewport bottom; the next reveal settles it precisely.
       const index = store.order.indexOf(id);
       if (index < 0) return;
-      let offset = 0;
-      for (let i = 0; i < index; i += 1) {
-        offset +=
-          heightCacheRef.current.get(store.order[i]!) ?? estimateRef.current;
-      }
+      const offset = prefixOffset(index);
       const next = Math.max(
         0,
         offset - scroller.clientHeight + estimateRef.current,
@@ -203,7 +215,7 @@ export function useFocusNavigation(args: {
       virtualize,
       rootRef,
       registryRef,
-      heightCacheRef,
+      prefixOffset,
       estimateRef,
       setScrollTop,
     ],

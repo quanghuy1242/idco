@@ -191,14 +191,15 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     [registryRef],
   );
 
-  const { windowRange, scrollTop, setScrollTop, onScroll } = useVirtualWindow({
-    order,
-    overscan,
-    refs,
-    store,
-    viewportHeight,
-    virtualize,
-  });
+  const { windowRange, scrollTop, setScrollTop, onScroll, fling } =
+    useVirtualWindow({
+      order,
+      overscan,
+      refs,
+      store,
+      viewportHeight,
+      virtualize,
+    });
   const {
     focusBlock,
     focusRoot,
@@ -314,25 +315,68 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     windowRange.ids,
     windowRange.startIndex,
   );
-  const blocks = windowRange.ids.map((id) => (
-    <EngineBlock
-      beginDrag={beginDrag}
-      focusRoot={focusRoot}
-      forcePolyfill={forcePolyfill}
-      goalColumnRef={goalColumnRef}
-      id={id}
-      key={id}
-      listMeta={listMetaForWindow.get(id)}
-      onRender={recordBlockRender}
-      pageCaret={pageCaret}
-      registerBlock={registerBlock}
-      registerInputBackend={registerInputBackend}
-      registerObjectEditor={registerObjectEditor}
-      requestFocus={focusBlock}
-      revealBlock={revealBlock}
-      store={store}
-    />
-  ));
+  const blocks = windowRange.ids.map((id, positionInWindow) => {
+    /*
+     * Velocity-gated mount (docs/025 §5.5): during a fling, render a cheap
+     * height-preserving placeholder for RESTING object blocks instead of
+     * hydrating their decorator, so a fast flywheel scroll does no per-frame
+     * decorator work and shows no blank gap. The height is the block's SEED-or-
+     * measured height from the offset model (§5.3), so even a never-mounted block
+     * gets a correctly sized box instead of falling through to full hydration.
+     * It stays registered with the same data-engine-block-id so the
+     * ResizeObserver keeps measuring it, and it swaps back to the live block on
+     * idle. Guards: only objects (text is cheap and may hold the caret); never
+     * the active object (would drop its live editor) nor a node-selected object
+     * (the selection overlay/AT points at it).
+     */
+    if (fling) {
+      const node = store.getNode(id);
+      const selection = store.selection;
+      const nodeSelected = selection?.type === "node" && selection.node === id;
+      if (
+        node?.kind === "object" &&
+        store.activeObjectId !== id &&
+        !nodeSelected
+      ) {
+        const index = windowRange.startIndex + positionInWindow;
+        const model = refs.offsetModelRef.current;
+        const height = model
+          ? model.prefix(index + 1) - model.prefix(index)
+          : refs.heightCacheRef.current.get(id);
+        if (height !== undefined && height > 0) {
+          return (
+            <div
+              aria-hidden="true"
+              data-engine-block-id={id}
+              data-engine-block-placeholder=""
+              key={id}
+              ref={(element) => registerBlock(id, element)}
+              style={{ height }}
+            />
+          );
+        }
+      }
+    }
+    return (
+      <EngineBlock
+        beginDrag={beginDrag}
+        focusRoot={focusRoot}
+        forcePolyfill={forcePolyfill}
+        goalColumnRef={goalColumnRef}
+        id={id}
+        key={id}
+        listMeta={listMetaForWindow.get(id)}
+        onRender={recordBlockRender}
+        pageCaret={pageCaret}
+        registerBlock={registerBlock}
+        registerInputBackend={registerInputBackend}
+        registerObjectEditor={registerObjectEditor}
+        requestFocus={focusBlock}
+        revealBlock={revealBlock}
+        store={store}
+      />
+    );
+  });
 
   if (!virtualize) {
     return (
@@ -400,6 +444,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       style={{
         ...baseViewStyle,
         height: viewportHeight,
+        // Take scroll anchoring away from the browser (docs/025 §5.4): the
+        // controller owns the anchor, so the browser's own overflow-anchor must
+        // not also adjust scrollTop or the two corrections fight and jitter.
+        overflowAnchor: "none",
         overflowY: "auto",
         padding: 0,
         ...style,

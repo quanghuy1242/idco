@@ -1,8 +1,8 @@
 # 025 - Virtual Geometry: Offset Model, Order-Statistics Tree, Per-Type Estimator, And Fling Stability
 
-> Status: implementation-grade research and proposal (pre-implementation)
+> Status: implemented (phases A–D landed; see Implementation Status below)
 >
-> Date: 2026-06-22
+> Date: 2026-06-22 (implemented 2026-06-23)
 >
 > Scope:
 >
@@ -35,6 +35,7 @@
 
 ## Table Of Contents
 
+- [0. Implementation Status](#0-implementation-status)
 - [1. Goal](#1-goal)
 - [2. System Summary](#2-system-summary)
 - [3. Current-State Findings](#3-current-state-findings)
@@ -70,6 +71,17 @@
 - [13. Test And Verification Plan](#13-test-and-verification-plan)
 - [14. Definition Of Done](#14-definition-of-done)
 - [15. Final Model](#15-final-model)
+
+## 0. Implementation Status
+
+All four phases are implemented behind the `OffsetModel` SPI and the `@idco/editor` barrel. Modules: `packages/editor/src/core/offset-model/{index,flat-offset-model,treap-offset-model,reconcile,block-estimator,block-metrics}.ts` and `packages/editor/src/view/controllers/{anchor,use-virtual-window}.ts`; scroller `overflow-anchor: none` and the fling placeholder live in `react-view.tsx`.
+
+- A: `OffsetModel` SPI + `FlatOffsetModel` (reference/oracle) + `calculateVirtualRange`/`rangeFromModel` adapter; controller memo split (model build keyed on order, window query keyed on scroll).
+- B: `TreapOffsetModel` (implicit augmented treap, `{size, heightSum}`), differential-tested against the flat oracle; persistent in-place model with `reconcileOffsetModel` (prefix/suffix diff + edit-storm rebuild).
+- C: `BlockEstimator` seed ladder (analytic text/code/image → per-type bucket → global) with outlier-resistant in-session calibration; `metricsForNode` adapter; the old estimate lock is gone; `anchorScrollAdjustment` anchoring (top-edge, skip-when-unmoved, fling-suppressed); `overflow-anchor: none`; `document.fonts.ready` bulk re-seed. The model is shared via the refs bag (`offsetModelRef`), so `use-focus-navigation.ts` scroll-to-block and off-window reveal query the treap's `prefix` in O(log n) instead of the old O(n) flat walk — closing the §14 "OffsetModel is the only geometry surface" claim.
+- D: measurement moved to a single `ResizeObserver` reading fractional `borderBoxSize` off the scroll frame; `isFlingVelocity` velocity gate driving a `fling` flag; resting object blocks render a height-preserving placeholder sized from the model's seed-or-measured height during a fling.
+
+Tests (all green, `tests/editor/`): `offset-model-flat`, `offset-model-treap`, `offset-model-reconcile`, `block-estimator`, `block-metrics`, `anchor`. Phases A–C and the estimator/reconcile/anchor/velocity math are covered aggressively (brute-force oracle, differential, randomized property incl. sub-1px floor, scale, survivor-preservation, calibration-convergence, outlier, edge). Honest gap: **Phase D is wired but not automatically tested, and the §13 Ladle fling benchmark is NOT built.** jsdom stubs `ResizeObserver` as a no-op and reports zero element heights, so `onResize`, the cache→model mirror, the two-pass settle, anchoring around the mutation, the velocity gate, and the placeholder branch never execute under the unit harness — they are verified by construction and by their extracted pure helpers only; the existing virtualization tests confirm the estimate-driven geometry still drives the window. Real-browser fling/perf verification (the §13 benchmark and the DoD's fixed pass criteria) remains the genuine next step. Full `pnpm check` (format, lint, typecheck, test, build) passes.
 
 ## 1. Goal
 
