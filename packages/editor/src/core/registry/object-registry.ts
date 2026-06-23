@@ -179,30 +179,45 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
   ),
   simpleObjectDefinition(
     "post-ref",
-    (node) => ({
-      data: {
-        postId: stringValue(node.postId) ?? "",
-        title: stringValue(node.title) ?? "",
-        url: stringValue(node.url) ?? "",
-      },
-      status: statusValue(node.status) ?? "ready",
-    }),
-    // Always bakes — even with no target yet — so a freshly-inserted post-ref
-    // renders its (empty-state) block and can then be configured from the gear
-    // (docs/018 §2.11 follow-up: insert-then-configure). A truly empty reference
-    // renders nothing in the published blog via the content-renderer's own path.
+    // post-ref is a reference block: its data is `{ ref, snapshot }` (docs/026
+    // §4.3). The compat reader keeps the stable ref and the projected snapshot;
+    // there is no legacy flat-shape fallback because the owned engine never
+    // persisted one (content-api is greenfield, docs/026 §15).
+    (node) => {
+      // The compat node is loose JSON (`node.snapshot` is `unknown`), so coerce to
+      // a `JsonValue` before the object guard, matching the `toJsonValue` path the
+      // generic `normalizeData` uses.
+      const snapshot = toJsonValue(node.snapshot);
+      return {
+        data: {
+          ref: stringValue(node.ref) ?? "",
+          snapshot: isJsonObject(snapshot) ? snapshot : {},
+        },
+        status: statusValue(node.status) ?? "ready",
+      };
+    },
+    // Always bakes — even with no ref yet — so a freshly-inserted post-ref renders
+    // its (empty-state) card and is then picked from the gear (docs/018 §2.11
+    // insert-then-configure; choose-first is docs/026 §7.1 / Phase 5). The baker
+    // flattens the projected snapshot into the payload the resting card reads
+    // (docs/026 §7.4), so `renderResting` is unchanged across the rebuild.
     (data) => {
       const record = isJsonObject(data) ? data : {};
+      const snapshot = isJsonObject(record.snapshot) ? record.snapshot : {};
       return {
         kind: "post-ref",
         payload: {
-          postId: stringValue(record.postId) ?? "",
-          title: stringValue(record.title) ?? "",
-          url: stringValue(record.url) ?? "",
+          postId: stringValue(snapshot.postId) ?? "",
+          title: stringValue(snapshot.title) ?? "",
+          url: stringValue(snapshot.url) ?? "",
         },
       };
     },
-    (data) => stringValue((isJsonObject(data) ? data : {}).title) ?? "",
+    (data) => {
+      const record = isJsonObject(data) ? data : {};
+      const snapshot = isJsonObject(record.snapshot) ? record.snapshot : {};
+      return stringValue(snapshot.title) ?? "";
+    },
   ),
   simpleObjectDefinition(
     "embed",

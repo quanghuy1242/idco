@@ -14,10 +14,12 @@
  * is the whole point of the SPI (docs/016 §10).
  */
 import type { ReactNode, RefObject } from "react";
+import type { ResourceOption } from "@quanghuy1242/idco-ui";
 import {
   registerGlobalNodeDefinition,
   registerGlobalStructuralDefinition,
   type BakedSnapshot,
+  type JsonObject,
   type JsonValue,
   type NodeDefinition,
   type NodeId,
@@ -53,11 +55,38 @@ export type NodeViewChromeArgs = {
   readonly focusInPlace: () => void;
 };
 
-/** One field in a node's default config popover (docs/006 chrome popover). */
-export type NodeViewConfigField = {
+/**
+ * A plain-text field in the default config popover — today's shape (docs/006
+ * chrome popover). `kind` is optional so every existing `{ key, label }`
+ * declaration keeps satisfying the union with no edit (docs/026 §14.2): the
+ * widening is non-breaking.
+ */
+export type NodeViewTextConfigField = {
+  readonly kind?: "text";
   readonly key: string;
   readonly label: string;
 };
+
+/**
+ * A resource field — the value is a host record picked from a registered data
+ * source (docs/026 §6.2). `source` joins to a `DataSource` by id; `toData`
+ * projects the chosen option into the block's snapshot patch (a *patch*, not a
+ * single value, so a block can project several fields at once, docs/026 §6.2).
+ * This is the entire gated surface a reference block declares; everything
+ * downstream (picker, cache, resolve, gating) is generic engine (docs/026 §6.3).
+ */
+export type NodeViewResourceConfigField = {
+  readonly kind: "resource";
+  readonly key: string;
+  readonly label: string;
+  readonly source: string;
+  toData(option: ResourceOption): Partial<JsonObject>;
+};
+
+/** One field in a node's default config popover: plain text or a host resource. */
+export type NodeViewConfigField =
+  | NodeViewTextConfigField
+  | NodeViewResourceConfigField;
 
 /** Arguments to a node's live-edit surface (mounted when it is the active object). */
 export type NodeViewLiveArgs = {

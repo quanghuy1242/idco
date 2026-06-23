@@ -6,6 +6,7 @@
  * framework-free `core/` half. Four registries live here and nothing else:
  *
  * - `node-view.ts`        — object blocks (the React half of `NodeDefinition`)
+ * - `data-source-registry.ts` — host data sources reference blocks project (docs/026 §6.1)
  * - `structural-view.ts`  — structural containers (the React half of `StructuralDefinition`)
  * - `mark-registry.ts`    — inline marks (render + toolbar metadata)
  * - `block-type-registry.ts` — text-leaf block types (chooser + aria role)
@@ -20,6 +21,7 @@
  * `controllers/`.
  */
 export * from "./node-view";
+export * from "./data-source-registry";
 export * from "./structural-view";
 export * from "./mark-registry";
 export * from "./block-type-registry";
