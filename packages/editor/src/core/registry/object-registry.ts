@@ -251,26 +251,46 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
   ),
   simpleObjectDefinition(
     "embed",
-    (node) => ({
-      data: {
-        title: stringValue(node.title) ?? "",
-        url: stringValue(node.url) ?? "",
-      },
-      status: statusValue(node.status) ?? "ready",
-    }),
-    // Always bakes so a freshly-inserted embed renders an empty-state prompt and
-    // is then configured from the gear (insert-then-configure, docs/018 §2.11).
+    // embed is the degenerate `resolve`-only reference block (docs/026 §4.4): the
+    // pasted URL is the `ref` (there is no collection to browse), and the title is
+    // author-local. The embed source's `resolve` validates the URL against
+    // `allowedEmbedDomains` and the engine marks an off-allowlist URL `invalid`
+    // (§12). Reads nested-or-flat so the legacy `{ url, title }` shape and the
+    // payload `youtube` corpus import through the fallback (§15).
+    (node) => {
+      const loc = isJsonObject(toJsonValue(node.local))
+        ? (toJsonValue(node.local) as { readonly [k: string]: JsonValue })
+        : {};
+      return {
+        data: {
+          local: {
+            title: stringValue(loc.title) ?? stringValue(node.title) ?? "",
+          },
+          ref: stringValue(node.ref) ?? stringValue(node.url) ?? "",
+          snapshot: {},
+        },
+        status: statusValue(node.status) ?? "ready",
+      };
+    },
+    // Always bakes so a freshly-inserted embed renders an empty-state prompt and is
+    // then configured from the gear. The URL comes from the ref, the title from the
+    // local field (docs/026 §4.4).
     (data) => {
       const record = isJsonObject(data) ? data : {};
+      const loc = isJsonObject(record.local) ? record.local : {};
       return {
         kind: "embed",
         payload: {
-          title: stringValue(record.title) ?? "",
-          url: stringValue(record.url) ?? "",
+          title: stringValue(loc.title) ?? stringValue(record.title) ?? "",
+          url: stringValue(record.ref) ?? stringValue(record.url) ?? "",
         },
       };
     },
-    (data) => stringValue((isJsonObject(data) ? data : {}).title) ?? "",
+    (data) => {
+      const record = isJsonObject(data) ? data : {};
+      const loc = isJsonObject(record.local) ? record.local : {};
+      return stringValue(loc.title) ?? stringValue(record.title) ?? "";
+    },
   ),
   simpleObjectDefinition(
     "table-of-contents",

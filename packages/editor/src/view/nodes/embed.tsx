@@ -1,9 +1,13 @@
 /**
  * The built-in `embed` (iframe/video) node view (docs/016 §10, docs/020 §7.2).
  *
- * Editing uses the dispatcher's default config popover (`configFields`). The
- * resting render frames an embeddable URL with the shared `RichTextEmbed` so the
- * editor's at-rest embed matches the published page.
+ * embed is the degenerate **resolve-only reference block** (docs/026 §4.4, §8.2):
+ * there is no collection to browse, so the author pastes a URL as a free-text `ref`
+ * and the embed source's `resolve` validates it against `allowedEmbedDomains`. An
+ * off-allowlist or refused URL marks the node `invalid` (§7.3/§12), and this render
+ * suppresses the iframe for an invalid node rather than framing an untrusted origin.
+ * The title is an author-local field. Editing flows through the default config
+ * popover; the resting render frames the URL with the shared `RichTextEmbed`.
  */
 import { RichTextEmbed } from "@quanghuy1242/idco-ui";
 import { type NodeView } from "../spi";
@@ -28,30 +32,43 @@ export const embedView: NodeView = {
   ariaLabel: "Embedded content",
   chromeMeta: { icon: "ExternalLink", label: "Embed" },
   configFields: [
-    { key: "url", label: "URL" },
+    // The URL is the ref: a resolve-only source has no browse, so the resource
+    // field renders a free-text input and the source validates the pasted URL.
+    {
+      kind: "resource",
+      key: "ref",
+      label: "URL",
+      source: "embed",
+      toData: () => ({}),
+    },
     { key: "title", label: "Title" },
   ],
   insert: {
-    createData: () => ({ title: "", url: "" }),
+    createData: () => ({ local: {}, ref: "", snapshot: {} }),
     group: "Media",
     icon: "ExternalLink",
     keywords: ["video", "youtube", "embed", "iframe"],
     label: "Embed",
   },
-  renderResting: ({ baked }) => {
+  renderResting: ({ node, baked }) => {
     const payload = asRecord(baked.payload);
     const url = stringField(payload, "url");
+    const title = stringField(payload, "title");
     const embedUrl = toEmbeddableUrl(url);
-    // Render the real embed (the same `RichTextEmbed` iframe the reader uses)
-    // when the URL is embeddable; a freshly-inserted embed has no URL yet, so it
-    // shows a labelled prompt until one is set from the gear.
+    // An `invalid` embed (off-allowlist or refused by resolve) never frames the
+    // origin — it shows the placeholder, and the resting-state chrome (docs/026
+    // §7.3) adds the "couldn't refresh" affordance.
+    const blocked = node.status === "invalid";
     return (
       <div data-engine-object-baked="embed">
-        {embedUrl ? (
-          <RichTextEmbed title={stringField(payload, "title")} url={embedUrl} />
+        {embedUrl && !blocked ? (
+          <RichTextEmbed title={title} url={embedUrl} />
         ) : (
           <div style={objectStatusStyle}>
-            🔗 {stringField(payload, "title") || url || "Add an embed URL ⚙"}
+            🔗{" "}
+            {blocked
+              ? "Embed not allowed"
+              : title || url || "Add an embed URL ⚙"}
           </div>
         )}
       </div>

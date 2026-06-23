@@ -108,7 +108,10 @@ function ResourceConfigField(props: {
     [choose, source],
   );
 
-  if (!source || (!source.load && !source.upload && !source.renderPicker)) {
+  if (
+    !source ||
+    (!source.load && !source.upload && !source.renderPicker && !source.resolve)
+  ) {
     return (
       <div className="text-sm opacity-70">
         Source “{field.source}” is not available in this deployment.
@@ -160,6 +163,26 @@ function ResourceConfigField(props: {
       source={source.load}
       value={ref}
     />
+  ) : source.resolve ? (
+    // A resolve-only source (embed) has no collection to browse, so the ref is
+    // free text — the author pastes a URL and `resolve` validates it (docs/026
+    // §4.4). Committing the ref leaves the snapshot empty; the resolve controller
+    // marks the node ready or invalid.
+    <label
+      data-engine-config-field={`${field.key}-ref`}
+      style={objectConfigFieldStyle}
+    >
+      <span className="min-w-16 text-sm">{field.label}</span>
+      <Input
+        ariaLabel={field.label}
+        onChange={(value) => {
+          setRef(value);
+          commit(value, {});
+        }}
+        size="sm"
+        value={ref}
+      />
+    </label>
   ) : (
     <span className="text-sm">{field.label}</span>
   );

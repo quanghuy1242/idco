@@ -81,6 +81,14 @@ describe("Payload-Lexical import adapter", () => {
       media?.kind === "object" &&
         (media.data as { snapshot?: { src?: string } }).snapshot?.src,
     ).toBe("/cat.png");
+    // The youtube node imports to a resolve-only embed reference: the watch URL is
+    // the ref (docs/026 §4.4, §15).
+    const embed = store.order
+      .map((id) => store.requireNode(id))
+      .find((n) => n.kind === "object" && n.type === "embed");
+    expect(
+      embed?.kind === "object" && (embed.data as { ref?: string }).ref,
+    ).toBe("https://www.youtube.com/watch?v=abc123");
   });
 
   it("recovers an inline link as a link mark and youtube as a watch URL", () => {
@@ -99,11 +107,13 @@ describe("Payload-Lexical import adapter", () => {
     const embed = store.order
       .map((id) => store.requireNode(id))
       .find((n) => n.kind === "object" && n.type === "embed");
+    // embed is a resolve-only reference block now (docs/026 §4.4): the watch URL is
+    // the ref, not a flat `url` field.
     expect(
       embed?.kind === "object" &&
         typeof embed.data === "object" &&
         embed.data !== null &&
-        (embed.data as { url?: string }).url,
+        (embed.data as { ref?: string }).ref,
     ).toBe("https://www.youtube.com/watch?v=abc123");
   });
 

@@ -51,6 +51,12 @@ export type OwnedModelEditorProps = OwnedModelEditorViewProps & {
   readonly proseClassName?: string;
   /** Host upload binding for image config + drag-drop (AC10); inert when absent. */
   readonly uploadImage?: UploadImage;
+  /**
+   * Allowed iframe-embed hostnames (docs/026 §4.4). The editor registers a default
+   * `embed` source whose `resolve` refuses an off-allowlist URL (marking the block
+   * `invalid`, §12). Empty/undefined allows any `http(s)` origin.
+   */
+  readonly allowedEmbedDomains?: readonly string[];
   /** Autosave wiring (AC10). When set, edits persist debounced through `onSave`. */
   readonly autosave?: AutosaveOptions;
   /** Replace/patch the built-in toolbar arrangement (docs/023 §6.3). */
@@ -69,6 +75,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   ref: Ref<OwnedModelEditorHandle>,
 ) {
   const {
+    allowedEmbedDomains,
     autosave,
     hideToolbar,
     proseClassName = "prose max-w-none",
@@ -102,6 +109,30 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
       },
     });
   }, [uploadImage]);
+
+  // The default `embed` source (docs/026 §4.4): embed is a resolve-only reference
+  // block, so the editor provides the source that validates a pasted URL against
+  // `allowedEmbedDomains`. A `null` from `resolve` marks the block `invalid` and the
+  // embed render suppresses the iframe (§12). Re-registers when the allowlist
+  // changes so the guard stays current; a host may register its own `embed` source
+  // (oEmbed title fetch, etc.) which this overwrites by id.
+  useEffect(() => {
+    const allowed = allowedEmbedDomains;
+    registerDataSource({
+      id: "embed",
+      resolve: async (refUrl) => {
+        if (!/^https?:\/\//i.test(refUrl)) return null;
+        if (allowed && allowed.length > 0) {
+          try {
+            if (!allowed.includes(new URL(refUrl).hostname)) return null;
+          } catch {
+            return null;
+          }
+        }
+        return { id: refUrl, label: "" };
+      },
+    });
+  }, [allowedEmbedDomains]);
 
   const focusEditor = useCallback(() => {
     viewRef.current?.getEditorHandle().focus();

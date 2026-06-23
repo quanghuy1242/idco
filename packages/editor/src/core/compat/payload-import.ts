@@ -74,25 +74,35 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-/** Map an `upload` node to a `media` compat node, reading the upload value. */
+/**
+ * Map an `upload` node to a `media` reference block (docs/026 §4.3, §15): the
+ * upload id is the `ref`, src/alt the projected snapshot, caption author-local.
+ */
 function uploadToMedia(node: PayloadNode): RichTextCompatNode {
   const value = record(node.value);
   const src = str(value.url) || str(value.filename) || str(node.src);
   return {
-    alt: str(value.alt) || str(node.alt),
-    caption: str(value.caption) || str(node.caption),
-    mediaId: str(value.id) || str(node.value),
-    src,
+    local: { caption: str(value.caption) || str(node.caption) },
+    ref: str(value.id) || str(node.value),
+    snapshot: { alt: str(value.alt) || str(node.alt), src },
     type: "media",
   };
 }
 
-/** Map a `youtube` node to an `embed` compat node, deriving a watch URL. */
+/**
+ * Map a `youtube` node to an `embed` reference block: the watch URL is the `ref`
+ * (a resolve-only source, docs/026 §4.4) and the title is author-local.
+ */
 function youtubeToEmbed(node: PayloadNode): RichTextCompatNode {
   const id =
     str(node.videoID) || str(node.id) || str(record(node.fields).videoID);
   const url = id ? `https://www.youtube.com/watch?v=${id}` : str(node.url);
-  return { title: str(node.title), type: "embed", url };
+  return {
+    local: { title: str(node.title) },
+    ref: url,
+    snapshot: {},
+    type: "embed",
+  };
 }
 
 /**
