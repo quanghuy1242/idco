@@ -129,4 +129,49 @@ describe("ObjectConfigPanel resource field (docs/026 §6.2)", () => {
       screen.getByText(/not available in this deployment/i),
     ).toBeInTheDocument();
   });
+
+  it("delegates to the host renderPicker and commits on choose (docs/026 §6.4)", async () => {
+    // A source with `renderPicker` replaces the default ComboBox: the engine opens
+    // its own overlay and the host fills the body, calling `onChoose`.
+    registerDataSource({
+      id: "posts",
+      renderPicker: ({ onChoose }) => (
+        <button
+          onClick={() =>
+            onChoose({
+              id: "post-9",
+              label: "Picked via host",
+              sublabel: "/posts/9",
+            })
+          }
+          type="button"
+        >
+          host-pick
+        </button>
+      ),
+    });
+    const { node, store } = postRefStore();
+    render(
+      <ObjectConfigPanel
+        node={node}
+        registerObjectEditor={() => {}}
+        store={store}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /choose post/i }));
+    fireEvent.click(await screen.findByText("host-pick"));
+    await waitFor(() => {
+      const updated = store.getNode(node.id);
+      if (updated?.kind !== "object") throw new Error("expected object");
+      const data = updated.data as {
+        ref: string;
+        snapshot: Record<string, unknown>;
+      };
+      expect(data.ref).toBe("post-9");
+      expect(data.snapshot).toMatchObject({
+        postId: "post-9",
+        title: "Picked via host",
+      });
+    });
+  });
 });

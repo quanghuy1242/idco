@@ -16,7 +16,13 @@
  * (docs/026 §6.3); the host only registers the source.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Input, ResourceSelector } from "@quanghuy1242/idco-ui";
+import {
+  Button,
+  Drawer,
+  Input,
+  ResourceSelector,
+  type ResourceOption,
+} from "@quanghuy1242/idco-ui";
 import {
   type EditorStore,
   type JsonValue,
@@ -55,6 +61,7 @@ function ResourceConfigField(props: {
   const { field, store, nodeId } = props;
   const source = getDataSource(field.source);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [ref, setRef] = useState<string>(() =>
     refField(currentObjectRecord(store, nodeId)),
   );
@@ -74,23 +81,34 @@ function ResourceConfigField(props: {
     [nodeId, store],
   );
 
+  // The one commit path every pick surface converges on — the default ComboBox, a
+  // host `renderPicker` modal, and upload all call this (docs/026 §7.1): project the
+  // chosen option and write `{ ref, snapshot }`. The engine never learns whether the
+  // option came from a dropdown, a grid, or a table (docs/026 §6.4).
+  const choose = useCallback(
+    (option: ResourceOption) => {
+      setRef(option.id);
+      commit(option.id, { ...field.toData(option) } as Record<
+        string,
+        JsonValue
+      >);
+      setPickerOpen(false);
+    },
+    [commit, field],
+  );
+
   const onUpload = useCallback(
     async (file: File | undefined) => {
       if (!file || !source?.upload) return;
       // Upload-as-create: the source makes the record and returns it as an option,
       // then the pick proceeds identically (docs/026 §7.1). A manual upload is not
       // cancellable, so a fresh signal is enough.
-      const option = await source.upload(file, new AbortController().signal);
-      setRef(option.id);
-      commit(option.id, { ...field.toData(option) } as Record<
-        string,
-        JsonValue
-      >);
+      choose(await source.upload(file, new AbortController().signal));
     },
-    [commit, field, source],
+    [choose, source],
   );
 
-  if (!source || (!source.load && !source.upload)) {
+  if (!source || (!source.load && !source.upload && !source.renderPicker)) {
     return (
       <div className="text-sm opacity-70">
         Source “{field.source}” is not available in this deployment.
@@ -98,34 +116,57 @@ function ResourceConfigField(props: {
     );
   }
 
+  // A host-supplied pick surface (its media-library modal) takes precedence over
+  // the default ComboBox (docs/026 §6.4): the engine owns the overlay (a React Aria
+  // modal via `@idco/ui` `Drawer`), the host fills only the body and calls
+  // `onChoose`/`onCancel`. Otherwise the default ComboBox drives off `load`.
+  const picker = source.renderPicker ? (
+    <>
+      <Button
+        ariaLabel={`Choose ${field.label.toLowerCase()}`}
+        onClick={() => setPickerOpen(true)}
+        size="sm"
+        variant="secondary"
+      >
+        {ref
+          ? `Change ${field.label.toLowerCase()}`
+          : `Choose ${field.label.toLowerCase()}`}
+      </Button>
+      <Drawer
+        onOpenChange={setPickerOpen}
+        open={pickerOpen}
+        title={`Choose ${field.label.toLowerCase()}`}
+      >
+        {source.renderPicker({
+          onCancel: () => setPickerOpen(false),
+          onChoose: choose,
+        })}
+      </Drawer>
+    </>
+  ) : source.load ? (
+    <ResourceSelector
+      kind="record"
+      label={field.label}
+      onChange={(next) => {
+        const nextRef = Array.isArray(next) ? (next[0] ?? "") : next;
+        setRef(nextRef);
+        // A cleared selection drops the ref and snapshot but keeps any
+        // author-local fields (setReference preserves `local`, docs/026 §7.1).
+        if (nextRef === "") commit("", {});
+      }}
+      onSelectOption={choose}
+      showLabel
+      size="sm"
+      source={source.load}
+      value={ref}
+    />
+  ) : (
+    <span className="text-sm">{field.label}</span>
+  );
+
   return (
     <div className="grid gap-2">
-      {source.load ? (
-        <ResourceSelector
-          kind="record"
-          label={field.label}
-          onChange={(next) => {
-            const nextRef = Array.isArray(next) ? (next[0] ?? "") : next;
-            setRef(nextRef);
-            // A cleared selection drops the ref and snapshot but keeps any
-            // author-local fields (setReference preserves `local`, docs/026 §7.1).
-            if (nextRef === "") commit("", {});
-          }}
-          onSelectOption={(option) => {
-            setRef(option.id);
-            commit(option.id, { ...field.toData(option) } as Record<
-              string,
-              JsonValue
-            >);
-          }}
-          showLabel
-          size="sm"
-          source={source.load}
-          value={ref}
-        />
-      ) : (
-        <span className="text-sm">{field.label}</span>
-      )}
+      {picker}
       {source.upload ? (
         <div className="flex justify-end">
           <input

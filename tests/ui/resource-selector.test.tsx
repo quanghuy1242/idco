@@ -462,4 +462,23 @@ describe("ResourceSelector", () => {
     await openCombo(/resource server/i);
     expect(await screen.findByText("Content API")).toBeInTheDocument();
   });
+
+  it("accepts a generic collection kind (docs/026 §16) and renders options", async () => {
+    // The editor's reference blocks pass a domain-agnostic kind ("post",
+    // "product") rather than masquerading as an admin kind; the relaxed
+    // `ResourceKind` makes that typecheck, and an unknown kind simply gets no
+    // default avatar.
+    render(
+      <ResourceSelector
+        kind="post"
+        label="Post"
+        onChange={() => {}}
+        showLabel
+        source={{ items: [{ id: "p1", label: "Hello post" }], mode: "sync" }}
+        value=""
+      />,
+    );
+    await openCombo(/post/i);
+    expect(await screen.findByText("Hello post")).toBeInTheDocument();
+  });
 });

@@ -36,7 +36,13 @@ export type ResourceKind =
   | "media"
   | "oauth-client"
   | "resource-server"
-  | "record";
+  | "record"
+  // A generic collection kind. The admin app uses the named kinds above; a
+  // domain-agnostic consumer (the editor's reference blocks, docs/026 §16) passes
+  // its own collection name (e.g. "post", "product"). `kind` only selects a
+  // default avatar (`withAvatar` below) and the fallback search label, so any
+  // string is safe; `& {}` keeps autocomplete for the named kinds.
+  | (string & {});
 
 export type ResourceOption = {
   readonly id: string;
