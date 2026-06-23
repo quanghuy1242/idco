@@ -1,140 +1,136 @@
-# Toolbar SPI — icon+label polish and responsive auto-collapse
+# Owned editor — parity gaps to close (grounded against legacy Lexical + the reader plan)
 
 ## What this is
 
-A design note for the next toolbar UX iteration. Today each tab's command row is a flat run of square icon-only buttons (tooltip on hover). The goal is to optionally render a text label next to the icon, decided per group, and to degrade gracefully under width pressure by collapsing overflow into a dropdown rather than horizontal-scrolling the row. The rest of this note captures the findings, the chosen shape, and the gotchas.
+A backlog of what the owned-model editor (`packages/editor`) still misses versus the legacy Lexical editor (`packages/editor-legacy`) and the read tier (docs/015), found by grounding the two side by side. Each item names the gap, where it is specified, the current state, and — for the SPI items — the concept it should be built on, so it can be picked up one at a time. This is a working list, not a design doc; it carries enough concept to start each slice without re-deriving it. Layout-shell parity (field label, bordered frame, error slot) and the side/aside TOC rail are deliberately out of scope; the aside rail was removed by design and the shell is the host's concern.
 
-## Status: implemented (2026-06-23)
+## 1. Alignment control (left / center / right / justify)
 
-All of this note shipped. The slices: `ToolbarSlot.display` (`"icon" | "labelled" | "auto"`) carried onto the resolved slot; a pure per-kind `collapsible` derivation on every resolved item (`"menu-item" | "keep-inline" | "submenu"`, with `submenu` reserved); the `useResponsiveCollapse` hook + pure `computeCollapsedIds` extracted into `@idco/ui` (priority-ordered, mixed-item, hidden-measure + ResizeObserver + correction pass); the ribbon command row rebuilt as a React Aria `Toolbar` (roving focus) that labels/collapses per slot and falls back to horizontal scroll on mobile; mark + block-type `disabled` gating wired (greyed off a text leaf); and a `shortcut` field on marks/commands surfaced in tooltips + `aria-keyshortcuts`. The **Insert tab renders icon + label** (`insert.tables` → `labelled`, `insert.blocks` → `auto`). Tests: `computeCollapsedIds` unit coverage in `tests/ui/use-responsive-collapse.test.ts` and display/collapsible/gating/shortcut assertions in `tests/editor/engine-toolbar-spi.test.ts`; full `pnpm check` green.
+Missing as an editing control on both editors; only the reader renders it. The owned engine never exposes it (docs/023 §"Built-in Home layout" says Home is "006 §4.2 minus alignment which the owned engine does not expose as a control today"). Legacy also dropped element `format` in its serializer and renderer (docs/001 §111). The read tier already maps `format` to align, so the reader is ahead of the editor here (`packages/content-renderer/src/index.tsx` `elementAlign`, lines 459-463).
 
-Two open follow-up questions resolved during the build: `auto` ships as the **two-tier** model (labelled → overflow menu, no icon-only middle tier) — the simpler sanctioned option, and the middle tier is the one that hurt touch discoverability anyway; and the `collapsible` derivation lives in **`computeToolbarLayout`** (pure + testable), not the renderer. Deliberate deferrals: the `"submenu"` collapse mode for popover/dropdown actions (they stay `keep-inline` for now), and code-block-specific mark gating (only the no-text-leaf case greys controls today).
+What it takes: an `align` block attribute on the model, a command to set it, and one `Align v` dropdown slot on Home showing the active value (target shape at docs/006 §4.2:284 and the node field sketch at docs/006 §5.5:661). Self-contained and small; no host binding involved. The reader already paints it, so this is editor-control-only.
 
-## The three layers being touched
+## 2. Host data provider SPI (the spine)
 
-- Layer 1, descriptor registries: marks, block types, node inserts, and the command registry. Each already carries a human label.
-- Layer 2, the product surface: `packages/editor/src/view/spi/toolbar-layout.ts` — the tab/slot/item model plus `computeToolbarLayout`, a pure DOM-free resolver.
-- Layer 3, the renderer: `packages/editor/src/view/chrome/surfaces/ribbon.tsx` — reads the resolved layout and paints it, holding zero command/layout knowledge.
+Specified at docs/006 §5 "Data Provider Contract", restated for the owned engine at docs/011 §12.1/§12.3. The owned engine built only the upload corner — `uploadImage(file) → {src}` (`owned-model-editor.tsx:51`). Media and post-ref are manual text fields today (`view/nodes/post-ref.tsx:14-20`); there is no picker, no host data resolution, no general provider registry, and `allowedEmbedDomains` gating is gone. Do not port the legacy `RichTextEditorBindings` verbatim — build it on the concept below and route it through the existing node SPI (`registerNode` / `configFields`, docs/016), not a parallel registry.
 
-## Finding: the label data already exists
+### 2.1 The concept: sort object nodes by where the source of truth lives
 
-Every resolved item kind already has a label that is currently spent only on `ariaLabel` + `tooltip`. So an icon+label mode needs no model or registry change — the data is already flowing.
+Every object node is exactly one of two kinds, and the data-provider SPI applies to one of them only.
 
-- `mark` → `item.mark.toolbar.label`
-- `insert` → `item.label`
-- `action` → `item.action.label`
-- `blockType` → already renders its label today (it is the labeled dropdown at ribbon.tsx:203-252)
+- **Owned blocks** — the content *is* the truth. Code block, callout, table, divider, mermaid. The author types it, the node owns it, nothing external. Editing means editing the node's own data. These keep `configFields` as typed inputs plus the live-edit surface and are **out of scope** for this SPI.
+- **Reference blocks** — the node is a *serialized projection of a record that lives in a host collection*. Media (an asset record), post-ref / chapter-ref / author-ref / citation (a collection record). The truth lives in the host; the node stores `{ ref, snapshot }` — a stable id plus a denormalized copy of the display fields. Media storing `alt/url/caption` and post-ref storing `title/url/postId` are the same shape of thing: a cached projection of an external record.
 
-The `@idco/ui` `Button` already supports icon + text together via `children` and `iconPosition` (packages/ui/src/button.tsx). The renderer change for static labels is just "drop `square`, pass the label as children." The whole problem is therefore an SPI-shape decision, not a rendering capability gap.
+The test for which kind a block is: *does editing it mean picking a different external record, or typing content?* Picking → reference block → this SPI. Typing → owned block → stays on `configFields`/live-edit.
 
-## Decision: the knob lives on the slot
+### 2.2 Reference block, defined precisely
 
-Chosen granularity is per-slot, not a global prop and not per-item. Rationale: labels are valuable for some groups and pure noise for others. Bold/Italic/Underline/Strike are universally legible glyphs — labels there waste horizontal space and make the row collapse sooner. The Insert blocks group (Callout, Code, Media, Embed, Divider, TOC, Post-ref) is exactly where icons are ambiguous and the discoverability win is real. That heterogeneity is also the real-world ribbon pattern (Word mixes large labelled buttons with dense icon clusters inside one tab).
+`data = { ref, snapshot }`, bound to a host **source**. The node never owns the truth; it caches a projection. **Pick** sets the ref + snapshot; **resolve** refreshes the snapshot from the ref. **Upload** is a pick that *creates* the record first, then references it.
 
-The slot is already defined as "a labelled group of controls" and already mentions dense/mobile presentation, so it is the natural home. Proposed addition to `ToolbarSlot`:
+A source offers up to two capabilities, and today's kinds are just different capability combos — one concept, capabilities vary, so media/post/embed stop being three bespoke bindings:
 
-```ts
-export type ToolbarSlot = {
-  readonly id: string;
-  // ...existing fields...
-  /** How controls in this slot present. Default "icon". */
-  readonly display?: "icon" | "labelled" | "auto";
-};
+- Media library: `load` (browse/search) + `resolve`; author picks from the collection, or uploads (create → pick).
+- Post / chapter / author ref: `load` + `resolve`; author searches the collection.
+- Embed (youtube): **no `load`**, `resolve` only (oEmbed); author pastes a URL as a free-text ref. This is why embed is not a third species — it is a reference block whose source can't browse.
+
+### 2.3 The three-actor seam (this is what keeps it general, not random)
+
+Three actors, decoupled by a source-id string — the same registry-by-string pattern already used for blocks, marks, and commands.
+
+- **The source** (deployment-owned): returns whatever the host's records look like — domain-agnostic `ResourceOption`s. Knows nothing about blocks.
+- **The block** (author-owned): owns the *projection* — `toData(option) → patch` adapts a generic option into *its* data shape, and `renderResting` paints the snapshot. Knows nothing about the host's backend.
+- **The engine**: the picker, the `{ref, snapshot}` cache, resolve scheduling, gating, reader static render.
+
+The payoff of that seam: **one source can feed many blocks.** A `products` source feeds a `product-card`, an inline `product-mention`, and a `comparison-row`, each with its own `toData` projection. That multiplexing is the concrete reason sources and blocks must be *separate* registries joined by id, not one fused thing — and it means a host adds a new referenceable collection by registering one source, and every block that projects it lights up.
+
+### 2.4 What the SPI gates — and only this
+
+The host registers **sources** (`{ id, load?, resolve? }`). A reference-block node declares "my data projects source X" through a resource config-field. That is the entire gated surface. Everything downstream is generic engine the host never touches: the picker UI (the standardized React Aria ComboBox + `ListBoxLoadMoreItem`, per the "standardize don't diverge" rule), the `{ref, snapshot}` caching, the resolve scheduling, and the reader rendering the stored snapshot statically with no host call (docs/015 — the snapshot is what makes the reference block reader-safe; legacy was resolve-on-render only).
+
+### 2.5 This SPI *is* the custom-block-data SPI, not a parallel one
+
+"Generalize the data provider" and "let a custom block reference host data" are the same work. The moment the resource config-field kind and `registerDataSource` are public, a custom block gets host-data reference for free, because a custom reference block is literally `registerNode` + a resource field bound to a source. So there is no separate "custom block data" phase to defer — it only appears as separate work if item 2 is built *wrong*, as media/post-only bindings. The forcing function: **rebuild the built-in `media` and `post-ref` on this SPI.** If the two built-ins still work after the refactor, the SPI is general by construction; they become proof instances, not special cases left beside it.
+
+### 2.6 Worked example — a `product-card` custom reference block (end to end)
+
+The shape a feature author writes, to make the SPI concrete (sketch, not final API):
+
+```text
+// Deployment wires the collection once, against its real backend:
+registerDataSource({
+  id: "products",
+  load:    (q, signal) => api.searchProducts(q, signal),   // ResourceOption[]
+  resolve: (id, signal) => api.getProduct(id, signal),     // ResourceOption | null
+})
+
+// Block author registers the node — knows the source id, not the backend:
+registerNode({
+  view: {
+    type: "product-card",
+    insert: { label: "Product", group: "Data", keywords: ["product", "shop"] },
+    configFields: [
+      { kind: "resource", key: "ref", source: "products", label: "Product",
+        toData: (opt) => ({ ref: opt.id, title: opt.title, price: opt.price, img: opt.image }) },
+    ],
+    renderResting: ({ node }) => <ProductCardView {...node.data /* the snapshot */} />,
+  },
+})
 ```
 
-This fits the SPI philosophy: declared as data, set at registration, the renderer reads it blind, and a host flips one group without touching the renderer. `home.format` stays `icon`; `insert.blocks` becomes `labelled` or `auto`. Per-item override was rejected as noisy and prone to ragged-looking rows; a global prop was rejected as too coarse (it would force redundant labels onto Bold/Italic).
+End-to-end flow this exercises: register source → register node with a resource field → author picks via the standard ComboBox → `toData` projects the option into the node's snapshot → `renderResting` paints the snapshot → bake persists the snapshot so the reader is static → `resolve` refreshes on mount → if `products` is not registered in this deployment, the insert affordance is hidden (provenance). Nothing here is media-specific, which is the whole point.
 
-## Decision: responsive behavior is "auto → dropdown", not scroll
+### 2.7 Pull-forward checklist (cheap now, expensive to retrofit)
 
-Under width pressure the row should collapse overflow into a dropdown menu, not horizontal-scroll. This replaces today's `flex-nowrap overflow-x-auto` strategy for the command row (ribbon.tsx:375).
+These are the corners usually deferred; do them on day one because the data shape and seams harden around them.
 
-Cleanest mental model is a three-tier `auto` per slot: labelled when there is room, then icon-only (drop labels, keep tooltips) when tighter, then overflow the tail into one trailing Ellipsis menu when even icons do not fit. Tier 2 reuses the same measurement already taken to decide tier 1 (you must measure the labelled width to know whether labels fit).
+- **Optional capabilities from the start.** `load?` and `resolve?` are optional on the source type, so embed (resolve-only, paste-a-URL) and a browse-only picker are the same type with different fields filled — no special-casing embed later.
+- **`toData` returns a patch, not a value.** A citation or product card projects several fields at once; `toData(option) → Partial<data>` makes multi-field projection native. A single-value return forces a rewrite the first time a block needs two fields.
+- **The snapshot is the error fallback.** A dangling ref or a failed `resolve` renders the stale snapshot plus a quiet "couldn't refresh" affordance, never a blank. This is the docs/015 §10 baked-field-staleness risk applied to refs — solved once, in the engine, for every reference block.
+- **Provenance gating wired immediately.** Source present → insert affordance enabled; absent → hidden (006 §7.9). A registry lookup, not a feature; deferring it ships custom blocks broken in deployments that lack their source.
+- **Stale-while-revalidate, not store-only.** Render the snapshot instantly, then `resolve` on mount and patch. Store-only means a renamed post never updates; SWR is small and is the difference between a live reference and a dead copy.
 
-### Mobile is horizontal scroll, not collapse
+### 2.8 Decision to settle before building
 
-The three-tier degradation is a **desktop** behavior, gated above the mobile breakpoint. Below it (the `max-width: 767px` cutoff ResponsiveActions already uses at responsive-actions.tsx:111-114), do not collapse the command row into a dropdown — keep today's simple `overflow-x-auto` horizontal scroll (ribbon.tsx:375). Rationale: on touch there is no hover, so the icon-only middle tier would strip labels exactly where tooltips never fire, leaving bare glyphs the user cannot learn; and an overflow menu of formatting controls is a worse thumb target than a swipeable row. So the responsive matrix is: desktop under width pressure → labelled → icon-only → overflow menu; mobile → always horizontal-scroll the labelled-or-icon row. This inverts ResponsiveActions' mobile rule (which collapses *everything* on mobile) because a formatting row is scanned and swiped, not a short list of page actions. The measurement engine still only runs on desktop; the mobile branch is a CSS fallback with no measurement, which also sidesteps the Ladle measurement flakiness on the mobile story.
+Whether the **host-node registry** (006 §5.3 — opaque `renderEditor`/`renderReadOnly` host blocks) is a separate escape hatch or just the degenerate reference block whose projection is "store the whole record" and whose render is host-supplied. Lean: the latter — one concept, not two parallel "host block" mechanisms. Settle it before building so a second mechanism does not grow.
 
-## Finding: the collapse engine already exists in `packages/ui`
+### 2.9 Slices to pick up (lock the shape first, per the SPI-first rule)
 
-Two in-house components implement "show inline until it doesn't fit, then collapse the overflow into a dropdown". This is battle-tested house code, not something to invent.
+- Public source registry: `registerDataSource` / `getDataSource` / `listDataSources` (`{ id, load?, resolve? }`).
+- Resource config-field kind: `NodeViewConfigField` becomes a union — `{ kind: "text" }` (today) | `{ kind: "resource", source, toData }`. The editor renders the standard ComboBox for the resource kind.
+- Resolved-ref access in render: a hook/arg so `renderResting` shows the snapshot now and refreshes from `resolve` (SWR).
+- Snapshot persistence: confirm bake/serialize carries the snapshot so the reader is static (node data already serializes; make the contract explicit).
+- Rebuild built-in media + post-ref on the SPI; restore `allowedEmbedDomains` as an embed source with `resolve`-only.
+- Resolve the §2.8 host-node-registry decision and implement whichever shape wins.
 
-- `packages/ui/src/responsive-actions.tsx` — the closest match. Trailing actions collapse into a single `Ellipsis` `MenuTrigger`.
-- `packages/ui/src/responsive-breadcrumb.tsx` — same technique, collapsing leading crumbs instead.
+## 3. Comments (half-migrated)
 
-The shared mechanism, worth lifting:
+The data model and derived index are ported; the authoring workflow is not. `comment`/`glossary` are identity marks in the model (`core/model/marks.ts:119`), render as annotation spans (`view/render/mark-render.tsx:129`), and bake builds a `CommentIndexEntry` rollup (`core/bake/bake.ts:152-193`). Missing: a comment command, the popover UI, and the host callbacks `onComment` / `comments` / `onCommentUpdate` / `onCommentDelete` (legacy at `editor-legacy/src/nodes/base.tsx:56-69`). So a comment mark can be stored and shown but never authored or threaded. Glossary authoring is in the same state. Placement: adding a comment to a selection is a Home action, thread management is Review (docs/006 §4.2:294).
 
-1. Hidden measurement layer. ResponsiveActions renders an `aria-hidden`, `invisible`, absolutely-positioned duplicate row of the fully labelled buttons plus the ellipsis button (responsive-actions.tsx:214-248), and measures each item's natural width from that — never from the live row. This is the key trick for `auto`: measure the width items want, not the width they currently have.
-2. ResizeObserver on container + parent + measure-list, coalesced through one requestAnimationFrame, plus window/visualViewport resize and `document.fonts.ready` (responsive-actions.tsx:161-169). Fonts-ready matters: text width is wrong until the webfont lands.
-3. Pure width math in `nextCollapseCount` (responsive-actions.tsx:48-80): greedily find how many trailing items to hide so `directWidth + menuWidth + gaps <= available`. Mirrors the toolbar-layout philosophy — a pure function decides, the renderer paints.
-4. A correction pass (responsive-actions.tsx:181-195): after layout, if `scrollWidth > available`, bump collapse by one to guard against measurement rounding.
-5. A hard mobile cutoff (`max-width: 767px` → collapse everything) at responsive-actions.tsx:111-114.
+Note: glossary is a candidate reference block (a `glossary-term-ref` projecting a host glossary collection) rather than an inline-owned term/definition. Decide alongside item 2, not blind.
 
-## Finding: what React Aria actually contributes (be precise)
+## 4. The reader tier — `packages/reader`, retiring content-renderer (docs/015)
 
-Checked the RA `Toolbar` docs page. Do not over-credit it.
+Not started. `packages/reader` does not exist; `content-renderer` (`@quanghuy1242/idco-content-renderer`) is still live and wired (tsconfig, pnpm-lock), still `"use client"` for one no-op checkbox (docs/015 §3.1). The substrate exists: the non-virtualized resting render (`virtualize={false}`) and `RestingDocument` (`view/render/resting-document.tsx`) are the editor half of the shared primitive layer (docs/015 §4.1 L2b). Sequence as docs/015 lays out:
 
-- React Aria does NOT do overflow/collapse. `Toolbar` is `display:flex; flex-wrap:wrap` — it wraps, it does not measure or collapse into a menu. There is no built-in responsive-collapse primitive in React Aria. The measurement layer must be ours (the packages/ui pattern above).
-- What RA gives is the two endpoints. `Menu`/`MenuTrigger` (already used in ribbon.tsx and ResponsiveActions) is the overflow target — focus, dismissal, keyboard, ARIA all handled. `Toolbar` (the component) would additionally give arrow-key roving focus + `role="toolbar"` semantics; today ribbon.tsx:341 hand-sets `role="toolbar"` with no arrow-key nav, so adopting RA `Toolbar` is an orthogonal accessibility upgrade we could fold in, but it is not what powers the collapse.
+- Create `packages/reader` at the bottom of the dependency graph; extract the RSC-safe `RichText*` / resting primitives into L1 (no `"use client"`, no hooks, no handlers), splitting the interactive bits (checklist checkbox, live code, scroll-spy TOC) into L3 islands.
+- Write the server `<Reader>` over a projection adapter (consume `RichTextEditorDocument` today, `EditorDocumentSnapshot` after the persistence flip) so retiring Lexical later is just an adapter swap.
+- Add the import-boundary lint that fails on any client import reaching L1 (mirror of the editor-core purity rule).
+- Re-point content-renderer's consumers at `packages/reader`, then delete content-renderer.
+- After editor↔reader parity and the persistence flip, remove `editor-legacy` (Lexical) — the editor is the only editor, the server reader the only reader (docs/015 §8).
 
-Net: "React Aria supports us" is true for the overflow popover and toolbar semantics; the collapse engine is the packages/ui pattern. Two different sources, both already in the house.
+## 5. Drag-to-reorder blocks
 
-## SPI-level considerations unique to the editor toolbar
+Legacy has `draggable-block-plugin.tsx` (grab a block by a handle, drop it elsewhere). The owned editor has no draggable / drop-indicator / move-by-drag — it can `remove-block` but not reposition by drag (`view/render/object-block.tsx:92-94`). The one direct-manipulation affordance legacy had that the owned editor dropped. The model already supports moving nodes (the table column/row move composes `move-node`); this is the view-layer handle + drop-indicator + a move command, not new core.
 
-ResponsiveActions only ever has uniform button items. The editor toolbar does not, so "auto → dropdown" surfaces three things ResponsiveActions never had to handle.
+## 6. `allowedNodes` — a per-deployment schema profile
 
-### a. `responsivePriority` finally earns its keep
+Legacy takes an `allowedNodes` prop; the owned editor has none (it has `toolbarCapabilities` flags but no node-type allowlist). It is not one thing — it is two enforcement points over one set:
 
-It is already on every resolved item (toolbar-layout.ts:185-188) and documented as "responsive-collapse rank", but nothing reads it today. The collapse order should be driven by it (lowest priority collapses into the menu first) instead of ResponsiveActions' purely positional "collapse from the end". This is the tissue connecting the existing SPI to the new behavior — no new field needed.
+- **Palette gate (insert time):** which node types the author can add — hide "table" where the deployment disallows it. UX.
+- **Schema gate (import/round-trip time):** which node types may exist in a stored document — drop or reject a disallowed node on load. Data integrity; the host already enforces this server-side with a Zod union (docs/006 §2.7), and the editor should honor the same contract.
 
-### b. Not every item kind collapses into a flat MenuItem
+The honest model is a **schema profile** ("blog profile" vs "book profile"), each a subset of the registry. The registry knows every node type that could exist; the profile is the allowlist of what this deployment permits, enforced at insert and at import. For reference blocks (item 2) the profile is partly implied — no `posts` source registered means post-ref can't function, so provenance already gates it (006 §7.9); the profile only makes deliberate calls about owned blocks (does the blog allow tables?) plus which collections are exposed.
 
-ResponsiveActions assumes `{label, icon, onAction}`. The resolved items are heterogeneous (toolbar-layout.ts:190-222):
+## Order suggestion
 
-- `mark`, `insert`, and `action` of `kind:"button"` → collapse cleanly (label + icon + run).
-- `action` of `kind:"popover"`/`"dropdown"` (table picker, link) → a popover-inside-a-menu is awkward; these want to stay inline or render as a submenu.
-- `blockType` → already a wide (`w-40`) labelled dropdown; it is the natural "keep last / never collapse to a menu item" element.
-- `component` (the `find` escape hatch at ribbon.tsx:128-141) → opaque host React; cannot become a MenuItem.
-
-So the resolved item likely needs to advertise its collapse behavior — something like `collapsible: "menu-item" | "keep-inline" | "submenu"` derived per kind. That is the one genuinely new bit of SPI surface, and it is a derivation, not host config.
-
-### c. It interacts with the existing responsive strategy
-
-Today the command row is `flex-nowrap overflow-x-auto` (ribbon.tsx:375) and scrolls under pressure. Auto → dropdown replaces that strategy for the command row. The three-tier model (labelled → icon-only → overflow menu) is the graceful degradation we want on a narrow editor pane.
-
-## Gotchas specific to the editor toolbar
-
-- Focus restoration. Every toolbar press deliberately bounces focus back to the editing surface (ribbon.tsx:95-101, 273-277). An overflow Menu must do the same on action — ResponsiveActions does not, since its actions do not refocus an editor. The collapsed MenuItem `onAction` has to route through the same `run(...)` wrapper.
-- The bar's `onMouseDownCapture` preventDefault (ribbon.tsx:339) must not swallow the measurement layer's interactions. The hidden measure row is `pointer-events-none`, so it is fine, but verify an RA `Toolbar` adoption does not fight the capture handler.
-- Re-measure on content change. The row's item set changes with selection (capability gating, marks resolving in/out). The measure effect must key off the resolved layout signature, like ResponsiveActions keys off `actionSignature` (responsive-actions.tsx:94-96).
-- Test story. Ladle measurement-driven UI has been flaky before (scroller/readyMs gotchas). An auto toolbar story needs a deterministic container width plus a fonts-ready wait, or it will be flaky.
-
-## UX gaps surfaced while grounding (adjacent, fold into the same epic)
-
-Grounding the label/collapse work against the live renderer turned up three real UX gaps that are cheap, already half-plumbed, and synergistic with this change. They are not "label + collapse" but they touch the same files and the same SPI, so they belong in the same epic rather than a later pass.
-
-### 1. `role="toolbar"` with no roving focus (accessibility correctness)
-
-ribbon.tsx:340 hand-sets `role="toolbar"`, which by ARIA contract promises arrow-key navigation between controls — and there is none. Every `Button` is independently tab-focusable, so a keyboard user tabs through ~12 stops to cross one tab's command row, and a screen reader announces a "toolbar" that does not behave like one. This is the RA `Toolbar` adoption the responsive finding listed as "orthogonal"; promote it from optional aside to in-scope, because it is a correctness issue (the role is already asserted) and it is cheapest to fold in while this file is already open. RA `Toolbar` gives roving tabindex + arrow-key nav for free; verify it does not fight the capture-phase `onMouseDownCapture` preventDefault (ribbon.tsx:339) or the hidden measure row.
-
-### 2. Mark and block-type gating is plumbed but dead
-
-The resolved item already carries a `disabled` field, but `resolveConfigItem` hardcodes `disabled: false` for every mark (toolbar-layout.ts:334) and for the block-type chooser (toolbar-layout.ts:362), and the mark `Button` does not even pass `disabled` (ribbon.tsx:187-199). So Bold stays clickable-looking inside a code block where inline marks are meaningless. Actions already gate through `isDisabled` (command-registry.ts:159); marks and block-types just never wire the equivalent query. Wiring it makes the controls reflect what actually applies to the selection — independent of labels, but it lands in the exact same resolve path.
-
-### 3. No keyboard-shortcut hints anywhere
-
-Marks have shortcuts (Ctrl/Cmd+B, etc.) but the mark and command descriptors carry **no shortcut metadata at all** — only `find` hardcodes the string `"Find (Ctrl/Cmd+F)"` (ribbon.tsx:136). Tooltips show the bare label (`tooltip={meta.label}`). Adding an optional `shortcut` to the descriptor and rendering it in the tooltip (plus `aria-keyshortcuts` on the control) is the highest discoverability-per-effort change here, and it composes directly with the label work — the same descriptor that gains a visible label can carry its shortcut.
-
-## Explicitly out of scope: contextual tabs
-
-No contextual/auto-following tab (the Word "Picture Format on selection" pattern). `ToolbarTab.isAvailable` gates visibility but tabs deliberately do not auto-activate on selection. This is intended, not a gap: objects already carry their own **inline** chrome — the node SPI ships a default settings gear, a custom `chromeControl` (the code block's language selector), a `chromeMeta` badge, and view-level `renderOverlay` floating surfaces (node-view.ts:41-159), and structural nodes contribute selection controls through `renderOverlay` + `contributeCommands` (the table's hover row/column controls, structural-view.ts:62-119). The contextual affordance lives next to the object, where the selection is, not in a far-away ribbon tab. A contextual ribbon tab would duplicate that inline chrome and split one object's controls across two places.
-
-## Recommendation / next step
-
-Extract a small `useResponsiveCollapse` measurement hook in `packages/ui` from responsive-actions.tsx (hidden-measure + ResizeObserver + `nextCollapseCount` + correction pass), parameterized by per-item width and a priority order. Then the editor's `display:"auto"` slot feeds it `responsivePriority` and renders the overflow tail into the `Menu` ribbon.tsx already imports — with the `collapsible` kind-derivation handling popover/component/blockType items. React Aria's role is the `Menu` (overflow) and optionally `Toolbar` (roving focus); the collapse engine is ours, already written.
-
-Open follow-up choices for when work resumes:
-
-- Whether `auto` is the three-tier model or a simpler two-tier (labelled → overflow menu, skipping the icon-only middle tier) — this is now a *desktop-only* question; mobile is settled as horizontal scroll.
-- Where the `collapsible` derivation lives — in `computeToolbarLayout` (so it stays pure and testable) versus in the renderer.
-
-(The RA `Toolbar` adoption is no longer an open "whether" — it moved into the in-scope UX-gaps section above as item 1, the accessibility-correctness fix.)
+Item 2 (host data SPI) is the spine — it blocks real authoring parity and is the thing custom blocks consume; lock its shape before building any slice. Item 4 (reader) is the other spine — it blocks retiring content-renderer and Lexical. Item 1 (alignment) is the cheapest standalone win (the reader already paints it). Item 5 (drag-reorder) is view-layer-only on an existing model capability. Item 3 (comments) is mostly UI + binding wiring on an existing model, and should be decided against item 2's reference-block concept. Item 6 (schema profile) pairs naturally with item 2 and the registry.
