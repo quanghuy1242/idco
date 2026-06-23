@@ -33,7 +33,12 @@ import type { ReactNode } from "react";
 import type { EditorStore, TextMarkKind } from "../../core";
 import { getMark, listMarks, type MarkDefinition } from "./mark-registry";
 import { listInsertableStructuralNodes } from "./structural-view";
-import { getNodeView, listInsertableNodes } from "./node-view";
+import {
+  getNodeView,
+  listInsertableNodes,
+  type NodeViewResourceConfigField,
+} from "./node-view";
+import { getDataSource } from "./data-source-registry";
 import {
   commandTargetsSurface,
   getCommand,
@@ -303,15 +308,28 @@ function resolveInsert(
   }
   const object = listInsertableNodes().find((view) => view.type === nodeType);
   if (object && getNodeView(nodeType)) {
+    const resourceField = object.configFields?.find(
+      (field): field is NodeViewResourceConfigField =>
+        field.kind === "resource",
+    );
+    // Provenance gating (docs/026 §9): a reference block whose source is not
+    // registered is hidden from the ribbon insert too (a null action is skipped).
+    if (resourceField && !getDataSource(resourceField.source)) return null;
     return {
       icon: object.insert.icon ?? "Plus",
       label: object.insert.label,
-      run: (store) =>
+      run: (store) => {
         store.command({
           data: object.insert.createData(),
           objectType: object.type,
           type: "insert-object",
-        }),
+        });
+        // Choose-first (docs/026 §7.1): open the picker, roll back on cancel.
+        if (resourceField) {
+          const sel = store.selection;
+          if (sel?.type === "node") store.beginProvisionalInsert(sel.node);
+        }
+      },
     };
   }
   return null;

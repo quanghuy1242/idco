@@ -25,7 +25,12 @@ import type { EditorStore, EditorSelection, NodeId } from "../../core";
 import { activeScope, collectSelectionText, scopePath } from "../../core";
 import { listMarks } from "./mark-registry";
 import { listBlockTypes } from "./block-type-registry";
-import { getNodeView, listInsertableNodes } from "./node-view";
+import {
+  getNodeView,
+  listInsertableNodes,
+  type NodeViewResourceConfigField,
+} from "./node-view";
+import { getDataSource } from "./data-source-registry";
 import {
   getStructuralView,
   listInsertableStructuralNodes,
@@ -204,6 +209,15 @@ function registryCommands(): Command[] {
   for (const view of listInsertableNodes()) {
     if (!getNodeView(view.type)) continue;
     const insert = view.insert;
+    const resourceField = view.configFields?.find(
+      (field): field is NodeViewResourceConfigField =>
+        field.kind === "resource",
+    );
+    // Provenance gating (docs/026 §9): a reference block whose source is not
+    // registered in this deployment cannot function, so it is hidden from the
+    // insert affordance entirely. A registry lookup, not a feature flag — existing
+    // instances in a loaded document still render their persisted snapshot (§7.4).
+    if (resourceField && !getDataSource(resourceField.source)) continue;
     out.push({
       group: "insert",
       icon: insert.icon ?? "Plus",
@@ -211,12 +225,20 @@ function registryCommands(): Command[] {
       keywords: insert.keywords ?? [insert.label.toLowerCase()],
       kind: "button",
       label: insert.label,
-      run: (ctx) =>
+      run: (ctx) => {
         ctx.store.command({
           data: insert.createData(),
           objectType: view.type,
           type: "insert-object",
-        }),
+        });
+        // Choose-first (docs/026 §7.1): a reference block opens its picker
+        // immediately and rolls back if dismissed before a record is picked. The
+        // insert just set the selection to the new node.
+        if (resourceField) {
+          const sel = ctx.store.selection;
+          if (sel?.type === "node") ctx.store.beginProvisionalInsert(sel.node);
+        }
+      },
       surfaces: { contextMenu: "more", slash: "primary" },
     });
   }

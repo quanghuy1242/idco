@@ -42,6 +42,7 @@ import {
   type IdAllocator,
   type JsonValue,
   type NodeId,
+  type ObjectNode,
   type ObjectNodeStatus,
   type ParentEntry,
   type StructuralNode,
@@ -301,6 +302,10 @@ export class EditorStore {
   #activeTextLeafSnapshot: TextLeafNode | null = null;
   #activeLeafDomSynced = false;
   #activeObjectId: NodeId | null = null;
+  // The id of a reference block inserted choose-first and awaiting its first pick
+  // (docs/026 §7.1). If it is dismissed before a record is picked, deactivation
+  // rolls the insert back so a cancelled insert leaves no orphan.
+  #provisionalInsertId: NodeId | null = null;
   #composition: CompositionRange | null = null;
   readonly #activeObjectSubscribers = new Set<() => void>();
   #order: NodeId[] = [];
@@ -487,12 +492,51 @@ export class EditorStore {
     this.#notifyActiveObject();
   }
 
+  /**
+   * Insert a reference block choose-first (docs/026 §7.1): the caller has already
+   * inserted the node (a recorded transaction, so undo removes it); this opens its
+   * picker immediately and marks it provisional so a dismissal before the first
+   * pick rolls the insert back. Tracking lives here because deactivation is the one
+   * choke point where "the object was left without picking" is observable.
+   */
+  beginProvisionalInsert(id: NodeId): void {
+    this.#provisionalInsertId = id;
+    this.activateObject(id);
+  }
+
   /** Leave live-edit; the object re-bakes to its resting snapshot (AC2/AC5). */
   deactivateObject(id?: NodeId): void {
     if (id && this.#activeObjectId !== id) return;
     if (!this.#activeObjectId) return;
+    const closing = this.#activeObjectId;
     this.#activeObjectId = null;
+    // Choose-first rollback (docs/026 §7.1): a provisional reference block dismissed
+    // before a record is picked (its `ref` still empty) is removed via undo — the
+    // insert is the top history entry (activation and the on-mount resolve are
+    // non-historic), so its inverse cleanly removes the node and a cancelled insert
+    // leaves no orphan. A block that did pick keeps its committed insert entry.
+    if (closing === this.#provisionalInsertId) {
+      this.#provisionalInsertId = null;
+      const node = this.getNode(closing);
+      if (
+        node?.kind === "object" &&
+        this.#isEmptyReference(node) &&
+        this.canUndo
+      ) {
+        this.undo();
+      }
+    }
     this.#notifyActiveObject();
+  }
+
+  /** True when an object's data is a reference projection with no picked ref yet. */
+  #isEmptyReference(node: ObjectNode): boolean {
+    const data = node.data;
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+      return false;
+    }
+    const ref = (data as { readonly ref?: JsonValue }).ref;
+    return ref === "";
   }
 
   /**

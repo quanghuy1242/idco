@@ -72,6 +72,7 @@ await import("./editor/object-config-resource-field.test");
 await import("./editor/reference-status-lifecycle.test");
 await import("./editor/resolve-swr.test");
 await import("./editor/media-reference-block.test");
+await import("./editor/choose-first-provenance.test");
 await import("./editor/engine-structural-spi.test");
 await import("./editor/engine-block-type-spi.test");
 await import("./editor/engine-structural-child-commands.test");
