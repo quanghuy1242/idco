@@ -59,10 +59,14 @@ describe("node SPI worked examples (AC6)", () => {
     expect(types).toContain("media");
   });
 
-  it("the image node view supplies a live-edit surface", () => {
+  it("the image node view is a reference block with a resource config field", () => {
+    // media rebuilt on the data-provider SPI (docs/026 §8.2): it edits through the
+    // default config popover (a `resource` field bound to the `media` source), not
+    // a bespoke live surface, so it carries `configFields` rather than `renderLive`.
     const media = getNodeView("media");
     expect(media?.renderResting).toBeDefined();
-    expect(media?.renderLive).toBeDefined();
+    expect(media?.renderLive).toBeUndefined();
+    expect(media?.configFields?.some((f) => f.kind === "resource")).toBe(true);
     expect(media?.insert?.label).toBe("Image");
   });
 });

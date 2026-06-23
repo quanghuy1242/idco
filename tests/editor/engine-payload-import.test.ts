@@ -70,12 +70,16 @@ describe("Payload-Lexical import adapter", () => {
     const store = createEditorStoreFromCompat(document);
     const objects = objectsOf(store);
     expect(objects.map((o) => o.type)).toEqual(["embed", "media", "divider"]);
-    // The mapped media node carries the upload's resolved source.
+    // The mapped media node carries the upload's resolved source. media is a
+    // reference block now (docs/026 §8.2), so the URL lands in the projected
+    // snapshot; the flat `upload` node imports through the media reader's
+    // nested-or-flat fallback (§15).
     const media = store.order
       .map((id) => store.requireNode(id))
       .find((n) => n.kind === "object" && n.type === "media");
     expect(
-      media?.kind === "object" && (media.data as { src?: string }).src,
+      media?.kind === "object" &&
+        (media.data as { snapshot?: { src?: string } }).snapshot?.src,
     ).toBe("/cat.png");
   });
 

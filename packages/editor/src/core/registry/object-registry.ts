@@ -143,27 +143,52 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
   codeBlockDefinition(),
   simpleObjectDefinition(
     "media",
-    (node) => ({
-      data: {
-        alt: stringValue(node.alt) ?? "",
-        caption: stringValue(node.caption) ?? "",
-        mediaId: stringValue(node.mediaId) ?? "",
-        src: stringValue(node.src) ?? "",
-      },
-      status: statusValue(node.status) ?? "ready",
-    }),
+    // media is a reference block (docs/026 §4.3): `{ ref(=mediaId), snapshot:{src,
+    // alt}, local:{caption} }`. `src`/`alt` are the projected asset fields (a
+    // resolve refreshes them); `caption` is author-local and a refresh never
+    // touches it (§7.2). The compat reader prefers the nested shape and falls back
+    // to the legacy flat fields — that fallback is how the one-time payload corpus
+    // (flat `upload` nodes, docs/026 §15) imports until it is re-baked nested, and
+    // it keeps every pre-SPI flat-media fixture valid; it is removable once the
+    // corpus is migrated.
+    (node) => {
+      const snap = isJsonObject(toJsonValue(node.snapshot))
+        ? (toJsonValue(node.snapshot) as { readonly [k: string]: JsonValue })
+        : {};
+      const loc = isJsonObject(toJsonValue(node.local))
+        ? (toJsonValue(node.local) as { readonly [k: string]: JsonValue })
+        : {};
+      return {
+        data: {
+          local: {
+            caption:
+              stringValue(loc.caption) ?? stringValue(node.caption) ?? "",
+          },
+          ref: stringValue(node.ref) ?? stringValue(node.mediaId) ?? "",
+          snapshot: {
+            alt: stringValue(snap.alt) ?? stringValue(node.alt) ?? "",
+            src: stringValue(snap.src) ?? stringValue(node.src) ?? "",
+          },
+        },
+        status: statusValue(node.status) ?? "ready",
+      };
+    },
     (data) => {
       // Media with neither a source URL nor a media id has nothing to render, so
       // it cannot bake. The engine surfaces that as a recoverable `invalid`.
       const record = isJsonObject(data) ? data : {};
-      const src = stringValue(record.src) ?? "";
-      const mediaId = stringValue(record.mediaId) ?? "";
+      const snap = isJsonObject(record.snapshot) ? record.snapshot : {};
+      const loc = isJsonObject(record.local) ? record.local : {};
+      const src = stringValue(snap.src) ?? stringValue(record.src) ?? "";
+      const mediaId =
+        stringValue(record.ref) ?? stringValue(record.mediaId) ?? "";
       if (src.length === 0 && mediaId.length === 0) return null;
       return {
         kind: "media",
         payload: {
-          alt: stringValue(record.alt) ?? "",
-          caption: stringValue(record.caption) ?? "",
+          alt: stringValue(snap.alt) ?? stringValue(record.alt) ?? "",
+          caption:
+            stringValue(loc.caption) ?? stringValue(record.caption) ?? "",
           mediaId,
           src,
         },
@@ -172,7 +197,12 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
     // Caption + alt are the searchable internals of a media node (011 §2.7).
     (data) => {
       const record = isJsonObject(data) ? data : {};
-      return [stringValue(record.caption) ?? "", stringValue(record.alt) ?? ""]
+      const snap = isJsonObject(record.snapshot) ? record.snapshot : {};
+      const loc = isJsonObject(record.local) ? record.local : {};
+      return [
+        stringValue(loc.caption) ?? stringValue(record.caption) ?? "",
+        stringValue(snap.alt) ?? stringValue(record.alt) ?? "",
+      ]
         .filter(Boolean)
         .join(" ");
     },

@@ -33,6 +33,7 @@ import {
   useCommandSurfaces,
 } from "./chrome";
 import type { ToolbarCapabilities, ToolbarLayoutConfig } from "./spi";
+import { getDataSource, registerDataSource } from "./spi";
 import { FindBar, useFindController, type FindController } from "./chrome";
 import { LinkPopover, useLinkInteraction } from "./chrome";
 import {
@@ -86,6 +87,22 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     setHandle(viewRef.current?.getEditorHandle() ?? null);
   }, []);
 
+  // Fold the legacy `uploadImage` prop into the data-provider SPI (docs/026
+  // §14.12): expose it as an upload-only `media` source so the image config's
+  // upload button works without the host registering a source. A host that
+  // registers a richer `media` source (browse + upload) wins — the shim only fills
+  // the gap, and it never unregisters so it cannot clobber a host source.
+  useEffect(() => {
+    if (!uploadImage || getDataSource("media")) return;
+    registerDataSource({
+      id: "media",
+      upload: async (file) => {
+        const result = await uploadImage(file);
+        return { id: result.src, image: result.src, label: result.alt ?? "" };
+      },
+    });
+  }, [uploadImage]);
+
   const focusEditor = useCallback(() => {
     viewRef.current?.getEditorHandle().focus();
   }, []);
@@ -104,7 +121,11 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
       void (async () => {
         const result = await uploadImage(file);
         store.command({
-          data: { alt: result.alt ?? "", caption: "", src: result.src },
+          data: {
+            local: { caption: "" },
+            ref: "",
+            snapshot: { alt: result.alt ?? "", src: result.src },
+          },
           objectType: "media",
           type: "insert-object",
         });
