@@ -18,6 +18,7 @@
  * for correctness because the writes are idempotent.
  */
 import { useEffect } from "react";
+import type { ResourceOption } from "@quanghuy1242/idco-ui";
 import type { JsonValue } from "../../core";
 import { type EditorStore, type ObjectNode } from "../../core";
 import {
@@ -26,6 +27,40 @@ import {
   type NodeViewResourceConfigField,
 } from "../spi";
 import { currentObjectRecord, patchSnapshot, refField } from "../object-data";
+
+type ResolveFn = (
+  ref: string,
+  signal: AbortSignal,
+) => Promise<ResourceOption | null>;
+
+/**
+ * In-flight resolve dedupe (docs/026 §14.5): many blocks that reference the same
+ * record — and every virtualization remount of one — share a single fetch instead
+ * of each firing its own. Keyed by `sourceId::ref`; the entry clears when the fetch
+ * settles. The shared fetch owns its own `AbortController`, because one consumer
+ * unmounting must NOT cancel the result the others are waiting on — each consumer
+ * instead gates *applying* the result on its own per-mount signal (below), so an
+ * unmounted block still drops its write. This dedupes concurrent fetches; result
+ * memoization across time is a separate future optimization.
+ */
+const inFlightResolves = new Map<string, Promise<ResourceOption | null>>();
+
+function sharedResolve(
+  sourceId: string,
+  resolve: ResolveFn,
+  ref: string,
+): Promise<ResourceOption | null> {
+  const key = `${sourceId}::${ref}`;
+  let pending = inFlightResolves.get(key);
+  if (!pending) {
+    const controller = new AbortController();
+    pending = Promise.resolve(resolve(ref, controller.signal)).finally(() => {
+      inFlightResolves.delete(key);
+    });
+    inFlightResolves.set(key, pending);
+  }
+  return pending;
+}
 
 /**
  * The reference field of a node's view, or null for a non-reference object. A
@@ -72,11 +107,13 @@ export function useResolveReference(
       store.resolveObject(nodeId, currentObjectRecord(store, nodeId), "ready");
       return;
     }
+    // Per-mount controller gates *applying* the result (an unmounted block drops
+    // its write); the fetch itself is shared and deduped across blocks (§14.5).
     const controller = new AbortController();
     const resolve = source.resolve;
     void (async () => {
       try {
-        const option = await resolve(ref, controller.signal);
+        const option = await sharedResolve(field.source, resolve, ref);
         if (controller.signal.aborted) return;
         if (!option) {
           // Dangling ref or refusal: keep the stale snapshot, mark invalid (§7.3).

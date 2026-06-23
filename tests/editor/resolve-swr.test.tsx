@@ -154,4 +154,48 @@ describe("resolve controller (docs/026 §7.2)", () => {
     });
     expect(objectData(store, id).snapshot.title).toBe("Stale");
   });
+
+  it("keeps a ref-bearing block ready when its source has no resolve", async () => {
+    // The drag-drop / upload path produces a node with a ref + a populated snapshot
+    // but a source that only uploads/browses (no resolve). It must read `ready`, not
+    // flip to `unresolved` (which would paint the empty-state "Pick" badge over a
+    // valid image).
+    registerDataSource({ id: "posts", load: { items: [], mode: "sync" } });
+    const { store, id } = makeStore({
+      ref: "post-1",
+      snapshot: { title: "Has content" },
+    });
+    render(<ResolveProbe id={id} store={store} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status").textContent).toBe("ready"),
+    );
+  });
+
+  it("dedupes concurrent resolves for the same ref (docs/026 §14.5)", async () => {
+    let calls = 0;
+    registerDataSource({
+      id: "posts",
+      resolve: async (refId) => {
+        calls += 1;
+        return { id: refId, label: "Fresh" };
+      },
+    });
+    const a = makeStore({ ref: "post-1", snapshot: {} });
+    const b = makeStore({ ref: "post-1", snapshot: {} });
+    // Both mount in the same commit, so the second sees the first's in-flight entry
+    // and shares its fetch rather than firing a second.
+    render(
+      <>
+        <ResolveProbe id={a.id} store={a.store} />
+        <ResolveProbe id={b.id} store={b.store} />
+      </>,
+    );
+    await waitFor(() => {
+      const an = a.store.getNode(a.id);
+      const bn = b.store.getNode(b.id);
+      expect(an?.kind === "object" && an.status).toBe("ready");
+      expect(bn?.kind === "object" && bn.status).toBe("ready");
+    });
+    expect(calls).toBe(1);
+  });
 });

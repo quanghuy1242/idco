@@ -65,6 +65,8 @@ function ResourceConfigField(props: {
   const [ref, setRef] = useState<string>(() =>
     refField(currentObjectRecord(store, nodeId)),
   );
+  // The free-text-ref (embed) draft, committed on blur rather than per keystroke.
+  const [refDraft, setRefDraft] = useState(ref);
 
   const commit = useCallback(
     (nextRef: string, snapshot: Record<string, JsonValue>) => {
@@ -164,23 +166,29 @@ function ResourceConfigField(props: {
       value={ref}
     />
   ) : source.resolve ? (
-    // A resolve-only source (embed) has no collection to browse, so the ref is
-    // free text — the author pastes a URL and `resolve` validates it (docs/026
-    // §4.4). Committing the ref leaves the snapshot empty; the resolve controller
-    // marks the node ready or invalid.
+    // A resolve-only source (embed) has no collection to browse, so the ref is free
+    // text — the author pastes a URL and `resolve` validates it (docs/026 §4.4). The
+    // ref commits on blur (the wrapper `onBlur` catches the input's bubbled blur),
+    // not per keystroke: typing a URL is one undo entry and one validation, not one
+    // per character — a half-typed URL would otherwise flicker `invalid` and storm a
+    // host's oEmbed `resolve`. Committing leaves the snapshot empty; the resolve
+    // controller marks the node ready or invalid.
     <label
       data-engine-config-field={`${field.key}-ref`}
+      onBlur={() => {
+        if (refDraft !== ref) {
+          setRef(refDraft);
+          commit(refDraft, {});
+        }
+      }}
       style={objectConfigFieldStyle}
     >
       <span className="min-w-16 text-sm">{field.label}</span>
       <Input
         ariaLabel={field.label}
-        onChange={(value) => {
-          setRef(value);
-          commit(value, {});
-        }}
+        onChange={setRefDraft}
         size="sm"
-        value={ref}
+        value={refDraft}
       />
     </label>
   ) : (

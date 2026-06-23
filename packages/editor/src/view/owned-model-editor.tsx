@@ -113,10 +113,13 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   // The default `embed` source (docs/026 §4.4): embed is a resolve-only reference
   // block, so the editor provides the source that validates a pasted URL against
   // `allowedEmbedDomains`. A `null` from `resolve` marks the block `invalid` and the
-  // embed render suppresses the iframe (§12). Re-registers when the allowlist
-  // changes so the guard stays current; a host may register its own `embed` source
-  // (oEmbed title fetch, etc.) which this overwrites by id.
+  // embed render suppresses the iframe (§12). Guarded like the media shim: a host
+  // that registered its own `embed` source (oEmbed title fetch, etc.) wins, and the
+  // guard also stops the re-registration churn when `allowedEmbedDomains` is passed
+  // as a fresh array literal each render. `allowedEmbedDomains` is captured at first
+  // registration (it is a static deployment config).
   useEffect(() => {
+    if (getDataSource("embed")) return;
     const allowed = allowedEmbedDomains;
     registerDataSource({
       id: "embed",
@@ -153,8 +156,12 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
         const result = await uploadImage(file);
         store.command({
           data: {
+            // The uploaded asset is referenced by its src (the same id the
+            // `uploadImage` media-source shim uses, §14.12). A non-empty ref is
+            // essential: an empty ref would read `unresolved` on mount and paint the
+            // "Pick an image" empty-state badge over a perfectly good image.
             local: { caption: "" },
-            ref: "",
+            ref: result.src,
             snapshot: { alt: result.alt ?? "", src: result.src },
           },
           objectType: "media",

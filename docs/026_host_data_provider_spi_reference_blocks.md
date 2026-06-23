@@ -463,7 +463,11 @@ Add helpers beside `asRecord`/`stringField`/`currentObjectRecord` (`view/object-
 
 ### 14.8 Choose-First Via Rollback
 
-Insertion of a `resource`-field block creates the node immediately (`unresolved`, empty `data`, via the existing `compileInsertObject` path, `commands/objects.ts:65`), then auto-activates the block and opens its picker (§14.3/§14.4). The new behavior is cancellation: cancelling the *initial* pick of a never-resolved block removes the node. The hard part is history — insert (`insert-object`) and the first `set-object-data` must coalesce into one undo unit, and a cancel must undo cleanly with no ghost block or stray entry. This is done at the §6.1 transaction chokepoint (`core/store/history.ts`): mark the insert transaction as *provisional* until the first pick commits, so a committed pick coalesces insert+data into one history entry and a cancel discards the provisional transaction rather than pushing a remove. This is the only engine-internals change in the whole plan and is isolated to P5; nothing in P1–P4 depends on it (P1–P4 use placeholder-first insertion).
+Insertion of a `resource`-field block creates the node immediately (`unresolved`, empty `data`, via the existing `compileInsertObject` path, `commands/objects.ts`), then auto-activates the block and opens its picker (§14.3/§14.4). The new behavior is cancellation: cancelling the *initial* pick of a never-resolved block removes the node, so a cancelled insert leaves no orphan.
+
+As built (`EditorStore.beginProvisionalInsert` + the `deactivateObject` rollback in `core/store/editor-store.ts`), the insert is a normal recorded transaction and the engine tracks the new node as the *provisional* insert (`#provisionalInsertId`). On deactivation, a provisional block whose `ref` is still empty is removed by calling `undo()` — clean because the insert is the top history entry: activation dispatches only a step-less (non-historic) selection transaction, and the on-mount resolve writes through `recordHistory: false` (§14.6), so neither lands on the undo stack above the insert. A block that *did* pick has a non-empty `ref`, so it is kept and its insert stays an ordinary undoable entry.
+
+One deliberate deviation from the original plan: insert and the first pick are **two** undo entries, not one. The plan called for coalescing insert + the first `set-object-data` into a single history unit via a provisional transaction at the §6.1 chokepoint; that coalescing was *not* built, because it is genuine history-layer surgery and the recorded-insert + undo-on-cancel mechanism delivers the load-bearing guarantee (a cancelled insert leaves nothing) at far lower risk. The cost is that undoing a completed insert+pick takes two presses (revert the pick, then remove the block). Single-step coalescing is recorded as future backlog (§18). The rollback's one fragility — `undo()` assumes the insert is the top entry — holds for every flow that exists today (nothing else can commit while a provisional, still-ref-empty block is the active object), but a future code path that commits a historic transaction while a provisional insert is open and unpicked would make the rollback revert the wrong entry; the provisional-transaction approach would remove that assumption.
 
 ### 14.9 Three Resting States Chrome
 
@@ -735,16 +739,17 @@ Scope:
 
 Tasks:
 
-- [ ] Insert a `resource`-field block, auto-open its picker; cancel of the initial pick removes the node.
-- [ ] Coalesce insert + first `set-object-data` into one undo unit (provisional-transaction at the §6.1 chokepoint).
+- [x] Insert a `resource`-field block, auto-open its picker; cancel of the initial pick removes the node.
+- [~] Coalesce insert + first `set-object-data` into one undo unit — *deferred*: the shipped mechanism records the insert and undoes it on cancel (`beginProvisionalInsert` + `deactivateObject` rollback), so insert+pick is two undo steps, not one (§14.8). True single-step coalescing via a provisional transaction is in §18.
 
-Acceptance criteria:
+Acceptance criteria (as shipped):
 
-- A completed insert is one undo step; a cancel leaves no node and no stray history entry.
+- A cancelled insert leaves no node and no stray history entry (the insert is undone, not removed-with-a-new-entry).
+- A picked insert is kept and undoable; undoing a completed insert+pick takes two presses (deferred coalescing, §14.8/§18).
 
 Tests:
 
-- `tests/editor/choose-first-rollback.test.ts`
+- `tests/editor/choose-first-provenance.test.ts`
 
 ### RB-13. Provenance Gating
 
@@ -804,6 +809,9 @@ Tests:
 
 Separate from first-release work; pulled in only when a consumer needs them.
 
+- **Single-undo coalescing for choose-first insert** (§14.8): coalesce the insert and the first pick into one history entry via a provisional transaction at the §6.1 chokepoint, so undoing a completed insert+pick is one press (today it is two) and the rollback no longer assumes the insert is the top entry. Deferred from RB-12 as history-layer surgery; the recorded-insert + undo-on-cancel mechanism already delivers the no-orphan guarantee.
+- **Free-text-ref resolve debounce** (§7.2): the embed URL input commits on blur today; a host whose `resolve` does a network oEmbed fetch may still want explicit debounce/throttle on rapid blur cycles.
+- **Result-memoizing SWR cache** (§14.5): in-flight fetches are deduped by `sourceId::ref`, but results are not memoized across time, so a remount after a fetch settles refetches. A short-TTL result cache would cut that.
 - **Per-block `deferrable` opt-out** (§11): allow a specific block to insert empty and fill later, for scaffolding workflows (citations, related-posts layout). A per-block flag the insert path reads; no model change.
 - **Collapse the host-node registry into the degenerate reference block** (§11, docs/006 §5.3): once a host needs a fully opaque block, implement it as a source with `renderPicker` + a block whose `renderResting` is host-supplied, rather than a parallel `RichTextHostNodeDefinition`.
 - **Glossary as a reference block** (§11): decide `glossary-term-ref` vs inline-owned alongside comments authoring (note.md item 3).
