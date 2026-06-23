@@ -140,6 +140,18 @@ export {
   type FindMatch,
 } from "./view";
 export { UploadProvider, useUpload, type UploadImage } from "./view";
+// Host data-source SPI (docs/026 §6.1): a deployment registers one `DataSource`
+// per host collection it wants reference blocks to project; everything downstream
+// (the picker, the cache, resolve scheduling, gating, the static reader) is engine
+// the host never touches.
+export {
+  getDataSource,
+  listDataSources,
+  registerDataSource,
+  unregisterDataSource,
+  type DataSource,
+  type DataSourcePickerProps,
+} from "./view";
 // Read-side document SPI (note.md): a node view reads the whole-document index
 // reactively without reaching across the document. The provider + store back it;
 // the editor and reader both feed it. See `useDocumentIndex` / `useDocumentReveal`.

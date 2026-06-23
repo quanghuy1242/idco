@@ -110,6 +110,18 @@ export {
   type ToolbarSlot,
   type ToolbarTab,
 } from "./spi";
+// Host data-source SPI (docs/026 §6.1): the single host-facing extension point by
+// which a deployment exposes host-backed records (media, posts, …) to the
+// reference blocks that project them. `registerDataSource` is the host's entire
+// surface — one call, one object — so it is part of the public package.
+export {
+  getDataSource,
+  listDataSources,
+  registerDataSource,
+  unregisterDataSource,
+  type DataSource,
+  type DataSourcePickerProps,
+} from "./spi";
 export { sanitizeHtmlToCompat } from "./paste-html";
 export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
 export {
