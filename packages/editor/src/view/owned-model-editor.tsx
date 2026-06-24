@@ -353,9 +353,10 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
         <div className="flex items-stretch" data-engine-editor-body="">
           {/* `relative` so the find card floats over the surface's top-right corner
               instead of pushing it down when it opens (no layout shift). `min-w-0` lets
-              the surface shrink when the dock takes its column. */}
+              the surface shrink when the dock takes its column. `m-1` matches the dock's
+              margin so the editor has even space around it and a small gap to the dock. */}
           <div
-            className="relative min-w-0 flex-1"
+            className="relative m-1 min-w-0 flex-1"
             data-engine-surface=""
             onClick={onClick}
             onContextMenu={onContextMenu}
