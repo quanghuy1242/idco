@@ -1,10 +1,13 @@
 import type { Story, StoryDefault } from "@ladle/react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   createEditorStoreFromCompat,
   OwnedModelEditor,
+  registerCommentSource,
+  unregisterCommentSource,
   type EditorStore,
   type RichTextCompatDocument,
+  type Thread,
 } from "../packages/editor/src";
 
 /**
@@ -199,6 +202,90 @@ export const DockInsights: Story = () => {
         Review tab is registry-driven — it shows because Insights (always
         available) registered (§7.7). Counts update as you type; select text for
         selection-scoped counts.
+      </p>
+    </div>
+  );
+};
+
+/**
+ * Comments (docs/027 §7), host-owned through a registered `CommentSource`. This story
+ * registers a fake in-memory source (a real deployment registers one backed by its
+ * thread store), which lights up the Comments pane and the add action (§7.7). Select
+ * text and choose "Comment" in the flyout to open a thread: the host creates it, then a
+ * comment mark anchors it (host-first, §7.3), the range highlights, and the thread
+ * appears in Review → Comments where it can be replied to, resolved, or deleted. No
+ * comment body lives in the document — only the anchor mark and a thin snapshot.
+ */
+function useInMemoryCommentSource(): void {
+  // Register on first render (before the editor gates its surfaces), tear down on
+  // unmount so it does not leak into the other stories (the registry is a singleton).
+  useState(() => {
+    const threads = new Map<string, Thread>();
+    let seq = 0;
+    const now = () => "just now";
+    registerCommentSource({
+      create: async (anchor, body) => {
+        seq += 1;
+        const thread: Thread = {
+          author: { id: "me", name: "You" },
+          body,
+          createdAt: now(),
+          excerpt: anchor.excerpt,
+          id: `c${seq}`,
+          replies: [],
+          resolved: false,
+          updatedAt: now(),
+        };
+        threads.set(thread.id, thread);
+        return thread;
+      },
+      id: "comments",
+      load: async () => [...threads.values()],
+      remove: async (id) => {
+        threads.delete(id);
+      },
+      reply: async (id, body) => {
+        const thread = threads.get(id)!;
+        const next: Thread = {
+          ...thread,
+          replies: [
+            ...thread.replies,
+            {
+              author: { id: "me", name: "You" },
+              body,
+              createdAt: now(),
+              id: `r${seq++}`,
+            },
+          ],
+        };
+        threads.set(id, next);
+        return next;
+      },
+      resolve: async (id) => threads.get(id) ?? null,
+      setResolved: async (id, resolved) => {
+        const thread = threads.get(id);
+        if (thread) threads.set(id, { ...thread, resolved });
+      },
+      update: async () => {},
+    });
+    return null;
+  });
+  useEffect(() => () => unregisterCommentSource("comments"), []);
+}
+
+export const DockComments: Story = () => {
+  useInMemoryCommentSource();
+  const store = useOutlineStore();
+  return (
+    <div style={{ height: 520, maxWidth: 980 }}>
+      <OwnedModelEditor store={store} viewportHeight={460} />
+      <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
+        Comments (docs/027 §7): a fake in-memory comment source is registered,
+        so the <strong>Comments</strong> pane and the flyout <em>Comment</em>{" "}
+        action appear (§7.7). Select text, choose Comment, and write one — the
+        host creates the thread, a mark anchors it, and it shows in Review →
+        Comments (reply, resolve, delete, jump). Unregister the source and it
+        all vanishes.
       </p>
     </div>
   );

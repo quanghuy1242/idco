@@ -90,6 +90,7 @@ await import("./editor/engine-side-panel-spi.test");
 await import("./editor/engine-insights-pane.test");
 await import("./editor/engine-collections.test");
 await import("./editor/engine-glossary.test");
+await import("./editor/engine-comments.test");
 await import("./editor/engine-payload-import.test");
 await import("./editor/engine-input-affordances.test");
 await import("./editor/engine-phase9-affordances.test");

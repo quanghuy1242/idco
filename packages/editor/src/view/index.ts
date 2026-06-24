@@ -145,6 +145,22 @@ export {
   unregisterDocumentCollection,
   type DocumentCollectionDefinition,
 } from "./spi";
+// Comment Source SPI (docs/027 §7.1): the docs/026 sibling for host-owned annotation
+// threads. A deployment registers one source with thread capabilities; the editor owns
+// the anchor mark + snapshot, the host owns the conversation. No source = no comments.
+export {
+  activeCommentSource,
+  getCommentSource,
+  listCommentSources,
+  registerCommentSource,
+  unregisterCommentSource,
+  type Comment,
+  type CommentAnchor,
+  type CommentAuthor,
+  type CommentSnapshot,
+  type CommentSource,
+  type Thread,
+} from "./spi";
 export { sanitizeHtmlToCompat } from "./paste-html";
 export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
 export {

@@ -34,6 +34,7 @@ import {
   type EditorStore,
 } from "../../../core";
 import {
+  activeCommentSource,
   getDocumentCollection,
   registerCommand,
   registerDocumentCollection,
@@ -43,6 +44,8 @@ import {
   type CommandRenderContext,
 } from "../../spi";
 import {
+  CommentAddPopover,
+  CommentsPane,
   GlossaryAddPopover,
   GlossaryPane,
   OutlinePane,
@@ -543,6 +546,46 @@ export function registerBuiltInCommands(): void {
     kind: "popover",
     label: "Add to glossary",
     render: (ctx) => <GlossaryAddPopover ctx={ctx} />,
+    slot: "review.panels",
+    surfaces: { flyout: "primary", ribbon: "primary" },
+  });
+
+  // --- Review: Comments (docs/027 §7) -----------------------------------------
+  // Host-owned (docs/027 §2.1): everything here gates on a registered comment source
+  // (§7.7). The editor ships none, so by default there are no comments — a deployment
+  // registers a source to light up the pane and the add action. The Review tab still
+  // shows for Insights when comments are absent.
+  registerSidePanel({
+    iconName: "MessageSquare",
+    id: "comments",
+    isAvailable: () => activeCommentSource() !== undefined,
+    render: ({ reveal, store }) => (
+      <CommentsPane reveal={reveal} store={store} />
+    ),
+    title: "Comments",
+  });
+  registerCommand({
+    group: "panel",
+    icon: "MessageSquare",
+    id: "review.comments",
+    isAvailable: () => activeCommentSource() !== undefined,
+    kind: "button",
+    label: "Comments",
+    run: (ctx) => ctx.panelHost?.toggle("comments"),
+    slot: "review.panels",
+    surfaces: { ribbon: "primary" },
+  });
+  // Comment add: the selection-first add action (docs/027 §7.1/§9.1), primary in the
+  // flyout, present in the Review ribbon; greyed without a selection (not removed).
+  registerCommand({
+    group: "annotate",
+    icon: "MessageSquare",
+    id: "comment.add",
+    isAvailable: () => activeCommentSource() !== undefined,
+    isDisabled: (ctx) => !ctx.selection.hasSelection,
+    kind: "popover",
+    label: "Comment",
+    render: (ctx) => <CommentAddPopover ctx={ctx} />,
     slot: "review.panels",
     surfaces: { flyout: "primary", ribbon: "primary" },
   });

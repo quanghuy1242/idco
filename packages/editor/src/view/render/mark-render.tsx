@@ -84,10 +84,26 @@ function renderLinkMark({
   );
 }
 
-/** The comment mark renders as an id-carrying span (live highlight lands in docs/027 P4). */
+/**
+ * The comment mark (docs/027 §7.5): no longer the inert span of §3.3 — a live, visible
+ * highlight over the anchored range, carrying the thread id (`attrs.thread`) so the
+ * Comments pane can find and jump to it. The thin snapshot the mark also stores
+ * (`attrs.snapshot`, §7.3) lets the reader paint a margin note with no host call. Full
+ * resolved-state dimming from live thread state flowing into the render is the one
+ * remaining view slice (§7.5); the pane already reflects resolved/unresolved.
+ */
 function renderAnnotationMark({ mark, child, key }: MarkRenderArgs): ReactNode {
+  const thread = mark.attrs?.thread;
   return (
-    <span key={key} data-engine-mark={mark.kind} data-engine-mark-id={mark.id}>
+    <span
+      key={key}
+      className="bg-warning/20 [box-decoration-break:clone]"
+      data-engine-comment-thread={
+        typeof thread === "string" ? thread : undefined
+      }
+      data-engine-mark={mark.kind}
+      data-engine-mark-id={mark.id}
+    >
       {child}
     </span>
   );

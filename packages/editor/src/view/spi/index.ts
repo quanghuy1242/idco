@@ -30,3 +30,4 @@ export * from "./command-surface";
 export * from "./toolbar-layout";
 export * from "./side-panel-registry";
 export * from "./document-collection-registry";
+export * from "./comment-source-registry";

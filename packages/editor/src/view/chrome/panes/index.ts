@@ -12,3 +12,5 @@ export * from "./statistics-pane";
 export * from "./text-stats";
 export * from "./glossary";
 export * from "./glossary-pane";
+export * from "./comments";
+export * from "./comments-pane";
