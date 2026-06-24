@@ -77,8 +77,9 @@
   - [16.6 Phase 4 — Comment Source SPI And Comment Model](#166-phase-4--comment-source-spi-and-comment-model)
   - [16.7 Phase 5 — Accessibility And Broken References](#167-phase-5--accessibility-and-broken-references)
   - [16.8 Phase 6 — Annotation Interaction](#168-phase-6--annotation-interaction)
-  - [16.9 Phase 7 — Reserved](#169-phase-7--reserved)
-  - [16.10 Sequencing Rationale](#1610-sequencing-rationale)
+  - [16.9 Phase 7 — Mark-Kind SPI And Dock Handle](#169-phase-7--mark-kind-spi-and-dock-handle)
+  - [16.10 Phase 8 — Reserved](#1610-phase-8--reserved)
+  - [16.11 Sequencing Rationale](#1611-sequencing-rationale)
 
 ## 1. Purpose And Scope
 
@@ -529,11 +530,25 @@ This is **SPI/seam work, not bespoke wiring**:
 
 The reader half is **docs/015 §12** (read-only `<abbr title>` for glossary, snapshot-only highlight/margin note for comments, never a host call) and is built with the reader extraction, not here. *Acceptance:* clicking a glossary word reads its definition and can open the Glossary pane focused on that term; placing the caret in a commented range surfaces a chip that opens the Comments pane focused on that thread (clicking the commented *text* never opens a thread); and `panelHost.open(paneId, focusId)` reliably reveals + rings the target in the pane.
 
-### 16.9 Phase 7 — Reserved
+### 16.9 Phase 7 — Mark-Kind SPI And Dock Handle
+
+> Status: implemented. The question this answers: of everything P1–P6 added, which depth is host-reachable and which was internal-only? The audit found the *Review surfaces* (panes, collections, comment sources, commands, command-routing) were already a proper SPI, but the *annotation primitive* was not — so this phase makes it one, and pointedly does **not** turn the interaction into an SPI (see the restraint note).
+
+Two host-facing gaps, both opened deliberately small:
+
+**Mark-kind SPI.** `TextMarkKind` was a closed union, so `registerMark` could only restyle the 11 built-ins, not introduce a new annotation kind; and segmentation hardcoded `IDENTITY_MARKS = Set(["link","comment","glossary"])`. Now: `TextMarkKind` carries the `(string & {})` arm (the same openness nodes have), and the identity set is registry-driven — `MarkDefinition.identity?: boolean`, which `registerMark` propagates into the core `registerIdentityMark`. So a host ships a genuinely new data-bearing annotation kind in one call: `registerMark({ kind: "citation", render, identity: true })`. It renders (its `render`), segments correctly (id/attrs keep adjacent runs apart), applies through the already-generic `add-ref-mark` command, and is interactive through a custom `render` (no new hook needed — see restraint). The built-in glossary/comment now declare `identity: true` themselves, so they are instances of the SPI, not privileged kinds.
+
+**Dock handle.** Registering a pane was already an SPI (`registerSidePanel`), but *opening* one was reachable only from a command's `ctx.panelHost`. The editor handle the host already holds now carries `openPanel(paneId, focusId?)` / `closePanel()`, so host code outside the command system (a host button, a custom mark's `onClick`) can drive the dock — the imperative twin of `ctx.panelHost.open`.
+
+**Restraint — what was deliberately *not* turned into an SPI.** Mark *interaction* (click/caret → read/route) is **not** an SPI and should not be: a custom `render` already returns interactive React, and the host owns the `store`, so click handlers/popovers/affordances are host-authorable without privileged model access. Adding an "interaction descriptor" would be ceremony around what `render` already does. Likewise the bake index keeps its built-in comment/glossary rollup rather than growing a per-kind ref-attr registry — a host kind's pane derives occurrences from the snapshot (the glossary pane already shows the pattern). The friction that remains — a host threads its `store`/`openPanel` into its own interactive render via its own context — is *kept on purpose*: the mark `render` is the shared editor↔reader (RSC-safe) component (docs/015), so editor-only deps must stay out of it. The lesson recorded: find the *small* core hook that unlocks a feature class (an open union + one `identity` flag), not an SPI for every behavior.
+
+*Acceptance:* a host registers a new mark kind that renders, segments (adjacent identity runs stay separate), and applies via `add-ref-mark`, without editing the editor package; `editorHandle.openPanel(id, focusId)` opens the dock focused on a pane from outside the command system; and the mark `render` stays free of editor-only context so it remains reader-safe.
+
+### 16.10 Phase 8 — Reserved
 
 Track-changes / suggested edits and AI-proposed changes (§9.7). Not built. The seam is already stated: a suggested edit is an annotation on a range with a thread and an accepted/resolved state — the comment model's shape — so when it is designed it extends the annotation/thread model and registers as another dock pane, rather than growing a parallel mechanism.
 
-### 16.10 Sequencing Rationale
+### 16.11 Sequencing Rationale
 
 Two ordering calls carry the phasing and are worth restating.
 

@@ -100,6 +100,8 @@ export {
   runBakeWorkerJob,
 } from "./bake";
 export {
+  registerIdentityMark,
+  isIdentityMark,
   resolveLeafMarks,
   segmentLeaf,
   segmentText,

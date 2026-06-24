@@ -115,8 +115,27 @@ export function segmentText(
   return segments;
 }
 
-/** Marks whose identity (not just kind) distinguishes adjacent segments. */
-const IDENTITY_MARKS = new Set<TextMarkKind>(["link", "comment", "glossary"]);
+/**
+ * Mark kinds whose *identity* (not just kind) distinguishes adjacent segments — a
+ * data-bearing mark like `link`/`comment`/`glossary`, where two adjacent runs must
+ * stay separate elements when their id/attrs differ. Seeded with the built-ins so the
+ * standard editor + the pure-core path work with no registration; a host opens a new
+ * data-bearing kind by calling `registerIdentityMark` (which its `registerMark`
+ * propagates, docs/027 §16 P7). This is the one core hook the mark-kind SPI needs —
+ * deliberately a small set, not a per-kind descriptor: segmentation only needs to know
+ * *whether* identity matters, nothing more.
+ */
+const IDENTITY_MARKS = new Set<string>(["link", "comment", "glossary"]);
+
+/** Register a data-bearing mark kind so its id/attrs distinguish segments (§16 P7). */
+export function registerIdentityMark(kind: string): void {
+  IDENTITY_MARKS.add(kind);
+}
+
+/** Whether a kind's identity distinguishes adjacent segments. */
+export function isIdentityMark(kind: string): boolean {
+  return IDENTITY_MARKS.has(kind);
+}
 
 /**
  * A stable key for a segment's covering set: kind for format marks, kind + id

@@ -5,9 +5,15 @@
  * behavior (one pane visible, closed renders nothing, Outline consumes the index).
  */
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { createRef } from "react";
+import { act, render } from "@testing-library/react";
+import {
+  OwnedModelEditor,
+  type OwnedModelEditorHandle,
+} from "../../packages/editor/src/view";
 import {
   createEditorStore,
+  createEngineScheduler,
   createIdAllocator,
   makeTextNode,
   type DocumentIndex,
@@ -254,5 +260,34 @@ describe("the dock (docs/027 §8.1/§8.3)", () => {
     expect(
       container.querySelector("nav[aria-label='Document outline']"),
     ).not.toBeNull();
+  });
+});
+
+describe("editor handle drives the dock (docs/027 §16 P7)", () => {
+  it("openPanel opens the dock on a pane; closePanel hides it", () => {
+    const ref = createRef<OwnedModelEditorHandle>();
+    const { container } = render(
+      <OwnedModelEditor
+        forcePolyfill
+        ref={ref}
+        scheduler={createEngineScheduler({ publishDashboard: false })}
+        store={paragraphStore("hello")}
+        virtualize={false}
+      />,
+    );
+    // Closed by default.
+    expect(container.querySelector("[data-engine-side-panel-dock]")).toBeNull();
+
+    act(() => ref.current!.openPanel("outline"));
+    const dock = container.querySelector("[data-engine-side-panel-dock]");
+    expect(dock).not.toBeNull();
+    expect(
+      dock!
+        .querySelector("[data-engine-side-panel]")
+        ?.getAttribute("data-engine-side-panel"),
+    ).toBe("outline");
+
+    act(() => ref.current!.closePanel());
+    expect(container.querySelector("[data-engine-side-panel-dock]")).toBeNull();
   });
 });

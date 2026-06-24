@@ -166,9 +166,22 @@ const BUILT_IN_MARKS: readonly MarkDefinition[] = [
   }),
   elementMark("subscript", "sub", 8),
   elementMark("superscript", "sup", 9),
-  { kind: "link", nestingRank: 0, render: renderLinkMark },
-  { kind: "comment", nestingRank: 1, render: renderAnnotationMark },
-  { kind: "glossary", nestingRank: 2, render: renderGlossaryMark },
+  // The three data-bearing built-ins declare `identity` (their id/attrs distinguish
+  // segments); core seeds the same set, so this is consistency + the propagation path
+  // a host kind rides (docs/027 §16 P7).
+  { identity: true, kind: "link", nestingRank: 0, render: renderLinkMark },
+  {
+    identity: true,
+    kind: "comment",
+    nestingRank: 1,
+    render: renderAnnotationMark,
+  },
+  {
+    identity: true,
+    kind: "glossary",
+    nestingRank: 2,
+    render: renderGlossaryMark,
+  },
 ];
 
 let builtInMarksRegistered = false;

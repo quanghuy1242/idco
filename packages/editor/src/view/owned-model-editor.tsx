@@ -79,6 +79,15 @@ export type OwnedModelEditorProps = OwnedModelEditorViewProps & {
 export type OwnedModelEditorHandle = OwnedModelEditorViewHandle & {
   /** Open the in-editor find bar (the Ctrl/Cmd+F replacement). */
   readonly openFind: () => void;
+  /**
+   * Open the side-panel dock on a registered pane, optionally focused on an item
+   * (docs/027 §16 P7). The host already holds this handle, so this is how host code
+   * outside the command system (a host button, a custom mark's onClick) drives the
+   * dock — the imperative twin of a command's `ctx.panelHost.open`.
+   */
+  readonly openPanel: (paneId: string, focusId?: string) => void;
+  /** Close the side-panel dock. */
+  readonly closePanel: () => void;
 };
 
 export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
@@ -306,7 +315,9 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
       get getEditorHandle() {
         return viewRef.current!.getEditorHandle;
       },
+      closePanel: () => panelHost.close(),
       openFind: () => find.open(),
+      openPanel: (paneId, focusId) => panelHost.open(paneId, focusId),
       get placeCaretAt() {
         return viewRef.current!.placeCaretAt;
       },
@@ -320,7 +331,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
         return viewRef.current!.serializeSelection;
       },
     }),
-    [find],
+    [find, panelHost],
   );
 
   // Autosave is always called (hooks rule); it no-ops until a handle exists and

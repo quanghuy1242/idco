@@ -161,6 +161,14 @@ export function selectionsEqual(
   return a.scope === other.scope && a.index === other.index;
 }
 
+/**
+ * Inline mark kinds. The built-in literals keep autocomplete and exhaustiveness for
+ * the engine's own marks; the `(string & {})` arm opens the set to registry-driven
+ * kinds (a host's `registerMark`, docs/027 §16 P7) without dropping the literals —
+ * the same openness `StructuralNodeType` has for nodes. A registered kind is a real
+ * mark without being named here; whether its id/attrs distinguish segments is decided
+ * by the identity registry (`registerIdentityMark`, marks.ts), not by this union.
+ */
 export type TextMarkKind =
   | "bold"
   | "italic"
@@ -172,7 +180,8 @@ export type TextMarkKind =
   | "highlight"
   | "link"
   | "comment"
-  | "glossary";
+  | "glossary"
+  | (string & {});
 
 export type MarkBoundary = {
   readonly anchor: TextAnchor;

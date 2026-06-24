@@ -193,21 +193,30 @@ export function buildDocumentIndex(
         });
       }
       for (const mark of node.marks) {
-        if (mark.kind !== "comment" && mark.kind !== "glossary") continue;
-        const from = resolveBoundaryOffset(node.content, mark.from);
-        const to = resolveBoundaryOffset(node.content, mark.to);
-        // The mark's reference id (docs/027 §4.1): a glossary mark points at a term,
-        // a comment mark at a host thread. Carried so a pane can join occurrences to
-        // their term/thread without re-walking the document.
-        const refAttr =
-          mark.kind === "glossary" ? mark.attrs?.term : mark.attrs?.thread;
-        comments.push({
-          id: mark.id,
-          kind: mark.kind,
-          node: id,
-          ...(typeof refAttr === "string" ? { ref: refAttr } : {}),
-          text: content.slice(from, to),
-        });
+        // The index rolls up the two built-in annotation kinds (docs/027 §5.4); a host
+        // mark kind (the open `TextMarkKind`, §16 P7) is intentionally *not* indexed
+        // here — its pane derives occurrences from the snapshot — so this core/worker
+        // pass keeps no per-kind ref-attr registry (the SPI-restraint call, §16 P7).
+        if (mark.kind === "comment" || mark.kind === "glossary") {
+          // A literal kind: the open `TextMarkKind` union (string & {}) defeats
+          // equality narrowing, so derive it explicitly rather than cast.
+          const kind: "comment" | "glossary" =
+            mark.kind === "glossary" ? "glossary" : "comment";
+          const from = resolveBoundaryOffset(node.content, mark.from);
+          const to = resolveBoundaryOffset(node.content, mark.to);
+          // The mark's reference id (docs/027 §4.1): a glossary mark points at a term,
+          // a comment mark at a host thread. Carried so a pane can join occurrences to
+          // their term/thread without re-walking the document.
+          const refAttr =
+            kind === "glossary" ? mark.attrs?.term : mark.attrs?.thread;
+          comments.push({
+            id: mark.id,
+            kind,
+            node: id,
+            ...(typeof refAttr === "string" ? { ref: refAttr } : {}),
+            text: content.slice(from, to),
+          });
+        }
       }
     } else if (node.kind === "object") {
       const plain = registry.get(node.type)?.plainText?.(node.data);
