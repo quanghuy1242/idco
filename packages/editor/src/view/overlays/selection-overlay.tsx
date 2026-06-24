@@ -36,6 +36,7 @@ import {
   ENGINE_OBJECT_CHROME_CSS,
   ENGINE_SURFACE_SUPPRESS_CSS,
   ENGINE_TYPOGRAPHY_CSS,
+  RICH_TEXT_TYPOGRAPHY_CSS,
   visuallyHiddenStyle,
 } from "../styles";
 import type { EditContextLike, RenderRegistry, SerializedRect } from "../types";
@@ -452,6 +453,9 @@ export function SelectionOverlay(props: {
       <style>
         {CARET_BLINK_KEYFRAMES +
           ENGINE_SURFACE_SUPPRESS_CSS +
+          // The reader's `.rt-*` typography contract (docs/015 §4.3): the single source of
+          // prose appearance, so the live editable host and the reader render identically.
+          RICH_TEXT_TYPOGRAPHY_CSS +
           ENGINE_TYPOGRAPHY_CSS +
           ENGINE_OBJECT_CHROME_CSS}
       </style>

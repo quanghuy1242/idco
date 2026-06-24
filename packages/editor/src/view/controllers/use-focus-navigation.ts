@@ -124,12 +124,30 @@ export function useFocusNavigation(args: {
         return;
       }
       const offset = prefixOffset(index);
-      // First jump uses the seeded/measured model offset; the measure effect then
-      // corrects it to the target's real layout position, iterating until stable
-      // (AC3) — and content-aware seeds make that converge faster (docs/025 §5.4).
+      // Clamp the estimate jump to the scroller's real max scroll. Revealing a near-bottom
+      // block in a document that only just overflows would otherwise seek past the end: the
+      // DOM `scrollTop` clamps, but the virtual-window *state* (`setScrollTop`) would keep
+      // the unclamped value, so the window computes its range from a position beyond the
+      // content — mounting a band past the last block and leaving a blank gap at the top
+      // (the Outline "half the document vanished" bug). The convergence effect then can't
+      // recover because the target never mounted at that bogus position. `scrollHeight`
+      // reflects the full estimated height (the virtual spacers sum to the offset-model
+      // total), so this is the true reachable maximum.
+      const scroller = rootRef.current;
+      // Only clamp when real layout is present (`scrollHeight > 0`); with no layout engine
+      // (jsdom, or a pre-paint frame) trust the model offset unchanged, so headless behavior
+      // and the first estimate jump are untouched.
+      const max =
+        scroller && scroller.scrollHeight > 0
+          ? Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+          : offset;
+      const target = Math.max(0, Math.min(offset, max));
+      // The measure effect then corrects `target` to the block's real layout position,
+      // iterating until stable (AC3); content-aware seeds make that converge fast (docs/025
+      // §5.4).
       pendingScrollRef.current = { attempts: 0, id };
-      if (rootRef.current) rootRef.current.scrollTop = offset;
-      setScrollTop(offset);
+      if (scroller) scroller.scrollTop = target;
+      setScrollTop(target);
     },
     [
       store,

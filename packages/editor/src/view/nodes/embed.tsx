@@ -9,7 +9,7 @@
  * The title is an author-local field. Editing flows through the default config
  * popover; the resting render frames the URL with the shared `RichTextEmbed`.
  */
-import { RichTextEmbed } from "@quanghuy1242/idco-ui";
+import { RichTextEmbed } from "@quanghuy1242/idco-reader";
 import { type NodeView } from "../spi";
 import { asRecord, stringField } from "../object-data";
 import { objectStatusStyle } from "../styles";

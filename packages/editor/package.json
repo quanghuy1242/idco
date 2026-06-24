@@ -17,8 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@quanghuy1242/idco-content-renderer": "workspace:^",
     "@quanghuy1242/idco-lib": "workspace:^",
+    "@quanghuy1242/idco-reader": "workspace:^",
     "@quanghuy1242/idco-ui": "workspace:^",
     "react-aria-components": "1.17.0"
   },

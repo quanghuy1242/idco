@@ -11,7 +11,7 @@
  * is unchanged: it still paints the shared `RichTextPostReference` card from the
  * baked snapshot, which the reader uses too.
  */
-import { RichTextPostReference } from "@quanghuy1242/idco-ui";
+import { RichTextPostReference } from "@quanghuy1242/idco-reader";
 import { type NodeView } from "../spi";
 import { asRecord, stringField } from "../object-data";
 

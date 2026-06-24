@@ -37,6 +37,11 @@ type ConfirmDialogProps = {
   readonly description?: string;
   readonly confirmLabel?: string;
   readonly cancelLabel?: string;
+  /**
+   * Hide the cancel button, leaving a single action — for a read-only / acknowledge
+   * dialog (a JSON viewer, a preview) where a separate Cancel and Close are redundant.
+   */
+  readonly hideCancel?: boolean;
   readonly variant?: "primary" | "danger";
   readonly size?: ConfirmDialogSize;
   readonly error?: string;
@@ -54,6 +59,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  hideCancel = false,
   variant = "primary",
   size = "md",
   error,
@@ -105,9 +111,11 @@ export function ConfirmDialog({
                 <div className="flex flex-col gap-3 py-2">{children}</div>
               )}
               <div className="modal-action">
-                <Button type="button" variant="secondary" onClick={close}>
-                  {cancelLabel}
-                </Button>
+                {hideCancel ? null : (
+                  <Button type="button" variant="secondary" onClick={close}>
+                    {cancelLabel}
+                  </Button>
+                )}
                 <Button
                   type="submit"
                   variant={variant === "danger" ? "danger" : "primary"}

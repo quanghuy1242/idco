@@ -124,26 +124,14 @@ importers:
         specifier: 4.1.6
         version: 4.1.6(@types/node@25.8.0)(jsdom@29.1.1)(msw@2.14.6(@types/node@25.8.0)(typescript@7.0.1-rc))(vite@8.0.16(@types/node@25.8.0)(jiti@2.7.0)(yaml@2.9.0))
 
-  packages/content-renderer:
-    dependencies:
-      '@quanghuy1242/idco-lib':
-        specifier: workspace:^
-        version: link:../lib
-      '@quanghuy1242/idco-ui':
-        specifier: workspace:^
-        version: link:../ui
-      react:
-        specifier: ^19.0.0
-        version: 19.2.6
-
   packages/editor:
     dependencies:
-      '@quanghuy1242/idco-content-renderer':
-        specifier: workspace:^
-        version: link:../content-renderer
       '@quanghuy1242/idco-lib':
         specifier: workspace:^
         version: link:../lib
+      '@quanghuy1242/idco-reader':
+        specifier: workspace:^
+        version: link:../reader
       '@quanghuy1242/idco-ui':
         specifier: workspace:^
         version: link:../ui
@@ -210,6 +198,18 @@ importers:
       jose:
         specifier: ^6.0.0
         version: 6.2.3
+
+  packages/reader:
+    dependencies:
+      '@quanghuy1242/idco-lib':
+        specifier: workspace:^
+        version: link:../lib
+      '@quanghuy1242/idco-ui':
+        specifier: workspace:^
+        version: link:../ui
+      react:
+        specifier: ^19.0.0
+        version: 19.2.6
 
   packages/ui:
     dependencies:

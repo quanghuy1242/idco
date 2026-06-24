@@ -79,9 +79,9 @@ describe("resting/themed render", () => {
     );
     const root = container.querySelector("[data-engine-resting-document]");
     expect(root?.className).toContain("prose");
-    expect(
-      container.querySelector("[data-engine-object-baked='media']"),
-    ).not.toBeNull();
+    // Resting renders through the reader (docs/028 §4.4): media is the L1 `<figure><img>`,
+    // not the old `data-engine-object-baked` wrapper.
+    expect(container.querySelector("figure img")).not.toBeNull();
     expect(container.textContent).toContain("Body");
   });
 
@@ -109,10 +109,7 @@ describe("resting/themed render", () => {
       <RestingDocument snapshot={store.toSnapshot()} />,
     );
     // The media view rendered a real <img> (not the bare type word), so the
-    // editor at rest and the reader show the actual image (docs/018 §2.11).
-    expect(
-      container.querySelector("[data-engine-object-baked='media']"),
-    ).not.toBeNull();
+    // editor at rest and the reader show the actual image (docs/018 §2.11, docs/028 §4.4).
     expect(container.querySelector("img")?.getAttribute("src")).toBe(
       "/diagram.png",
     );

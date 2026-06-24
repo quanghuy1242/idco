@@ -24,6 +24,26 @@ function isEditorPackageSource(filename) {
   return filename.includes("/packages/editor/src/");
 }
 
+function isReaderPackageSource(filename) {
+  filename = normalizeFilename(filename);
+  return filename.includes("/packages/reader/src/");
+}
+
+// The server-safe layer of the reader (docs/015 §7.5): L1 primitives + the server
+// `<Reader>`/adapter. Must stay RSC-pure — no client import can reach here, or the whole
+// reader collapses back into a client component. The islands (`src/islands/`) are the
+// allowed client zone and are deliberately excluded.
+function isReaderServerSafeSource(filename) {
+  filename = normalizeFilename(filename);
+  return (
+    filename.includes("/packages/reader/src/l1/") ||
+    filename.includes("/packages/reader/src/reader/") ||
+    /\/packages\/reader\/src\/index\.tsx?$/.test(filename)
+  );
+}
+
+var REACT_HOOK_RE = /^use[A-Z]/;
+
 // The legacy Lexical editor was extracted to its own product-neutral package
 // (note.md Legacy extraction track). It is subject to the same @idco boundary,
 // and the Lexical-only update-listener rule moved here with the Lexical code.
@@ -60,7 +80,8 @@ function isIdcoPackageSource(filename) {
     isUiPackageSource(filename) ||
     isLibPackageSource(filename) ||
     isEditorPackageSource(filename) ||
-    isEditorLegacyPackageSource(filename)
+    isEditorLegacyPackageSource(filename) ||
+    isReaderPackageSource(filename)
   );
 }
 
@@ -228,12 +249,101 @@ var engineCoreNoFrameworkRule = {
   },
 };
 
+// docs/015 §7.5 — the L1 purity rule: nothing in the reader's server-safe layer (L1 +
+// the server `<Reader>`) may turn it into a client module, or the whole reader stops being
+// a Server Component (silent bundle bloat / a broken server build, §13). The mirror of the
+// engine-core purity rule (010 G3). Scope of what THIS lint enforces (single-file, static):
+// no `"use client"` directive; no React hook used by named import OR `React.useX` member
+// access; no import of the client islands entry; no import of the client-heavy `@idco/ui`
+// barrel. It deliberately does NOT chase a transitive `"use client"` in some third module
+// or a runtime browser-global access — those are beyond a single-file lint and are caught
+// instead by the RSC bundler at the consumer and by review.
+var readerL1PurityRule = {
+  meta: { type: "problem", docs: { description: "reader L1 (and the server <Reader>) stays RSC-safe: no client module markers reach it (docs/015 §7.5)" } },
+  create: function (context) {
+    var filename = context.filename || context.physicalFilename || "";
+    if (!isReaderServerSafeSource(filename)) return {};
+
+    // Local name React is bound to (default/namespace import), so `React.useState` etc.
+    // can be flagged, not just `import { useState } from "react"`.
+    var reactLocalNames = [];
+
+    function reportDirective(node) {
+      var body = node.body || [];
+      for (var i = 0; i < body.length; i++) {
+        var stmt = body[i];
+        if (
+          stmt &&
+          stmt.type === "ExpressionStatement" &&
+          stmt.expression &&
+          stmt.expression.type === "Literal" &&
+          stmt.expression.value === "use client"
+        ) {
+          context.report({ node: stmt, message: "reader L1 / server <Reader> must not be a client module: remove the \"use client\" directive (docs/015 §7.5). Interactive code belongs in src/islands/." });
+        }
+      }
+    }
+
+    return {
+      Program: reportDirective,
+      ImportDeclaration: function (node) {
+        var spec = extractImportSource(node);
+        if (!spec) return;
+        if (/(^|\/)islands(\/|$)/.test(spec)) {
+          context.report({ node: node.source, message: "reader L1 / server <Reader> must not import the client islands (docs/015 §7.5); the island seam is the `renderIsland` callback the consumer supplies." });
+          return;
+        }
+        if (spec === "@idco/ui" || spec === "@quanghuy1242/idco-ui") {
+          context.report({ node: node.source, message: "reader L1 / server <Reader> must not import @idco/ui (client-heavy); it would taint the server graph (docs/015 §7.5)." });
+          return;
+        }
+        if (spec === "react" && node.specifiers) {
+          for (var i = 0; i < node.specifiers.length; i++) {
+            var s = node.specifiers[i];
+            // `import { useState } from "react"` — a named hook import.
+            if (
+              s.type === "ImportSpecifier" &&
+              s.imported &&
+              typeof s.imported.name === "string" &&
+              REACT_HOOK_RE.test(s.imported.name)
+            ) {
+              context.report({ node: s, message: "reader L1 / server <Reader> must not use a React hook (" + s.imported.name + "); primitives are pure node→DOM (docs/015 §7.5)." });
+            }
+            // `import React from "react"` / `import * as React from "react"` — track the
+            // local name so member access `React.useX` below is flagged too.
+            if (
+              (s.type === "ImportDefaultSpecifier" || s.type === "ImportNamespaceSpecifier") &&
+              s.local &&
+              typeof s.local.name === "string"
+            ) {
+              reactLocalNames.push(s.local.name);
+            }
+          }
+        }
+      },
+      MemberExpression: function (node) {
+        if (
+          node.object &&
+          node.object.type === "Identifier" &&
+          reactLocalNames.indexOf(node.object.name) !== -1
+        ) {
+          var prop = memberPropertyName(node.property);
+          if (typeof prop === "string" && REACT_HOOK_RE.test(prop)) {
+            context.report({ node: node, message: "reader L1 / server <Reader> must not use a React hook (" + node.object.name + "." + prop + "); primitives are pure node→DOM (docs/015 §7.5)." });
+          }
+        }
+      },
+    };
+  },
+};
+
 var plugin = {
   meta: { name: "architecture" },
   rules: {
     "editor-no-direct-update-listener": editorNoDirectUpdateListenerRule,
     "engine-core-no-framework": engineCoreNoFrameworkRule,
     "idco-package-boundary": idcoPackageBoundaryRule,
+    "reader-l1-purity": readerL1PurityRule,
     "ui-no-side-effect-css": uiNoSideEffectCssRule,
     "ui-no-native-dialog": uiNoNativeDialogRule,
     "ui-no-neutral-button-class": uiNoNeutralButtonClassRule,

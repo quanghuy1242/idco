@@ -51,7 +51,12 @@ import { requestFrame } from "../raf";
 import { listTabHandlers } from "../spi";
 import { leafHasMarks, renderLeafMarks } from "./mark-render";
 import { ariaLabelForLeaf } from "../overlays";
-import { blockStyleFor, listItemStyle, type ListItemMeta } from "../styles";
+import {
+  blockStyleFor,
+  listItemStyle,
+  richTextLeafClass,
+  type ListItemMeta,
+} from "../styles";
 import type {
   CharacterBoundsUpdateEventLike,
   EditContextConstructor,
@@ -661,6 +666,9 @@ export function EngineTextBlock(props: {
     <div
       aria-label={ariaLabelForLeaf(node)}
       aria-multiline="true"
+      // The shared `.rt-*` typography class (docs/015 §4.3): the editable host wears the
+      // same class the reader's L1 primitive emits, so prose appearance is single-sourced.
+      className={richTextLeafClass(node)}
       data-engine-block-id={node.id}
       data-engine-block-type={node.type}
       data-engine-heading={

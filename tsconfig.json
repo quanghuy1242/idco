@@ -17,7 +17,12 @@
       "@quanghuy1242/idco-ui": ["./packages/ui/src/index.ts"],
       "@idco/lib": ["./packages/lib/src/index.ts"],
       "@quanghuy1242/idco-lib": ["./packages/lib/src/index.ts"],
-      "@idco/content-renderer": ["./packages/content-renderer/src/index.tsx"],
+      "@idco/reader": ["./packages/reader/src/index.ts"],
+      "@quanghuy1242/idco-reader": ["./packages/reader/src/index.ts"],
+      "@idco/reader/islands": ["./packages/reader/src/islands/index.ts"],
+      "@quanghuy1242/idco-reader/islands": [
+        "./packages/reader/src/islands/index.ts"
+      ],
       "@idco/editor": ["./packages/editor/src/index.ts"],
       "@quanghuy1242/idco-editor": ["./packages/editor/src/index.ts"],
       "@idco/editor-legacy": ["./packages/editor-legacy/src/index.ts"],

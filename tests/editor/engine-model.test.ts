@@ -15,15 +15,18 @@
  *   machinery.
  */
 import { render, screen } from "@testing-library/react";
-import { RichTextRenderer } from "@idco/content-renderer";
+// content-renderer retired (docs/015 §7.4); the server `<Reader>` is its drop-in.
+import { Reader as RichTextRenderer } from "@quanghuy1242/idco-reader";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
   BlockRegistry,
   ROOT_NODE_ID,
   TEXT_FORMAT,
+  bakeObjectData,
   characterIdsForSlice,
   compatFromEditorStore,
+  createDefaultBlockRegistry,
   createEditorStore,
   createEditorStoreFromCompat,
   createIdAllocator,
@@ -457,7 +460,27 @@ describe("owned-model editor core", () => {
 
     const golden = compatFromEditorStore(store);
     expect(golden).toEqual(GOLDEN_COMPAT_OUTPUT);
-    render(createElement(RichTextRenderer, { value: golden }));
+    // The reader renders the NATIVE snapshot now (docs/028 §4.4), not the compat projection.
+    // Bake objects for display (the reader reads baked payloads; the editor bakes here).
+    const registry = createDefaultBlockRegistry();
+    const readerSnapshot = store.toSnapshot();
+    const bakedBlocks: Record<string, EditorNode> = {};
+    for (const [id, node] of Object.entries(readerSnapshot.body.blocks)) {
+      bakedBlocks[id] =
+        node.kind === "object" && !node.baked
+          ? ({
+              ...node,
+              baked:
+                bakeObjectData(registry, node.type, node.data).baked ??
+                undefined,
+            } as EditorNode)
+          : node;
+    }
+    const baked = {
+      ...readerSnapshot,
+      body: { ...readerSnapshot.body, blocks: bakedBlocks },
+    };
+    render(createElement(RichTextRenderer, { value: baked }));
     expect(screen.getByText(/Owned model text/)).toBeInTheDocument();
     expect(screen.getByText("Nested child").closest("ul")).not.toBeNull();
     expect(screen.getByText("const answer = 42;")).toBeInTheDocument();

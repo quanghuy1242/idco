@@ -229,6 +229,16 @@ export function getNodeView(type: string): NodeView | undefined {
   return NODE_VIEWS.get(type);
 }
 
+/**
+ * Every registered node view (docs/028 §4.4). The editor's `RestingDocument` enumerates
+ * these to hand the shared reader dispatch a per-type resting renderer for any *custom*
+ * node — so a node registered via `registerNode` renders in the editor preview through the
+ * same dispatch the published reader uses, with no per-node edit to the renderer.
+ */
+export function listNodeViews(): readonly NodeView[] {
+  return [...NODE_VIEWS.values()];
+}
+
 /** Every registered node that offers an insert affordance (docs/016 §6.2, AC9). */
 export function listInsertableNodes(): readonly (NodeView & {
   insert: NonNullable<NodeView["insert"]>;

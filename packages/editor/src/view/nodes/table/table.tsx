@@ -22,7 +22,7 @@ import {
   RichTextTableRow,
   readableTextColor,
   verticalAlignClass,
-} from "@quanghuy1242/idco-ui";
+} from "@quanghuy1242/idco-reader";
 import { type JsonValue, type StructuralNode } from "../../../core";
 import { tabWithinTable } from "../../../core/table/operations";
 import { type StructuralNodeView } from "../../spi";

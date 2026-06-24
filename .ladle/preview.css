@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @source "../packages/ui/src/**/*.{tsx,ts}";
 @source "../packages/editor/src/**/*.{tsx,ts}";
-@source "../packages/content-renderer/src/**/*.{tsx,ts}";
+@source "../packages/reader/src/**/*.{tsx,ts}";
 @source "../stories/**/*.{tsx,ts}";
 @plugin "daisyui";
 

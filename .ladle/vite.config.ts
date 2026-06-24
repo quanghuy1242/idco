@@ -8,8 +8,11 @@ const uiSrc = fileURLToPath(
 const libSrc = fileURLToPath(
   new URL("../packages/lib/src/index.ts", import.meta.url),
 );
-const contentRendererSrc = fileURLToPath(
-  new URL("../packages/content-renderer/src/index.tsx", import.meta.url),
+const readerSrc = fileURLToPath(
+  new URL("../packages/reader/src/index.ts", import.meta.url),
+);
+const readerIslandsSrc = fileURLToPath(
+  new URL("../packages/reader/src/islands/index.ts", import.meta.url),
 );
 const editorSrc = fileURLToPath(
   new URL("../packages/editor/src/index.ts", import.meta.url),
@@ -53,7 +56,12 @@ export default defineConfig({
       { find: "@quanghuy1242/idco-ui", replacement: uiSrc },
       { find: "@idco/lib", replacement: libSrc },
       { find: "@quanghuy1242/idco-lib", replacement: libSrc },
-      { find: "@idco/content-renderer", replacement: contentRendererSrc },
+      {
+        find: "@quanghuy1242/idco-reader/islands",
+        replacement: readerIslandsSrc,
+      },
+      { find: "@quanghuy1242/idco-reader", replacement: readerSrc },
+      { find: "@idco/reader", replacement: readerSrc },
       { find: "@idco/editor-legacy", replacement: editorLegacySrc },
       {
         find: "@quanghuy1242/idco-editor-legacy",

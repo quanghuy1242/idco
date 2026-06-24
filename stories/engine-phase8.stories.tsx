@@ -9,9 +9,12 @@ import {
   Input,
   type ResourceOption,
 } from "@idco/ui";
+import { Reader } from "@quanghuy1242/idco-reader";
 import {
   OwnedModelEditor,
   RestingDocument,
+  bakeObjectData,
+  createDefaultBlockRegistry,
   createEditorStoreFromCompat,
   importPayloadLexical,
   registerCommand,
@@ -21,11 +24,35 @@ import {
   unregisterCommentSource,
   unregisterDataSource,
   type DataSourcePickerProps,
+  type EditorDocumentSnapshot,
+  type EditorNode,
   type EditorStore,
   type RichTextCompatNode,
   type UploadImage,
 } from "../packages/editor/src";
 import { createInMemoryCommentSource } from "./_fake-comment-source";
+
+// The reader renders baked object payloads (docs/028 §4.1). A live snapshot may carry
+// unbaked imported objects, so bake them on the fly for the Preview — pure, display-only,
+// exactly what the editor's at-rest render does.
+const readerBakeRegistry = createDefaultBlockRegistry();
+function bakeSnapshotForReader(
+  snapshot: EditorDocumentSnapshot,
+): EditorDocumentSnapshot {
+  const blocks: Record<string, EditorNode> = {};
+  for (const [id, node] of Object.entries(snapshot.body.blocks)) {
+    blocks[id] =
+      node.kind === "object" && !node.baked
+        ? ({
+            ...node,
+            baked:
+              bakeObjectData(readerBakeRegistry, node.type, node.data).baked ??
+              undefined,
+          } as EditorNode)
+        : node;
+  }
+  return { ...snapshot, body: { ...snapshot.body, blocks } };
+}
 
 export default {
   title: "Engine / Phase 8",
@@ -682,6 +709,15 @@ export const FullEditor: Story = () => {
   const [saved, setSaved] = useState("clean");
   const [jsonOpen, setJsonOpen] = useState(false);
   const [json, setJson] = useState("");
+  // Preview opens the live document in the server-native read tier (`packages/reader`,
+  // docs/028). `<Reader>` renders the NATIVE `EditorDocumentSnapshot` (`store.toSnapshot()`)
+  // through the same dispatch the editor's at-rest preview uses — never the Lexical-compat
+  // shape (docs/028 §4.4). Objects are baked here for display (the reader reads baked
+  // payloads). The snapshot is captured at click time.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<EditorDocumentSnapshot | null>(
+    null,
+  );
   // Add a "Save" button next to undo/redo through the command SPI (docs/023/024):
   // a `button` command in the persistent `global.history` slot. The `useState`
   // initializer registers it during this story's first render — before the child
@@ -699,6 +735,22 @@ export const FullEditor: Story = () => {
       run: (ctx) => {
         setJson(JSON.stringify(ctx.store.toSnapshot(), null, 2));
         setJsonOpen(true);
+      },
+      slot: "global.history",
+      surfaces: { ribbon: "primary" },
+    });
+    // Preview, registered right after Save so it sits next to it in the same slot
+    // (in-slot order is registration order). It renders the live document through the
+    // server reader (`<Reader>`) inside a modal, from the NATIVE snapshot (docs/028 §8).
+    registerCommand({
+      group: "history",
+      icon: "FileText",
+      id: "story.preview",
+      kind: "button",
+      label: "Preview",
+      run: (ctx) => {
+        setPreviewDoc(bakeSnapshotForReader(ctx.store.toSnapshot()));
+        setPreviewOpen(true);
       },
       slot: "global.history",
       surfaces: { ribbon: "primary" },
@@ -753,6 +805,7 @@ export const FullEditor: Story = () => {
   useEffect(
     () => () => {
       unregisterCommand("story.save");
+      unregisterCommand("story.preview");
       unregisterDataSource("media");
       unregisterDataSource("posts");
       unregisterCommentSource("comments");
@@ -778,6 +831,7 @@ export const FullEditor: Story = () => {
       />
       <ConfirmDialog
         confirmLabel="Close"
+        hideCancel
         onConfirm={() => {}}
         onOpenChange={setJsonOpen}
         open={jsonOpen}
@@ -792,6 +846,23 @@ export const FullEditor: Story = () => {
           readOnly
           value={json}
         />
+      </ConfirmDialog>
+      {/* Preview: render the captured NATIVE snapshot through the server reader
+          (`<Reader>`, packages/reader, docs/028) — the published read tier, not the editor,
+          and the same dispatch the editor's at-rest preview uses. Media/code/divider/tables/
+          callouts all render from their baked payloads via L1; no compat anywhere. */}
+      <ConfirmDialog
+        confirmLabel="Close"
+        hideCancel
+        onConfirm={() => {}}
+        onOpenChange={setPreviewOpen}
+        open={previewOpen}
+        size="xl"
+        title="Preview — rendered by packages/reader"
+      >
+        <div className="max-h-[70vh] overflow-auto p-1">
+          {previewDoc ? <Reader value={previewDoc} /> : null}
+        </div>
       </ConfirmDialog>
       <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
         Try the table: hover it, then use the chrome's cell button (paint

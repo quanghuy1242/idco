@@ -6,9 +6,7 @@
     "declarationMap": true,
     "outDir": "dist",
     "paths": {
-      "@quanghuy1242/idco-content-renderer": [
-        "../content-renderer/dist/index.d.ts"
-      ],
+      "@quanghuy1242/idco-reader": ["../reader/dist/index.d.ts"],
       "@quanghuy1242/idco-lib": ["../lib/dist/index.d.ts"],
       "@quanghuy1242/idco-ui": ["../ui/dist/index.d.ts"]
     }

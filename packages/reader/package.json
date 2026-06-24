@@ -1,5 +1,5 @@
 {
-  "name": "@quanghuy1242/idco-content-renderer",
+  "name": "@quanghuy1242/idco-reader",
   "version": "0.1.19",
   "type": "module",
   "sideEffects": false,
@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./islands": {
+      "types": "./dist/islands/index.d.ts",
+      "default": "./dist/islands/index.js"
     }
   },
   "scripts": {
@@ -17,10 +21,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@quanghuy1242/idco-lib": "workspace:^",
-    "@quanghuy1242/idco-ui": "workspace:^"
+    "@quanghuy1242/idco-lib": "workspace:^"
   },
   "peerDependencies": {
+    "@quanghuy1242/idco-ui": "workspace:^",
     "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@quanghuy1242/idco-ui": {
+      "optional": true
+    }
   }
 }

@@ -31,15 +31,21 @@ export default defineConfig({
         ),
       },
       {
-        find: "@idco/content-renderer",
+        find: "@quanghuy1242/idco-reader/islands",
         replacement: fileURLToPath(
-          new URL("./packages/content-renderer/src/index.tsx", import.meta.url),
+          new URL("./packages/reader/src/islands/index.ts", import.meta.url),
         ),
       },
       {
-        find: "@quanghuy1242/idco-content-renderer",
+        find: "@quanghuy1242/idco-reader",
         replacement: fileURLToPath(
-          new URL("./packages/content-renderer/src/index.tsx", import.meta.url),
+          new URL("./packages/reader/src/index.ts", import.meta.url),
+        ),
+      },
+      {
+        find: "@idco/reader",
+        replacement: fileURLToPath(
+          new URL("./packages/reader/src/index.ts", import.meta.url),
         ),
       },
       {

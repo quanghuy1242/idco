@@ -132,7 +132,9 @@ describe("§2.8 indent + callout in the resting render", () => {
 
     const aside = container.querySelector<HTMLElement>("aside");
     expect(aside?.getAttribute("role")).toBe("note");
-    expect(aside?.getAttribute("data-engine-callout-tone")).toBe("warning");
+    // Resting now renders through the reader's L1 callout (docs/028 §4.4): the tone rides
+    // on `data-rt-callout-tone`, the reader's contract, not the old `data-engine-*` attr.
+    expect(aside?.getAttribute("data-rt-callout-tone")).toBe("warning");
     expect(aside?.textContent).toContain("heads up");
   });
 
@@ -169,9 +171,10 @@ describe("§2.8 indent + callout in the resting render", () => {
       version: 1,
     };
     const { container } = render(<RestingDocument snapshot={snapshot} />);
-    // The nested run is grouped into one ordered list, so the browser numbers it.
+    // The nested run is grouped into one real ordered list, so the browser numbers it
+    // (the reader's L1 `<ol>`, docs/028 §4.4 — not a bare run of `<li>`).
     const ol = container.querySelector<HTMLElement>("aside ol");
-    expect(ol?.getAttribute("data-engine-resting-list")).toBe("number");
+    expect(ol).not.toBeNull();
     expect(ol?.querySelectorAll("li")).toHaveLength(2);
   });
 });

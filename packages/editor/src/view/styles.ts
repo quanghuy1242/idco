@@ -20,7 +20,41 @@
  * - `whiteSpace: pre-wrap` on text blocks (soft breaks + caret geometry).
  */
 import type { CSSProperties } from "react";
+import {
+  RICH_TEXT_TYPOGRAPHY_CSS,
+  RT_BLOCK,
+  RT_BLOCK_CLASS,
+  rtHeadingClass,
+} from "@quanghuy1242/idco-reader";
 import type { EditorStore, NodeId, TextLeafType } from "../core";
+
+/**
+ * The `.rt-*` typography class for a text-leaf block (docs/015 §4.3). The single source of
+ * prose appearance: the live editor's editable host wears the *same* class the reader's L1
+ * primitive emits, so a heading/quote looks identical whether edited or read, and changing
+ * `.rt-h2` once moves both. Paragraph carries `rt-p` (no extra rules — default body text);
+ * `listitem` carries only the baseline (`.rt-li` has no appearance of its own — the marker
+ * is the engine's functional `::before`).
+ */
+export function richTextLeafClass(node: {
+  readonly type: string;
+  readonly attrs?: { readonly tag?: unknown } | null;
+}): string {
+  if (node.type === "heading") {
+    const tag =
+      typeof node.attrs?.tag === "string" && /^h[1-6]$/.test(node.attrs.tag)
+        ? (node.attrs.tag as "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
+        : "h2";
+    return `${RT_BLOCK} ${rtHeadingClass(tag)}`;
+  }
+  if (node.type === "quote") return `${RT_BLOCK} ${RT_BLOCK_CLASS.quote}`;
+  if (node.type === "listitem") return `${RT_BLOCK} ${RT_BLOCK_CLASS.listItem}`;
+  return `${RT_BLOCK} ${RT_BLOCK_CLASS.paragraph}`;
+}
+
+// Re-export the reader's typography contract for the editor surface to inject (the single
+// stylesheet that defines the `.rt-*` appearance the live host wears).
+export { RICH_TEXT_TYPOGRAPHY_CSS };
 
 export const baseViewStyle: CSSProperties = {
   border: "1px solid color-mix(in srgb, CanvasText 18%, transparent)",
@@ -90,15 +124,13 @@ export const ENGINE_SURFACE_SUPPRESS_CSS =
  * the editor-surface counterpart, not a competing theme.
  */
 export const ENGINE_TYPOGRAPHY_CSS =
-  // Block types.
-  '[data-engine-view-root] [data-engine-block-type="heading"]{font-weight:700;line-height:1.25;margin:0;}' +
-  '[data-engine-view-root] [data-engine-heading="h1"]{font-size:1.875em;}' +
-  '[data-engine-view-root] [data-engine-heading="h2"]{font-size:1.5em;}' +
-  '[data-engine-view-root] [data-engine-heading="h3"]{font-size:1.25em;}' +
-  '[data-engine-view-root] [data-engine-heading="h4"]{font-size:1.1em;}' +
-  // Quote: a left rule + faint base tint reading off DaisyUI base tokens (not a
-  // washed-out opacity), so it matches the rest of the theme.
-  '[data-engine-view-root] [data-engine-block-type="quote"]{border-left:4px solid color-mix(in oklab, var(--color-base-content, currentColor) 25%, transparent);background:color-mix(in oklab, var(--color-base-content, currentColor) 4%, transparent);border-radius:0 6px 6px 0;font-style:italic;color:color-mix(in oklab, var(--color-base-content, currentColor) 80%, transparent);margin:0.4em 0;}' +
+  // Block prose appearance (heading sizes/weight, the quote rule) is no longer defined
+  // here: it moved to the single `.rt-*` typography contract the reader owns
+  // (`RICH_TEXT_TYPOGRAPHY_CSS`, docs/015 §4.3), which the surface injects and the live
+  // editable host wears via `richTextLeafClass`, so the editor and the reader render a
+  // heading/quote from one definition and cannot drift. What remains here is structural
+  // chrome and inline-mark styling whose live DOM differs from the reader's static
+  // primitive (callout container + glyph, the computed list marker, the inline marks).
   // Callout: a tinted note box themed per `tone` with the same DaisyUI semantic
   // tokens the `Alert` component uses (info/success/warning/error), so it reads
   // as a callout while editing and matches the resting `alert` render (docs/018
@@ -146,48 +178,11 @@ export const ENGINE_TYPOGRAPHY_CSS =
   "[data-engine-view-root] [data-engine-mark='comment']{background:color-mix(in srgb, var(--color-info, #38bdf8) 22%, transparent);border-radius:2px;}" +
   "[data-engine-view-root] [data-engine-mark='glossary']{border-bottom:1px dotted currentColor;}";
 
-/**
- * Self-sufficient baseline typography for the *resting* (reader) render.
- *
- * The resting render uses real semantic elements (`<h1>`/`<ul>`/`<blockquote>`/…)
- * and is meant to be themed by the host's `prose`/typography (docs/010 §7.1). But
- * a host that imports a CSS reset (Tailwind preflight) without a typography plugin
- * gets *stripped* defaults and no replacement — unstyled headings, bulletless
- * lists, collapsed spacing. The editor surface never has this problem because it
- * ships `ENGINE_TYPOGRAPHY_CSS`; the resting render needs the same self-sufficiency
- * (docs/010 §14 hardening — the resting render looked broken without `prose`).
- *
- * Every rule is wrapped in `:where(…)`, giving it **zero specificity**: it beats
- * the UA/preflight defaults (author stylesheet, later in source order) but loses
- * to *any* real `prose` rule (`.prose` = (0,1,0)), so a host's typography still
- * governs when present. Values track `ENGINE_TYPOGRAPHY_CSS` so the editing
- * surface and the resting render look the same. This is the interim until the
- * reader package (docs/015) owns the L1 render and its styling (docs/018 §2.5).
- */
-export const ENGINE_RESTING_TYPOGRAPHY_CSS =
-  ":where([data-engine-resting-document]){line-height:1.55;}" +
-  ":where([data-engine-resting-document] h1){font-size:1.875em;font-weight:700;line-height:1.25;margin:0.6em 0 0.3em;}" +
-  ":where([data-engine-resting-document] h2){font-size:1.5em;font-weight:700;line-height:1.25;margin:0.6em 0 0.3em;}" +
-  ":where([data-engine-resting-document] h3){font-size:1.25em;font-weight:700;line-height:1.3;margin:0.6em 0 0.3em;}" +
-  ":where([data-engine-resting-document] h4){font-size:1.1em;font-weight:700;line-height:1.3;margin:0.6em 0 0.3em;}" +
-  ":where([data-engine-resting-document] p){margin:0.5em 0;}" +
-  ":where([data-engine-resting-document] ul){list-style:disc;padding-left:1.6em;margin:0.5em 0;}" +
-  ":where([data-engine-resting-document] ol){list-style:decimal;padding-left:1.6em;margin:0.5em 0;}" +
-  ":where([data-engine-resting-document] li){margin:0.15em 0;}" +
-  ":where([data-engine-resting-document] blockquote){border-left:4px solid color-mix(in oklab, var(--color-base-content, currentColor) 25%, transparent);background:color-mix(in oklab, var(--color-base-content, currentColor) 4%, transparent);border-radius:0 6px 6px 0;padding:6px 12px;font-style:italic;color:color-mix(in oklab, var(--color-base-content, currentColor) 80%, transparent);margin:0.5em 0;}" +
-  // Callout `<aside>` *fallback* styling for when DaisyUI is absent (the reader,
-  // docs/015). With DaisyUI present the resting render uses the real `alert
-  // alert-{tone}` classes (resting-document.tsx), which win over this
-  // zero-specificity rule; this only keeps the box legible without them. Tones
-  // track the `Alert` component (info default / success / warning / error).
-  ":where([data-engine-resting-document] aside){border-radius:var(--radius-box, 0.5rem);border:1px solid color-mix(in oklab, var(--color-info, #0ea5e9) 35%, transparent);background:color-mix(in oklab, var(--color-info, #0ea5e9) 10%, var(--color-base-100, transparent));padding:8px 12px;margin:0.5em 0;}" +
-  ':where([data-engine-resting-document] aside[data-engine-callout-tone="success"]){border-color:color-mix(in oklab, var(--color-success, #16a34a) 35%, transparent);background:color-mix(in oklab, var(--color-success, #16a34a) 10%, var(--color-base-100, transparent));}' +
-  ':where([data-engine-resting-document] aside[data-engine-callout-tone="warning"]){border-color:color-mix(in oklab, var(--color-warning, #d97706) 35%, transparent);background:color-mix(in oklab, var(--color-warning, #d97706) 10%, var(--color-base-100, transparent));}' +
-  ':where([data-engine-resting-document] aside[data-engine-callout-tone="error"]){border-color:color-mix(in oklab, var(--color-error, #dc2626) 35%, transparent);background:color-mix(in oklab, var(--color-error, #dc2626) 10%, var(--color-base-100, transparent));}' +
-  ":where([data-engine-resting-document] a){color:var(--color-primary, #2563eb);text-decoration:underline;text-underline-offset:2px;}" +
-  ":where([data-engine-resting-document] code){font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:color-mix(in srgb, currentColor 8%, transparent);padding:0.05em 0.3em;border-radius:3px;}" +
-  ":where([data-engine-resting-document] mark){background:color-mix(in srgb, var(--color-warning, gold) 45%, transparent);color:inherit;border-radius:2px;}" +
-  ":where([data-engine-resting-document] hr){border:0;border-top:1px solid color-mix(in srgb, currentColor 24%, transparent);margin:1em 0;}";
+// The self-sufficient resting typography (`ENGINE_RESTING_TYPOGRAPHY_CSS`) was retired
+// (docs/028 §4.5): it was a *third* source of block/mark appearance beside the live editor
+// CSS and the reader's `.rt-*` contract. `RestingDocument` now renders through the reader's
+// `<Reader>`, which injects the single `RICH_TEXT_TYPOGRAPHY_CSS` — so there is no second
+// definition to drift from.
 
 /**
  * Hover/active affordance for heavy-object blocks. Painted with `box-shadow` (a

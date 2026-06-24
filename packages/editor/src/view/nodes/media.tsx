@@ -11,7 +11,7 @@
  * unchanged — the shared `RichTextMediaFigure` the reader uses, painted from the
  * baked snapshot.
  */
-import { RichTextMediaFigure } from "@quanghuy1242/idco-ui";
+import { RichTextMediaFigure } from "@quanghuy1242/idco-reader";
 import { type NodeView } from "../spi";
 import { asRecord, stringField } from "../object-data";
 import { mediaBakedStyle, mediaThumbStyle } from "../styles";
