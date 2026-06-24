@@ -40,7 +40,7 @@ import {
   registerToolbarTab,
   type CommandRenderContext,
 } from "../../spi";
-import { OutlinePane } from "../panes";
+import { OutlinePane, StatisticsPane } from "../panes";
 import { listToggleCommand } from "../chrome-commands";
 
 /** The link editor body (docs/023 §7.3) — the migrated `set-link`/`clear-link` form. */
@@ -198,11 +198,12 @@ export function registerBuiltInCommands(): void {
   registerToolbarTab({ id: "home", label: "Home" });
   registerToolbarTab({ id: "insert", label: "Insert" });
   registerToolbarTab({ id: "view", label: "View" });
-  registerToolbarTab({
-    id: "review",
-    isAvailable: (ctx) => ctx.capabilities.review,
-    label: "Review",
-  });
+  // Review is registry-driven (docs/027 §7.7): no capability gate on the tab itself —
+  // it shows when at least one Review command resolves (the empty-tab-drop rule), and
+  // each command self-gates on its registry (Comments on a comment source, Glossary on
+  // the glossary collection). Insights/Statistics is always available, so once Review
+  // ships Insights the tab is present; a host that wants it gone hides it by id.
+  registerToolbarTab({ id: "review", label: "Review" });
   registerToolbarTab({
     id: "data",
     isAvailable: (ctx) => ctx.capabilities.media,
@@ -243,6 +244,13 @@ export function registerBuiltInCommands(): void {
   // View tab — dock-opening commands (docs/027 §8.2). Labelled because a panel name
   // ("Outline") is the discoverability win, like Insert's block glyphs are.
   registerToolbarSlot({ display: "labelled", id: "view.panels", tab: "view" });
+  // Review tab — the document-insight dock commands (docs/027 §9). Same labelled
+  // presentation; the tab appears once any of these resolves (§7.7).
+  registerToolbarSlot({
+    display: "labelled",
+    id: "review.panels",
+    tab: "review",
+  });
 
   // --- Global edit-ops (docs/024 §7.1) — the context menu's former literals ----
   // Clipboard goes through the same model serialization the native Ctrl+C/X/V path
@@ -463,6 +471,29 @@ export function registerBuiltInCommands(): void {
     // (docs/027 §8.2). A bare/no-dock context (`panelHost` absent) makes it a no-op.
     run: (ctx) => ctx.panelHost?.toggle("outline"),
     slot: "view.panels",
+    surfaces: { ribbon: "primary" },
+  });
+
+  // --- Review: Insights / Statistics (docs/027 §9.4) --------------------------
+  // The first Review pane: a read-only renderer over the live `index.text` rollup
+  // (§2.2 — derive, do not store), always available because statistics are a pure
+  // function of the document (no host source needed), so it is what makes the Review
+  // tab appear (§7.7). Later Review panes (Comments, Glossary) self-gate on their
+  // registries and slot in beside it.
+  registerSidePanel({
+    iconName: "Activity",
+    id: "insights",
+    render: ({ ctx }) => <StatisticsPane ctx={ctx} />,
+    title: "Insights",
+  });
+  registerCommand({
+    group: "panel",
+    icon: "Activity",
+    id: "review.insights",
+    kind: "button",
+    label: "Insights",
+    run: (ctx) => ctx.panelHost?.toggle("insights"),
+    slot: "review.panels",
     surfaces: { ribbon: "primary" },
   });
 }

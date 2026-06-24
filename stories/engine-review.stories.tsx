@@ -135,3 +135,25 @@ export const DockOutline: Story = () => {
     </div>
   );
 };
+
+/**
+ * The Insights pane (docs/027 §9.4): the first Review surface and what makes the
+ * Review tab appear (§7.7 — registry-driven). Open Review → Insights for live
+ * word/character/sentence counts, reading time, and a Flesch readability estimate,
+ * all derived from the off-thread document index (§2.2). Select text for a
+ * selection-scoped section (§9.4 / §10).
+ */
+export const DockInsights: Story = () => {
+  const store = useOutlineStore();
+  return (
+    <div style={{ height: 520, maxWidth: 980 }}>
+      <OwnedModelEditor store={store} viewportHeight={460} />
+      <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
+        Insights pane (docs/027 §9.4): <strong>Review → Insights</strong>. The
+        Review tab is registry-driven — it shows because Insights (always
+        available) registered (§7.7). Counts update as you type; select text for
+        selection-scoped counts.
+      </p>
+    </div>
+  );
+};
