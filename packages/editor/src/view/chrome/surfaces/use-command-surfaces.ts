@@ -18,8 +18,13 @@
  *   markdown suppression in the input path is needed (docs/024 §8 "disjoint by trigger").
  * - **Flyout on a settled selection.** The flyout shows only on a non-collapsed text
  *   selection when no pointer drag is in progress (`pointerDown`) and no object is
- *   active — re-evaluated on selection change + `pointerup`, so it does not thrash
- *   mid-drag (docs/024 §7.2 "settled").
+ *   active — re-evaluated on selection change + a *debounced* `pointerup`, so it does
+ *   not thrash mid-drag (docs/024 §7.2 "settled"). The debounce is what makes a
+ *   double/triple-click resolve to ONE appearance at the end of the gesture: each click
+ *   is its own pointerdown→up, so an immediate raise would flash the flyout in after the
+ *   first release and re-raise on the next, visible jank. `pointerup` only arms a short
+ *   settle timer, and a following `pointerdown` (the next click, or a new drag) cancels
+ *   it — so a 1-, 2-, or 3-click selection all land as a single clean appearance.
  *
  * The live `CommandContext` is rebuilt each render via `buildCommandContext` so every
  * host resolves against the same selection/scope. The hosts are presentational: they
@@ -35,6 +40,15 @@ import {
   type ToolbarCapabilities,
 } from "../../spi";
 import { useStoreVersion } from "./use-store-version";
+
+/**
+ * How long the pointer must stay up before a selection is "settled" enough to raise the
+ * flyout (docs/024 §7.2). It bridges the gap *between* the clicks of a double/triple-click
+ * (a fast multi-click's inter-click gap is well under this), so the gesture coalesces into
+ * one appearance at the end instead of flickering per click. Kept short so a plain
+ * drag-select still feels prompt on release.
+ */
+const FLYOUT_SETTLE_MS = 180;
 
 /** A live slash trigger detected on the committed leaf text (docs/024 §7.3). */
 export type SlashTrigger = {
@@ -132,25 +146,44 @@ export function useCommandSurfaces(
   const ctx = buildCommandContext(store, capabilities, panelHost);
 
   // Track an in-progress pointer drag so the ambient flyout does not flicker mid-drag
-  // (docs/024 §7.2 "settled"). `settleTick` bumps on pointerup so the flyout effect
-  // re-evaluates once the gesture ends.
+  // (docs/024 §7.2 "settled"). `settleTick` bumps once the gesture *fully* settles so the
+  // flyout effect re-evaluates then.
   const pointerDownRef = useRef(false);
   // The selection signature the flyout is suppressed for (set when a context menu opens
   // or any surface is dismissed); the flyout will not re-raise for it until the selection
   // changes (docs/024 §8 — keeps the sticky flyout from fighting a context-menu popover).
   const suppressedSigRef = useRef<string | null>(null);
   const [settleTick, setSettleTick] = useState(0);
+  // The pending settle timer (debounced pointerup). A double/triple-click is several
+  // pointerdown→up cycles; arming on up and cancelling on the next down collapses the
+  // whole sequence into one settle so the flyout appears once, at the end (the user's ask),
+  // instead of flashing in per click.
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
+    const cancelSettle = () => {
+      if (settleTimerRef.current !== null) {
+        clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = null;
+      }
+    };
     const onDown = () => {
       pointerDownRef.current = true;
+      // A new press — the next click of a multi-click, or the start of a fresh drag —
+      // cancels the pending settle so the flyout does not raise between clicks.
+      cancelSettle();
     };
     const onUp = () => {
       pointerDownRef.current = false;
-      setSettleTick((n) => n + 1);
+      cancelSettle();
+      settleTimerRef.current = setTimeout(() => {
+        settleTimerRef.current = null;
+        setSettleTick((n) => n + 1);
+      }, FLYOUT_SETTLE_MS);
     };
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("pointerup", onUp, true);
     return () => {
+      cancelSettle();
       document.removeEventListener("pointerdown", onDown, true);
       document.removeEventListener("pointerup", onUp, true);
     };
