@@ -9,7 +9,8 @@
 import type { RefObject } from "react";
 import type { EditorStore, NodeId, TextPoint } from "../../core";
 import { EngineObjectBlock } from "./object-block";
-import { getStructuralView } from "../spi";
+import { getStructuralView, isNodeTypeAllowed } from "../spi";
+import { QuarantineBlock } from "./quarantine-block";
 import { useEditorNode } from "../store-hooks";
 import { EngineTextBlock } from "./text-block";
 import {
@@ -58,6 +59,24 @@ export function EngineBlock(props: {
   // The node was removed in the same tick (merge/delete); render nothing until
   // the order change unmounts this block.
   if (!node) return null;
+  // Schema-profile quarantine (note.md item 6): an object/structural block whose group
+  // the deployment's profile disallows renders an inert, preserved placeholder instead
+  // of its normal surface. This sits before the kind dispatch — and so before the
+  // structural recursion below — so a quarantined container never paints its children
+  // as orphans (the whole subtree stays in the store, untouched, ready to round-trip).
+  // Text leaves are the prose floor (ungrouped) and never quarantine.
+  if (
+    (node.kind === "object" || node.kind === "structural") &&
+    !isNodeTypeAllowed(store.schemaProfile, node.type)
+  ) {
+    return (
+      <QuarantineBlock
+        node={node}
+        registerBlock={registerBlock}
+        store={store}
+      />
+    );
+  }
   if (node.kind === "text") {
     const textBlock = (
       <EngineTextBlock

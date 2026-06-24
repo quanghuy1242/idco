@@ -68,5 +68,6 @@ export const calloutStructuralView: StructuralNodeView = {
       </aside>
     );
   },
+  schemaGroup: "callout",
   type: "callout",
 };

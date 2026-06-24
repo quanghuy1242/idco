@@ -136,6 +136,7 @@ export const tableStructuralView: StructuralNodeView = {
       </div>
     );
   },
+  schemaGroup: "table",
   type: "table",
 };
 
@@ -152,6 +153,7 @@ export const tableRowStructuralView: StructuralNodeView = {
   renderResting: ({ children, renderSequence }) => (
     <RichTextTableRow>{renderSequence(children)}</RichTextTableRow>
   ),
+  schemaGroup: "table",
   type: "tablerow",
 };
 
@@ -209,5 +211,6 @@ export const tableCellStructuralView: StructuralNodeView = {
   // the former floating `…` popover is gone; the cell-range drag that feeds "Merge"
   // stays spatial in `TableInteractions`.
   contributeCommands: contributeCellCommands,
+  schemaGroup: "table",
   type: "tablecell",
 };

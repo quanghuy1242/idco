@@ -487,19 +487,34 @@ const BLOCK_TYPE_STYLE: Partial<
  */
 export function blockStyleFor(node: {
   readonly type: string;
-  readonly attrs?: { readonly indent?: unknown } | null;
+  readonly attrs?: {
+    readonly indent?: unknown;
+    readonly format?: unknown;
+  } | null;
 }): LonghandBlockStyle {
   const indent =
     typeof node.attrs?.indent === "number" && node.attrs.indent > 0
       ? node.attrs.indent
       : 0;
+  // Element alignment rides on `attrs.format` (note.md item 1) — the same field the
+  // reader's `elementAlign` maps to align. The LIVE editor must paint it here too, or
+  // the Align control is a model-only no-op with no visible effect (the symptom that
+  // exposed this gap). Only center/right/justify produce a `text-align`; left/absent is
+  // the default, so the shared-object fast path below still covers the common block.
+  const align =
+    node.attrs?.format === "center" ||
+    node.attrs?.format === "right" ||
+    node.attrs?.format === "justify"
+      ? (node.attrs.format as "center" | "right" | "justify")
+      : undefined;
   const typeStyle = BLOCK_TYPE_STYLE[node.type as TextLeafType];
-  // Fast path for the common, unstyled, unindented block (paragraph/heading):
-  // reuse the shared object so React sees a stable reference.
-  if (!typeStyle && indent === 0) return blockStyle;
+  // Fast path for the common, unstyled, unindented, left-aligned block
+  // (paragraph/heading): reuse the shared object so React sees a stable reference.
+  if (!typeStyle && indent === 0 && !align) return blockStyle;
   return {
     ...blockStyle,
     ...typeStyle,
     ...(indent > 0 ? { marginLeft: `${indent * INDENT_STEP_EM}em` } : {}),
+    ...(align ? { textAlign: align } : {}),
   };
 }

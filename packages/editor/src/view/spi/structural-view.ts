@@ -101,6 +101,15 @@ export type StructuralNodeView = {
   renderResting(args: StructuralRestingArgs): ReactNode;
   readonly insert?: StructuralNodeViewInsert;
   /**
+   * The schema group this container belongs to for the per-deployment schema profile
+   * (note.md item 6) — the structural twin of `NodeView.schemaGroup`. The whole table
+   * family (`table`/`table-row`/`table-cell`) shares one group so a profile toggles the
+   * family coherently; a quarantined container renders an inert placeholder without
+   * recursing into its children, so no orphan rows/cells leak through (block-dispatch).
+   * Omit it for a container that is always permitted (lists, quote — the prose floor).
+   */
+  readonly schemaGroup?: string;
+  /**
    * The caret/gap ink to use when the caret sits inside this node, or undefined
    * to defer to an ancestor / the theme default (docs/022 §7). The engine paints
    * its own caret, so CSS `caret-color` cannot reach it; a container that paints

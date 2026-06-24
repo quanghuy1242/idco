@@ -23,6 +23,7 @@
 export * from "./node-view";
 export * from "./data-source-registry";
 export * from "./structural-view";
+export * from "./schema-profile";
 export * from "./mark-registry";
 export * from "./block-type-registry";
 export * from "./command-registry";

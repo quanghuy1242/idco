@@ -172,6 +172,60 @@ function TableInsertBody({ ctx }: { readonly ctx: CommandRenderContext }) {
   );
 }
 
+/**
+ * The four element alignments (note.md item 1). `left` is the default: applying it
+ * *clears* `attrs.format` so the document stays clean and the reader paints the
+ * default (it honours only `center`/`right`/`justify`). The non-default values store
+ * on `attrs.format` — the field the compat layer already round-trips to the legacy
+ * element `format` the reader maps to align — so this control writes nothing new to
+ * the wire format; it only exposes the field the owned engine never let an author set.
+ */
+const ALIGN_OPTIONS: readonly {
+  readonly value: string;
+  readonly icon: string;
+  readonly label: string;
+}[] = [
+  { icon: "AlignLeft", label: "Left", value: "left" },
+  { icon: "AlignCenter", label: "Center", value: "center" },
+  { icon: "AlignRight", label: "Right", value: "right" },
+  { icon: "AlignJustify", label: "Justify", value: "justify" },
+];
+
+/**
+ * The Home alignment dropdown body (docs/006 §4.2 — "one dropdown trigger showing the
+ * active alignment", not four flat buttons). The active option is highlighted from the
+ * live `current-align` query; picking one sets `attrs.format` across the covered leaves
+ * via the generic `set-block-attr` (no new command verb) and closes. The model
+ * selection survives the popover focus (docs/011 §8.6), so the set lands on the caret
+ * the author left.
+ */
+function AlignBody({ ctx }: { readonly ctx: CommandRenderContext }) {
+  const active = ctx.store.query({ type: "current-align" });
+  const apply = (value: string) => {
+    ctx.store.command({
+      key: "format",
+      type: "set-block-attr",
+      value: value === "left" ? undefined : value,
+    });
+    ctx.close();
+  };
+  return (
+    <div aria-label="Text alignment" className="flex gap-1" role="group">
+      {ALIGN_OPTIONS.map((option) => (
+        <Button
+          ariaLabel={option.label}
+          iconName={option.icon}
+          key={option.value}
+          onClick={() => apply(option.value)}
+          size="sm"
+          tooltip={option.label}
+          variant={active === option.value ? "primary" : "ghost"}
+        />
+      ))}
+    </div>
+  );
+}
+
 /** Select the whole document, end to end, on the model (the menu's Select all). */
 function selectAllInStore(store: EditorStore): void {
   const leaves = orderedTextLeaves(store);
@@ -237,6 +291,9 @@ export function registerBuiltInCommands(): void {
   registerToolbarSlot({ id: "home.text", tab: "home" });
   registerToolbarSlot({ id: "home.format", tab: "home" });
   registerToolbarSlot({ id: "home.lists", tab: "home" });
+  // Paragraph-layout controls (note.md item 1): the alignment dropdown sits after the
+  // list/indent group and before annotate, matching docs/006 §4.2's Home arrangement.
+  registerToolbarSlot({ id: "home.paragraph", tab: "home" });
   registerToolbarSlot({ id: "home.annotate", tab: "home" });
   // Insert slots (docs/023 §7.2): the table dimension picker, then a projection of
   // every other registered insertable (DEFAULT_TOOLBAR_LAYOUT's `inserts` note). The
@@ -444,6 +501,28 @@ export function registerBuiltInCommands(): void {
     shortcut: "Ctrl/Cmd+K",
     slot: "home.annotate",
     surfaces: { contextMenu: "primary", flyout: "primary", ribbon: "primary" },
+  });
+
+  // --- Paragraph — the alignment dropdown (ribbon only, note.md item 1) --------
+  // One popover trigger showing the active alignment (docs/006 §4.2), ribbon-only:
+  // alignment is a block-layout property set on the Home tab, not a flat-surface
+  // selection action. The trigger highlights when a non-default alignment is set; the
+  // body sets `attrs.format` through the generic `set-block-attr` (no new verb), and
+  // the reader already paints it via the existing `format` round-trip.
+  registerCommand({
+    group: "blockStyle",
+    icon: "AlignLeft",
+    id: "align",
+    isActive: (ctx) => {
+      const align = ctx.store.query({ type: "current-align" });
+      return align === "center" || align === "right" || align === "justify";
+    },
+    kind: "popover",
+    label: "Align",
+    render: (ctx) => <AlignBody ctx={ctx} />,
+    responsivePriority: 2,
+    slot: "home.paragraph",
+    surfaces: { ribbon: "primary" },
   });
 
   // --- Insert — the table dimension picker (ribbon only, docs/023 §7.2) --------

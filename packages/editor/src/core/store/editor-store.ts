@@ -110,12 +110,34 @@ import {
 
 export const ROOT_NODE_ID = "idco_node_root" as NodeId;
 
+/**
+ * A per-deployment schema profile (note.md item 6): the allowlist of schema *groups*
+ * this deployment permits (a "blog profile" vs a "book profile"). The store holds it
+ * as opaque transport and never interprets the group strings — group membership is a
+ * view concern, resolved against the node registries by `isNodeTypeAllowed`
+ * (view/spi/schema-profile.ts), which gates the insert palette and renders an
+ * out-of-profile node as an inert, preserved quarantine placeholder rather than
+ * deleting it (lossless; the server's Zod union stays the hard authority on write).
+ * `undefined` (or `allowedGroups` omitted) permits every node — the backward-compatible
+ * default, so an editor with no profile behaves exactly as before.
+ */
+export type SchemaProfile = {
+  /**
+   * Allowlisted schema-group ids. A node whose type maps to a group not in this list
+   * is quarantined; an *ungrouped* node type (the prose floor — paragraph/heading/
+   * quote/list, and any node that declares no group) is always permitted.
+   */
+  readonly allowedGroups?: readonly string[];
+};
+
 export type EditorStoreOptions = {
   readonly allocator: IdAllocator;
   readonly snapshot?: EditorDocumentSnapshot;
   readonly selection?: EditorSelection | null;
   /** Object-block registry; used to re-bake objects on edit. Defaults to built-ins. */
   readonly registry?: BlockRegistry;
+  /** Per-deployment schema profile (note.md item 6); permits everything when omitted. */
+  readonly schemaProfile?: SchemaProfile;
 };
 
 /**
@@ -330,6 +352,9 @@ export class EditorStore {
   #order: NodeId[] = [];
   #selection: EditorSelection | null;
   #settings: DocumentSettings = {};
+  // The per-deployment schema profile (note.md item 6). Held opaquely: the store never
+  // reads the group strings — the view layer resolves type→group and gates on it.
+  #schemaProfile: SchemaProfile | undefined;
   // Document-owned collections (docs/027 §5.1): keyed item arrays (glossary terms,
   // later citations). Mutated only through the `set-collection` step, so every edit is
   // undoable in the same history stack as text and serializes with the document.
@@ -353,6 +378,7 @@ export class EditorStore {
     this.#allocator = options.allocator;
     this.#registry = options.registry ?? createDefaultBlockRegistry();
     this.#selection = options.selection ?? null;
+    this.#schemaProfile = options.schemaProfile;
     const root = makeStructuralNode({
       children: options.snapshot?.body.order ?? [],
       id: ROOT_NODE_ID,
@@ -399,6 +425,15 @@ export class EditorStore {
 
   get settings(): DocumentSettings {
     return this.#settings;
+  }
+
+  /**
+   * The per-deployment schema profile (note.md item 6), or undefined when the
+   * deployment permits every node. Read by the view's palette gate and quarantine
+   * render through `isNodeTypeAllowed`; the store itself never interprets it.
+   */
+  get schemaProfile(): SchemaProfile | undefined {
+    return this.#schemaProfile;
   }
 
   /** Every document-owned collection, keyed by id (docs/027 §5.1). */

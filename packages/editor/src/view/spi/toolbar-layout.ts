@@ -39,6 +39,7 @@ import {
   type NodeViewResourceConfigField,
 } from "./node-view";
 import { getDataSource } from "./data-source-registry";
+import { isNodeTypeAllowed } from "./schema-profile";
 import {
   commandTargetsSurface,
   getCommand,
@@ -295,7 +296,12 @@ function itemId(item: ToolbarItem): string {
 /** Normalize one registered insert (structural or object) into a dispatch + label. */
 function resolveInsert(
   nodeType: string,
+  ctx: CommandContext,
 ): { label: string; icon: string; run: (store: EditorStore) => void } | null {
+  // Schema-profile palette gate (note.md item 6): an out-of-profile type produces no
+  // ribbon insert control, the ribbon twin of `command-surface`'s gate. Cheap registry
+  // lookup, applied before either insert branch so it covers structural and object.
+  if (!isNodeTypeAllowed(ctx.store.schemaProfile, nodeType)) return null;
   const structural = listInsertableStructuralNodes().find(
     (view) => view.type === nodeType,
   );
@@ -425,7 +431,7 @@ function resolveConfigItem(
         },
       ];
     case "insert": {
-      const insert = resolveInsert(item.nodeType);
+      const insert = resolveInsert(item.nodeType, ctx);
       if (!insert) return [];
       return [
         {
@@ -449,7 +455,7 @@ function resolveConfigItem(
       const out: ResolvedToolbarItem[] = [];
       for (const nodeType of types) {
         if (exclude.has(nodeType)) continue;
-        const insert = resolveInsert(nodeType);
+        const insert = resolveInsert(nodeType, ctx);
         if (!insert) continue;
         out.push({
           collapsible: "menu-item",

@@ -188,5 +188,6 @@ export const codeBlockView: NodeView = {
       </div>
     );
   },
+  schemaGroup: "code",
   type: "code-block",
 };

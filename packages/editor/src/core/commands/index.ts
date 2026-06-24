@@ -38,6 +38,7 @@ import {
   activeLinkHref,
   canIndent,
   canOutdent,
+  currentAlign,
   currentBlockType,
   currentListType,
   isMarkActive,
@@ -152,6 +153,7 @@ export type EditorQuery =
   | { readonly type: "can-outdent" }
   | { readonly type: "current-block-type" }
   | { readonly type: "current-list-type" }
+  | { readonly type: "current-align" }
   | { readonly type: "active-link-href" };
 
 type CommandCompiler = (
@@ -266,6 +268,8 @@ export function runQuery(
       return currentBlockType(store);
     case "current-list-type":
       return currentListType(store);
+    case "current-align":
+      return currentAlign(store);
     case "active-link-href":
       return activeLinkHref(store);
   }

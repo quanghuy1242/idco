@@ -200,6 +200,7 @@ export {
   type EditorStoreOptions,
   type EditorSubscriber,
   type PendingFormat,
+  type SchemaProfile,
 } from "./store";
 export {
   TEXT_FORMAT,

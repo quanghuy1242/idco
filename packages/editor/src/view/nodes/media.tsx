@@ -86,5 +86,6 @@ export const mediaView: NodeView = {
       </div>
     );
   },
+  schemaGroup: "media",
   type: "media",
 };

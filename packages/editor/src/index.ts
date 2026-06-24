@@ -175,6 +175,11 @@ export {
   type DataSource,
   type DataSourcePickerProps,
 } from "./view";
+// Schema profile (note.md item 6): the per-deployment allowlist of schema *groups*.
+// `SchemaProfile` (the data) is set on `EditorStoreOptions`; `isNodeTypeAllowed` /
+// `schemaGroupOf` resolve a node type against the registries (the palette + quarantine
+// gates use them, and a host can reuse them to reason about its own profile).
+export { isNodeTypeAllowed, schemaGroupOf } from "./view";
 // Read-side document SPI (note.md): a node view reads the whole-document index
 // reactively without reaching across the document. The provider + store back it;
 // the editor and reader both feed it. See `useDocumentIndex` / `useDocumentReveal`.
@@ -213,6 +218,7 @@ export {
   createOwnedEditorHandle,
   type EditorStore,
   type EditorStoreOptions,
+  type SchemaProfile,
   type EditorSubscriber,
   type EditorCommitSubscriber,
   type OwnedEditorHandle,

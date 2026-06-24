@@ -74,5 +74,6 @@ export const embedView: NodeView = {
       </div>
     );
   },
+  schemaGroup: "embed",
   type: "embed",
 };

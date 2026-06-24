@@ -86,6 +86,8 @@ await import("./editor/engine-commands-phase8.test");
 await import("./editor/engine-chrome.test");
 await import("./editor/engine-toolbar-spi.test");
 await import("./editor/engine-command-surface.test");
+await import("./editor/engine-alignment.test");
+await import("./editor/engine-schema-profile.test");
 await import("./editor/engine-side-panel-spi.test");
 await import("./editor/engine-insights-pane.test");
 await import("./editor/engine-collections.test");

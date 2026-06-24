@@ -31,6 +31,7 @@ import {
   type NodeViewResourceConfigField,
 } from "./node-view";
 import { getDataSource } from "./data-source-registry";
+import { isNodeTypeAllowed } from "./schema-profile";
 import {
   getStructuralView,
   listInsertableStructuralNodes,
@@ -146,8 +147,9 @@ export function computeCommandScope(store: EditorStore): CommandScope {
  * it appears on every text surface" true with no per-surface config (the flat
  * surfaces have no arrangement to externalize, unlike the ribbon).
  */
-function registryCommands(): Command[] {
+function registryCommands(store: EditorStore): Command[] {
   const out: Command[] = [];
+  const profile = store.schemaProfile;
 
   // Marks → inline formats on every text surface (context menu + flyout). Gated on
   // a live selection: an inline format applies to a range, not a bare caret (the
@@ -197,6 +199,10 @@ function registryCommands(): Command[] {
   // `createCommand()` carries no params → its default subtree, e.g. a 3×3 table),
   // the fast path; the ribbon keeps the richer dimension picker (docs/024 §7.3).
   for (const view of listInsertableStructuralNodes()) {
+    // Schema-profile palette gate (note.md item 6): an out-of-profile structural type
+    // (e.g. a table in a deployment that disallows the `table` group) is hidden from
+    // the insert affordance. Same shape as the provenance gate below.
+    if (!isNodeTypeAllowed(profile, view.type)) continue;
     const insert = view.insert;
     out.push({
       group: "insert",
@@ -211,6 +217,9 @@ function registryCommands(): Command[] {
   }
   for (const view of listInsertableNodes()) {
     if (!getNodeView(view.type)) continue;
+    // Schema-profile palette gate (note.md item 6): an out-of-profile object type is
+    // hidden from the insert affordance, alongside the provenance gate below.
+    if (!isNodeTypeAllowed(profile, view.type)) continue;
     const insert = view.insert;
     const resourceField = view.configFields?.find(
       (field): field is NodeViewResourceConfigField =>
@@ -308,7 +317,7 @@ export function resolveCommandList(
 ): readonly ResolvedCommandGroup[] {
   const candidates: Command[] = [
     ...scopeContributions(ctx),
-    ...registryCommands(),
+    ...registryCommands(ctx.store),
     ...listCommands(),
   ];
 

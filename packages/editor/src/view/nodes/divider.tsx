@@ -28,5 +28,6 @@ export const dividerView: NodeView = {
       }}
     />
   ),
+  schemaGroup: "divider",
   type: "divider",
 };

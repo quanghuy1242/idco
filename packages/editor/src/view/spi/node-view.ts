@@ -156,6 +156,16 @@ export type NodeView = {
    */
   /** Accessible base name for the block (screen readers, docs/018 §2.3). */
   readonly ariaLabel?: string;
+  /**
+   * The schema *group* this node belongs to for the per-deployment schema profile
+   * (note.md item 6). A profile's `allowedGroups` allowlist is checked against this:
+   * a node whose group is absent is gated out of the insert palette and renders as an
+   * inert quarantine placeholder if it already exists in a loaded document. Omit it for
+   * a node that is always permitted (it then never participates in profile gating).
+   * Group, not type, is the unit so a family of node types (the table's row/cell) toggles
+   * coherently as one — see `isNodeTypeAllowed` (schema-profile.ts).
+   */
+  readonly schemaGroup?: string;
   /** ARIA role for the block; defaults to `"group"` when omitted. */
   readonly ariaRole?: string;
   /** Floating-chrome badge icon + label. */

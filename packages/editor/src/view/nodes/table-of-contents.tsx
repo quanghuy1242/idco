@@ -392,5 +392,6 @@ export const tableOfContentsView: NodeView = {
   renderResting: ({ baked }) => (
     <TocRestingView payload={asRecord(baked.payload)} />
   ),
+  schemaGroup: "toc",
   type: "table-of-contents",
 };

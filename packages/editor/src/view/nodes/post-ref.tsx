@@ -58,5 +58,6 @@ export const postRefView: NodeView = {
       </div>
     );
   },
+  schemaGroup: "post",
   type: "post-ref",
 };

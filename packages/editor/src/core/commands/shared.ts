@@ -503,6 +503,26 @@ export function currentListType(store: EditorStore): string | null {
     : "bullet";
 }
 
+/**
+ * The element alignment of the current block (note.md item 1). Alignment is stored
+ * on the existing `attrs.format` field — the same field the compat layer already
+ * round-trips to the legacy element `format` the reader maps to align
+ * (`content-renderer` `elementAlign`); the owned engine simply never exposed a
+ * control to set it before. A text leaf with no explicit alignment reads as
+ * `"left"` (the default) so the toolbar can tell a left-aligned block from a
+ * centered/justified one; null off a text leaf. The reader honours only
+ * `center`/`right`/`justify`, so the set-command clears the attr for `left`.
+ */
+export function currentAlign(store: EditorStore): string | null {
+  const range = textRange(store);
+  if (!range) return null;
+  const node = store.getNode(range.start.node);
+  if (!node || node.kind !== "text") return null;
+  return typeof node.attrs?.format === "string" && node.attrs.format.length > 0
+    ? node.attrs.format
+    : "left";
+}
+
 // ---------------------------------------------------------------------------
 // Shared helpers.
 // ---------------------------------------------------------------------------

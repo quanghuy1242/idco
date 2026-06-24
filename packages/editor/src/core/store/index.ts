@@ -13,6 +13,7 @@ export {
   EditorStore,
   createEditorStore,
   type EditorStoreOptions,
+  type SchemaProfile,
   type CompositionRange,
   type PendingFormat,
   type EditorSubscriber,

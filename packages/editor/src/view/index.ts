@@ -122,6 +122,9 @@ export {
   type DataSource,
   type DataSourcePickerProps,
 } from "./spi";
+// Schema profile (note.md item 6): resolve a node type against the registries to decide
+// whether the deployment's profile permits it (the palette + quarantine gates).
+export { isNodeTypeAllowed, schemaGroupOf } from "./spi";
 // Side Panel SPI (docs/027 §8.2): a feature registers one `SidePanel` to add a dock
 // pane (Outline first; Comments/Glossary/Insights follow). `PanelHost` is the seam a
 // toolbar/flyout command opens a pane through. The dock host itself stays internal
