@@ -86,6 +86,16 @@ export function useAutosave(
       }
     };
 
+    // Deliberately a raw timer, not an engine-scheduler debounced-lane task
+    // (note.md §7 P4 considered folding it in). `useAutosave` is a *public, standalone*
+    // hook: the host calls it with only the `OwnedEditorHandle`, which is derived
+    // from the store and has no reference to the view's per-instance scheduler
+    // (created inside `react-view.tsx`). Routing this through the shared lane would
+    // mean leaking the scheduler into the public autosave API for a hook that fires
+    // at most once per `delayMs` (1s default) and is already guarded against
+    // re-entrancy and in-flight clobber — negligible budget pressure for a real
+    // API cost. The debounce stays local; if autosave ever needs dashboard
+    // visibility it should take an optional scheduler, not require one.
     const schedule = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void runSave(), delayMs);

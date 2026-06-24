@@ -242,7 +242,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     store,
     syncFocusToSelection,
   });
-  useDocumentIndexController({ createBakeWorker, refs, store });
+  useDocumentIndexController({ createBakeWorker, refs, scheduler, store });
   const { api } = useEditorDiagnostics({
     focusBlock,
     placeCaretAt,

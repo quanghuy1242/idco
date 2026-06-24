@@ -363,6 +363,14 @@ export function useVirtualWindow(args: {
           }
         }
         lastScrollSampleRef.current = { time: now, top };
+        // Deliberately a raw timer, not an engine-scheduler task (note.md §7 P4).
+        // This is a state-machine deadline ("scrolling went quiet → exit fling"),
+        // not coalescible derived work: each scroll sample *resets* the deadline
+        // (clear + re-arm) so the timer fires only once the last sample is
+        // FLING_IDLE_MS old. The scheduler's coalescing slot models "run the latest
+        // payload once," not "slide a deadline forward on every event," so routing
+        // it through a lane would buy no budget sharing and lose the reset
+        // semantics. Left raw; cancelled with the rest on unmount below.
         if (flingExitTimerRef.current !== null) {
           clearTimeout(flingExitTimerRef.current);
         }

@@ -555,6 +555,19 @@ export class EditorStore {
   resolveObject(node: NodeId, data: JsonValue, status: ObjectNodeStatus): void {
     const current = this.getNode(node);
     if (!current || current.kind !== "object") return;
+    // Fast idempotent guard (note.md §7 P3). The resolve controller calls this on
+    // *every* virtualization remount (use-resolve.ts), and the hot remount paths —
+    // an unpicked reference (`ref === ""`) and a browse-only source — pass back the
+    // node's own data object *by reference* (`currentObjectRecord` returns
+    // `node.data` itself). When the data is reference-identical and the status is
+    // unchanged, the bake is a pure function of (registry, type, data), so it
+    // cannot change `baked` either: nothing can transition, so skip the re-bake and
+    // the structural compare entirely. This is what makes the per-remount call
+    // genuinely free; without it, scrolling a doc full of reference blocks re-baked
+    // and ran four `JSON.stringify`s over each node on every remount. The full
+    // compare below still runs for a real resolve (a fresh snapshot is a new object,
+    // not reference-equal), which is off the scroll hot path.
+    if (Object.is(current.data, data) && current.status === status) return;
     const baked = bakeObjectData(this.registry, current.type, data);
     const bakedTo: JsonValue | undefined = baked.baked ?? undefined;
     const bakedFrom: JsonValue | undefined = current.baked ?? undefined;

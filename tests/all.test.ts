@@ -71,6 +71,8 @@ await import("./editor/post-ref-reference-block.test");
 await import("./editor/object-config-resource-field.test");
 await import("./editor/reference-status-lifecycle.test");
 await import("./editor/resolve-swr.test");
+await import("./editor/resolve-object-idempotent.test");
+await import("./editor/document-index-scheduler.test");
 await import("./editor/media-reference-block.test");
 await import("./editor/choose-first-provenance.test");
 await import("./editor/embed-reference-block.test");

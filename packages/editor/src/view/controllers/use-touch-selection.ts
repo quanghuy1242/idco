@@ -239,6 +239,12 @@ export function useTouchSelection(args: {
       }
       mode = "pressing";
       clearTimer();
+      // Deliberately a raw timer, not an engine-scheduler task (note.md §7 P4): a
+      // single-shot gesture-classification deadline ("finger held this long without
+      // moving → long-press select"), armed once per touch and cleared the moment
+      // the gesture reclassifies (move → scroll, lift → tap). There is nothing to
+      // coalesce and no shared budget to honour — it is control flow, not derived
+      // work — so a lane would only obscure it.
       timer = setTimeout(() => {
         timer = null;
         if (mode !== "pressing") return;

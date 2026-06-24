@@ -19,10 +19,6 @@ export const DEFAULT_VIEWPORT_HEIGHT = 480;
 export const DEFAULT_OVERSCAN = 4;
 export const DEFAULT_BLOCK_ESTIMATE = 40;
 export const AUTOSCROLL_STEP_PX = 12;
-// Coalesce the off-thread document-index rebuild across a burst of structural
-// edits. Short enough that the TOC/search index feels live after a pause, long
-// enough that holding Enter or pasting does not fire an O(N) snapshot per edit.
-export const INDEX_REBUILD_DEBOUNCE_MS = 200;
 // Lead the caret keeps from the viewport edge when keyboard movement scrolls it
 // into view (~one line). Small enough that each line-move scrolls about one
 // line, not a whole block. Trivially promotable to a prop if a knob is wanted.
