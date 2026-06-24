@@ -102,11 +102,11 @@ Whether the **host-node registry** (006 §5.3 — opaque `renderEditor`/`renderR
 - Rebuild built-in media + post-ref on the SPI; restore `allowedEmbedDomains` as an embed source with `resolve`-only.
 - Resolve the §2.8 host-node-registry decision and implement whichever shape wins.
 
-## 3. Comments (half-migrated)
+## 3. Comments (half-migrated) — designed in docs/027
 
-The data model and derived index are ported; the authoring workflow is not. `comment`/`glossary` are identity marks in the model (`core/model/marks.ts:119`), render as annotation spans (`view/render/mark-render.tsx:129`), and bake builds a `CommentIndexEntry` rollup (`core/bake/bake.ts:152-193`). Missing: a comment command, the popover UI, and the host callbacks `onComment` / `comments` / `onCommentUpdate` / `onCommentDelete` (legacy at `editor-legacy/src/nodes/base.tsx:56-69`). So a comment mark can be stored and shown but never authored or threaded. Glossary authoring is in the same state. Placement: adding a comment to a selection is a Home action, thread management is Review (docs/006 §4.2:294).
+The data model and derived index are ported; the authoring workflow is not. `comment`/`glossary` are identity marks in the model (`core/model/marks.ts:119`), render as annotation spans (`view/render/mark-render.tsx:129`), and bake builds a `CommentIndexEntry` rollup (`core/bake/bake.ts:152-193`). Missing: a comment command, the popover UI, and the host callbacks `onComment` / `comments` / `onCommentUpdate` / `onCommentDelete` (legacy at `editor-legacy/src/nodes/base.tsx:56-69`). So a comment mark can be stored and shown but never authored or threaded. Glossary authoring is in the same state.
 
-Note: glossary is a candidate reference block (a `glossary-term-ref` projecting a host glossary collection) rather than an inline-owned term/definition. Decide alongside item 2, not blind.
+The full design is now docs/027 (Review tab, side-panel dock, document-insight surfaces) — pending design review, no backlog scoped yet. Settled there: Review is the document-insight surface (everything bake derives — comments, glossary, word count, a11y, broken refs — shown back as panes consuming the live document index). Comments are host-owned (a Comment Source SPI, sibling of docs/026: thread CRUD + resolve, mark stores `{thread, snapshot}`); glossary is document-owned (a generic Document Collections SPI document-level slot, glossary as first tenant, mark stores `{term}` referencing a single registry item — define-once/reference-everywhere, two flows define-first + type-first converge). A generic Side Panel SPI / tabbed dock (one pane visible, editor chrome not host layout — distinct from the removed aside rail) holds the panes. Add-actions live in the selection flyout + Review tab, NOT Home (overrides docs/006 §4.2). Posture: recommendation-only, never auto-modify the author's document.
 
 ## 4. The reader tier — `packages/reader`, retiring content-renderer (docs/015)
 
