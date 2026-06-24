@@ -14,3 +14,6 @@ export * from "./glossary";
 export * from "./glossary-pane";
 export * from "./comments";
 export * from "./comments-pane";
+export * from "./accessibility";
+export * from "./broken-refs";
+export * from "./health-panes";

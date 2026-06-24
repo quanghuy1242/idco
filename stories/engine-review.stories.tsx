@@ -273,6 +273,64 @@ function useInMemoryCommentSource(): void {
   useEffect(() => () => unregisterCommentSource("comments"), []);
 }
 
+// A deliberately unhealthy document: a heading-level skip (h1 → h3), an empty
+// heading, and a vague link — so the Accessibility pane has something to flag.
+const HEALTH_SAMPLE: RichTextCompatDocument = {
+  root: {
+    children: [
+      {
+        children: [{ text: "Document health", type: "text" }],
+        tag: "h1",
+        type: "heading",
+      },
+      {
+        children: [{ text: "The next heading skips a level.", type: "text" }],
+        type: "paragraph",
+      },
+      {
+        children: [{ text: "A deep heading", type: "text" }],
+        tag: "h3",
+        type: "heading",
+      },
+      { children: [{ text: "", type: "text" }], tag: "h2", type: "heading" },
+      {
+        children: [
+          { text: "See ", type: "text" },
+          {
+            children: [{ text: "click here", type: "text" }],
+            type: "link",
+            url: "https://example.com",
+          },
+          { text: " for details.", type: "text" },
+        ],
+        type: "paragraph",
+      },
+    ],
+  },
+};
+
+/**
+ * Document health (docs/027 §9.5/§9.6): Accessibility lint and Broken references, both
+ * recommendation-only renderers over derived state. Open Review → Accessibility on this
+ * deliberately-unhealthy document and it flags the heading-level skip, the empty
+ * heading, and the vague "click here" link — each links to its node, and nothing is
+ * auto-fixed (§6.4). Broken references lists any reference block whose resolve failed.
+ */
+export const DockHealth: Story = () => {
+  const store = useMemo(() => createEditorStoreFromCompat(HEALTH_SAMPLE), []);
+  return (
+    <div style={{ height: 520, maxWidth: 980 }}>
+      <OwnedModelEditor store={store} viewportHeight={460} />
+      <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
+        Document health (docs/027 §9.5/§9.6):{" "}
+        <strong>Review → Accessibility</strong> flags the heading skip, the
+        empty heading, and the vague link — click a finding to jump to it.
+        Recommendation-only: it never rewrites the prose.
+      </p>
+    </div>
+  );
+};
+
 export const DockComments: Story = () => {
   useInMemoryCommentSource();
   const store = useOutlineStore();

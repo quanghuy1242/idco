@@ -44,6 +44,8 @@ import {
   type CommandRenderContext,
 } from "../../spi";
 import {
+  AccessibilityPane,
+  BrokenRefsPane,
   CommentAddPopover,
   CommentsPane,
   GlossaryAddPopover,
@@ -588,6 +590,46 @@ export function registerBuiltInCommands(): void {
     render: (ctx) => <CommentAddPopover ctx={ctx} />,
     slot: "review.panels",
     surfaces: { flyout: "primary", ribbon: "primary" },
+  });
+
+  // --- Review: document health (docs/027 §9.5/§9.6) ---------------------------
+  // Accessibility lint + broken references: pure derived renderers, always available
+  // (no host source needed), recommendation-only — they flag, never fix (§6.4).
+  registerSidePanel({
+    iconName: "ShieldCheck",
+    id: "accessibility",
+    render: ({ reveal, store }) => (
+      <AccessibilityPane reveal={reveal} store={store} />
+    ),
+    title: "Accessibility",
+  });
+  registerCommand({
+    group: "panel",
+    icon: "ShieldCheck",
+    id: "review.accessibility",
+    kind: "button",
+    label: "Accessibility",
+    run: (ctx) => ctx.panelHost?.toggle("accessibility"),
+    slot: "review.panels",
+    surfaces: { ribbon: "primary" },
+  });
+  registerSidePanel({
+    iconName: "Unlink",
+    id: "broken-refs",
+    render: ({ reveal, store }) => (
+      <BrokenRefsPane reveal={reveal} store={store} />
+    ),
+    title: "Broken refs",
+  });
+  registerCommand({
+    group: "panel",
+    icon: "Unlink",
+    id: "review.broken-refs",
+    kind: "button",
+    label: "Broken refs",
+    run: (ctx) => ctx.panelHost?.toggle("broken-refs"),
+    slot: "review.panels",
+    surfaces: { ribbon: "primary" },
   });
 }
 
