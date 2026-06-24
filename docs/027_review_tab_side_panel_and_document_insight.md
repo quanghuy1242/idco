@@ -512,6 +512,8 @@ The remaining document-health panes (§9.5–§9.6), recommendation-only.
 
 ### 16.8 Phase 6 — Annotation Interaction
 
+> Status: the editor (live) half is implemented — `useAnnotationInteraction` + `AnnotationPopover` (read popover, innermost-wins), `panelHost.open(paneId, focusId)`, and the per-pane reveal+ring. The reader (resting) half is docs/015 §12 and is built with the reader extraction.
+
 The marks are visible after P3/P4 (the glossary `<abbr>`, the comment highlight) but still *passive* — you cannot click a marked word to read or manage it. This phase makes the annotations interactive on both tiers and is the natural payoff of the dock: a marked word becomes the entry point to its term/thread. It was surfaced during the first run-through (the marks felt inert next to the dock) and is sequenced after P5 because it depends on P3+P4 existing and reuses three seams already shipped.
 
 The interaction model, settled:

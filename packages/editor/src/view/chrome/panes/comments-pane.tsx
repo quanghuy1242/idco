@@ -21,6 +21,7 @@ import {
   nodeForThread,
   unanchorThread,
 } from "./comments";
+import { useScrollToFocus } from "./use-reveal-focus";
 
 /** Load threads from the host source with SWR semantics + a manual refresh (docs/027 §7.3). */
 function useCommentThreads(source: CommentSource): {
@@ -84,12 +85,17 @@ function ThreadCard(props: {
   readonly onToggleResolved: () => void;
   readonly onDelete: () => void;
   readonly onJump: () => void;
+  readonly focused: boolean;
 }) {
-  const { thread, onReply, onToggleResolved, onDelete, onJump } = props;
+  const { thread, onReply, onToggleResolved, onDelete, onJump, focused } =
+    props;
   return (
     <div
-      className="grid gap-1 rounded-box border border-base-200 p-2"
+      className={`grid gap-1 rounded-box border border-base-200 p-2 ${
+        focused ? "ring-2 ring-primary" : ""
+      }`}
       data-engine-comment-thread-card={thread.id}
+      data-focus-key={thread.id}
     >
       <button
         className="truncate border-l-2 border-warning/60 pl-2 text-left text-xs italic text-base-content/70 outline-none hover:text-base-content"
@@ -137,8 +143,9 @@ function ThreadCard(props: {
 export function CommentsPane(props: {
   readonly store: EditorStore;
   readonly reveal: (id: NodeId) => void;
+  readonly focusId?: string;
 }) {
-  const { store, reveal } = props;
+  const { store, reveal, focusId } = props;
   const source = activeCommentSource();
   // Gated to a registered source (docs/027 §7.7); the null guard is belt-and-braces.
   if (!source) {
@@ -148,16 +155,26 @@ export function CommentsPane(props: {
       </p>
     );
   }
-  return <CommentsPaneBody reveal={reveal} source={source} store={store} />;
+  return (
+    <CommentsPaneBody
+      focusId={focusId}
+      reveal={reveal}
+      source={source}
+      store={store}
+    />
+  );
 }
 
 function CommentsPaneBody(props: {
   readonly store: EditorStore;
   readonly source: CommentSource;
   readonly reveal: (id: NodeId) => void;
+  readonly focusId?: string;
 }) {
-  const { store, source, reveal } = props;
+  const { store, source, reveal, focusId } = props;
   const { threads, error, refresh } = useCommentThreads(source);
+  // Scroll the routed-to thread into view when opened from a clicked comment (P6).
+  const listRef = useScrollToFocus(focusId);
 
   const jump = (threadId: string) => {
     const node = nodeForThread(store, threadId);
@@ -195,6 +212,7 @@ function CommentsPaneBody(props: {
 
   const card = (thread: Thread) => (
     <ThreadCard
+      focused={thread.id === focusId}
       key={thread.id}
       onDelete={() => {
         void (async () => {
@@ -221,7 +239,7 @@ function CommentsPaneBody(props: {
   );
 
   return (
-    <div className="grid gap-3 p-3" data-engine-comments="">
+    <div className="grid gap-3 p-3" data-engine-comments="" ref={listRef}>
       <section className="grid gap-2">
         <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-base-content/50">
           Unresolved

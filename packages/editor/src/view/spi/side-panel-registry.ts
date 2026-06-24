@@ -39,6 +39,13 @@ export type SidePanelRenderArgs = {
   readonly reveal: (id: NodeId) => void;
   /** Close the dock (a pane's own "done"/dismiss affordance). */
   readonly close: () => void;
+  /**
+   * An item to reveal + highlight on open (docs/027 §16 P6): a glossary term id, a
+   * comment thread id. Set when the pane was routed to from a clicked annotation;
+   * undefined for a plain open. A pane scrolls the matching row into view and rings
+   * it; a pane with no addressable rows ignores it.
+   */
+  readonly focusId?: string;
 };
 
 /**

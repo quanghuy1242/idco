@@ -45,6 +45,7 @@ import {
 } from "./controllers/document-index-store";
 import { FindBar, useFindController, type FindController } from "./chrome";
 import { LinkPopover, useLinkInteraction } from "./chrome";
+import { AnnotationPopover, useAnnotationInteraction } from "./chrome";
 import {
   OwnedModelEditorView,
   type OwnedModelEditorViewHandle,
@@ -186,6 +187,9 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   );
 
   const linkInteraction = useLinkInteraction(store);
+  // Click-to-read for glossary/comment marks (docs/027 §16 P6); tried before the link
+  // interaction so the innermost annotation claims the click.
+  const annotationInteraction = useAnnotationInteraction();
 
   // The flat command surfaces (context menu, selection flyout, slash menu) share one
   // capability set + one coordinator (docs/024 §8). Defaults mirror the ribbon's so a
@@ -209,30 +213,38 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   const indexStoreRef = useRef<MutableDocumentIndexStore | null>(null);
   if (!indexStoreRef.current)
     indexStoreRef.current = createDocumentIndexStore();
-  // The dock's only persistent state: open/closed plus the active pane id (docs/027
-  // §8.5 — no per-user tab layout persisted before there is evidence it is wanted).
+  // The dock's only persistent state: open/closed, the active pane id (docs/027 §8.5),
+  // and an optional item the pane should reveal when routed to from a clicked
+  // annotation (docs/027 §16 P6).
   const [panelOpen, setPanelOpen] = useState(false);
   const [activePanelId, setActivePanelId] = useState<string | null>(null);
+  const [activePanelFocusId, setActivePanelFocusId] = useState<string | null>(
+    null,
+  );
   // Jump-to-anchor for panes (docs/027 §9): the engine's scroll-to-block reaches a
   // windowed-out node a plain `#hash` cannot under virtualization.
   const revealNode = useCallback((id: NodeId) => {
     viewRef.current?.scrollToBlock(id);
   }, []);
-  // The panel host seam (docs/027 §8.2): a tab command opens a pane through this.
+  // The panel host seam (docs/027 §8.2): a tab command opens a pane through this; an
+  // annotation popover opens a pane *focused* on a term/thread (§16 P6).
   const panelHost = useMemo<PanelHost>(
     () => ({
       close: () => setPanelOpen(false),
-      open: (paneId) => {
+      open: (paneId, focusId) => {
         setActivePanelId(paneId);
+        setActivePanelFocusId(focusId ?? null);
         setPanelOpen(true);
       },
-      toggle: (paneId) => {
+      toggle: (paneId, focusId) => {
         // Toggling the active pane closes the dock; toggling another pane (or opening
-        // when closed) switches to and reveals it (docs/027 §8.2).
-        if (panelOpen && activePanelId === paneId) {
+        // when closed, or with a focus target) switches to and reveals it (docs/027
+        // §8.2/§16 P6). A focus request always opens (never toggles closed).
+        if (panelOpen && activePanelId === paneId && !focusId) {
           setPanelOpen(false);
         } else {
           setActivePanelId(paneId);
+          setActivePanelFocusId(focusId ?? null);
           setPanelOpen(true);
         }
       },
@@ -245,14 +257,17 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   const surfaces = useCommandSurfaces(store, capabilities, panelHost);
   const { requestContextMenu, closeAll: closeSurfaces } = surfaces;
 
-  // A click on an inert link mark opens the link editor over it (legacy
-  // floating-link-editor parity); other clicks fall through to the editing
-  // surface untouched.
+  // A click on an annotation/link mark opens a popover over it. Annotations
+  // (glossary/comment) are tried first so the innermost mark claims the click
+  // (docs/027 §16 P6); a plain link falls through to the link editor (legacy
+  // floating-link-editor parity). Other clicks pass through to the editing surface.
   const onClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      linkInteraction.openAt(event.target as HTMLElement);
+      const element = event.target as HTMLElement;
+      if (annotationInteraction.openAt(element)) return;
+      linkInteraction.openAt(element);
     },
-    [linkInteraction],
+    [annotationInteraction, linkInteraction],
   );
 
   // Right-click: open the one scope-merged context menu when commands resolve,
@@ -380,6 +395,11 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
               interaction={linkInteraction}
               store={store}
             />
+            <AnnotationPopover
+              interaction={annotationInteraction}
+              panelHost={panelHost}
+              store={store}
+            />
             {/* The three flat command surfaces, all driven by the one coordinator so
                 only one is open at a time (docs/024 §8). */}
             <EngineContextMenu
@@ -411,6 +431,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
           <SidePanelDock
             activeId={activePanelId}
             capabilities={capabilities}
+            focusId={activePanelFocusId}
             indexStore={indexStoreRef.current}
             onClose={() => setPanelOpen(false)}
             open={panelOpen}

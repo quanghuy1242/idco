@@ -47,6 +47,8 @@ export type SidePanelDockProps = {
   readonly open: boolean;
   /** The pane the dock shows; falls back to the first available pane when stale/null. */
   readonly activeId: string | null;
+  /** An item the active pane should reveal + highlight (docs/027 §16 P6), or null. */
+  readonly focusId: string | null;
   /** Close the dock (the header X, the Drawer backdrop, a pane's done). */
   readonly onClose: () => void;
   /** The engine's scroll-to-block, handed to panes for jump-to-anchor (docs/027 §9). */
@@ -62,6 +64,7 @@ export function SidePanelDock(props: SidePanelDockProps) {
     panelHost,
     open,
     activeId,
+    focusId,
     onClose,
     reveal,
     indexStore,
@@ -107,7 +110,13 @@ export function SidePanelDock(props: SidePanelDockProps) {
           className="min-h-0 flex-1 overflow-y-auto"
           data-engine-side-panel={active.id}
         >
-          {active.render({ close: onClose, ctx, reveal, store })}
+          {active.render({
+            close: onClose,
+            ctx,
+            ...(focusId ? { focusId } : {}),
+            reveal,
+            store,
+          })}
         </div>
       </div>
     </DocumentIndexProvider>

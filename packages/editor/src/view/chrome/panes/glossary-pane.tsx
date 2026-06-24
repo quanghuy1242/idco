@@ -30,6 +30,7 @@ import {
   type GlossaryRow,
   type GlossaryTerm,
 } from "./glossary";
+import { useScrollToFocus } from "./use-reveal-focus";
 
 /** Mint a unique term id without a new mechanism (the document allocator). */
 function newTermId(store: EditorStore): string {
@@ -72,11 +73,17 @@ function GlossaryRowView(props: {
   readonly row: GlossaryRow;
   readonly reveal: (id: NodeId) => void;
   readonly index: ReturnType<typeof useDocumentIndex>;
+  readonly focused: boolean;
 }) {
-  const { store, row, reveal, index } = props;
+  const { store, row, reveal, index, focused } = props;
   const { term, occurrences, nodeIds } = row;
   return (
-    <div className="grid gap-1 border-b border-base-200 py-2 last:border-0">
+    <div
+      className={`grid gap-1 border-b border-base-200 py-2 last:border-0 ${
+        focused ? "rounded-box ring-2 ring-primary" : ""
+      }`}
+      data-focus-key={term.id}
+    >
       <div className="flex items-center gap-2">
         <span className="font-medium">{term.term || "Untitled term"}</span>
         {term.category ? (
@@ -122,10 +129,14 @@ function GlossaryRowView(props: {
 export function GlossaryPane(props: {
   readonly store: EditorStore;
   readonly reveal: (id: NodeId) => void;
+  readonly focusId?: string;
 }) {
-  const { store, reveal } = props;
+  const { store, reveal, focusId } = props;
   const index = useDocumentIndex();
   const rows = buildGlossaryRows(index);
+  // Scroll the routed-to term row into view when opened from a clicked occurrence
+  // (docs/027 §16 P6); the ring is a literal class on that row.
+  const listRef = useScrollToFocus(focusId);
   const orphans = orphanedGlossaryRefs(index);
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
@@ -212,9 +223,10 @@ export function GlossaryPane(props: {
           and choose “Add to glossary”.
         </p>
       ) : (
-        <div className="grid">
+        <div className="grid" ref={listRef}>
           {visible.map((row) => (
             <GlossaryRowView
+              focused={row.term.id === focusId}
               index={index}
               key={row.term.id}
               reveal={reveal}

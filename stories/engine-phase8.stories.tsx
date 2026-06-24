@@ -803,7 +803,8 @@ export const FullEditor: Story = () => {
         <strong>Review</strong> for the document-insight dock (docs/027):
         Comments, Glossary, Insights, Accessibility, and Broken refs — or{" "}
         <strong>View → Outline</strong>. Select text for the flyout’s Comment
-        and Add-to-glossary actions.
+        and Add-to-glossary actions, then <em>click</em> a glossary or comment
+        mark to read it and jump to its term/thread in the dock.
       </p>
       <p
         style={{

@@ -519,8 +519,8 @@ export function registerBuiltInCommands(): void {
     iconName: "BookA",
     id: "glossary",
     isAvailable: () => getDocumentCollection("glossary") !== undefined,
-    render: ({ reveal, store }) => (
-      <GlossaryPane reveal={reveal} store={store} />
+    render: ({ focusId, reveal, store }) => (
+      <GlossaryPane focusId={focusId} reveal={reveal} store={store} />
     ),
     title: "Glossary",
   });
@@ -561,8 +561,8 @@ export function registerBuiltInCommands(): void {
     iconName: "MessageSquare",
     id: "comments",
     isAvailable: () => activeCommentSource() !== undefined,
-    render: ({ reveal, store }) => (
-      <CommentsPane reveal={reveal} store={store} />
+    render: ({ focusId, reveal, store }) => (
+      <CommentsPane focusId={focusId} reveal={reveal} store={store} />
     ),
     title: "Comments",
   });

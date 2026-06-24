@@ -162,6 +162,7 @@ describe("the dock (docs/027 §8.1/§8.3)", () => {
     return render(
       <SidePanelDock
         activeId={activeId}
+        focusId={null}
         capabilities={CAPS}
         indexStore={indexStore}
         onClose={() => {}}
@@ -238,6 +239,7 @@ describe("the dock (docs/027 §8.1/§8.3)", () => {
       <SidePanelDock
         activeId="outline"
         capabilities={CAPS}
+        focusId={null}
         indexStore={indexStore}
         onClose={() => {}}
         open

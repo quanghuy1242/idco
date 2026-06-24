@@ -119,12 +119,17 @@ export type CommandScope = {
  * it, never `isAvailable`/`isActive` (those must stay pure functions of model state).
  */
 export type PanelHost = {
-  /** Open (and switch to) a registered side panel by id, revealing the dock. */
-  readonly open: (paneId: string) => void;
+  /**
+   * Open (and switch to) a registered side panel by id, revealing the dock. The
+   * optional `focusId` asks the pane to reveal + highlight a specific item — a
+   * glossary term row, a comment thread — when routed to from a clicked annotation
+   * (docs/027 §16 P6). Panes that ignore it simply open normally.
+   */
+  readonly open: (paneId: string, focusId?: string) => void;
   /** Hide the dock; the panels stay registered, only the surface closes. */
   readonly close: () => void;
   /** Open the pane when closed or showing another; close it when already active. */
-  readonly toggle: (paneId: string) => void;
+  readonly toggle: (paneId: string, focusId?: string) => void;
 };
 
 /** What every command predicate, `run`, and `contributeCommands` receives (docs/024 §5.4). */

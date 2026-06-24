@@ -7,6 +7,7 @@
  * commands like the rest of the chrome. Registration of the built-in panes happens in
  * `surfaces/command-builtins` alongside the tabs/slots/commands.
  */
+export * from "./use-reveal-focus";
 export * from "./outline-pane";
 export * from "./statistics-pane";
 export * from "./text-stats";
