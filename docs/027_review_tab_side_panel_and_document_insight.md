@@ -68,6 +68,16 @@
 - [13. Verification Plan](#13-verification-plan)
 - [14. Definition Of Done For The Design](#14-definition-of-done-for-the-design)
 - [15. Final Model](#15-final-model)
+- [16. Implementation Phasing](#16-implementation-phasing)
+  - [16.1 Dependency Order](#161-dependency-order)
+  - [16.2 Phase 0 — Lock The Contracts](#162-phase-0--lock-the-contracts)
+  - [16.3 Phase 1 — Foundations](#163-phase-1--foundations)
+  - [16.4 Phase 2 — Statistics Pane](#164-phase-2--statistics-pane)
+  - [16.5 Phase 3 — Document Collections SPI And Glossary](#165-phase-3--document-collections-spi-and-glossary)
+  - [16.6 Phase 4 — Comment Source SPI And Comment Model](#166-phase-4--comment-source-spi-and-comment-model)
+  - [16.7 Phase 5 — Accessibility And Broken References](#167-phase-5--accessibility-and-broken-references)
+  - [16.8 Phase 6 — Reserved](#168-phase-6--reserved)
+  - [16.9 Sequencing Rationale](#169-sequencing-rationale)
 
 ## 1. Purpose And Scope
 
@@ -444,3 +454,69 @@ Review is the editor's document-insight surface: the place where everything the 
 The reusable seams: a **reference points at an item in a collection**, and a collection is either document-owned (the **Document Collections SPI**, glossary first) or host-owned (the **Comment Source SPI**, a sibling of docs/026's data-source SPI). A **Side Panel dock** — one tabbed region, one pane visible, editor chrome and not host layout — holds the panes that render those collections and the other derived insights (statistics, accessibility, broken references), every one of them a consumer of the off-thread document index, not a new store.
 
 The posture: the document belongs to the author. Glossary is content and lives in the document; comments are metadata and live in the host; the tool surfaces problems and recommends fixes but never silently edits. Comments and glossary stop being two identical id-only marks and become what they always were — a host-owned conversation and a document-owned definition — joined only by the fact that both are references, and both finally have a workspace to be managed in.
+
+## 16. Implementation Phasing
+
+This section is *sequencing*, not the ticket backlog. The §14 gate still holds: the phases below order the work and state each phase's grounding and acceptance shape, but they are scoped into tickets only after this design is reviewed and accepted. The order is chosen to land the two unblocking foundations first, then the cheapest self-contained pane, then the document-owned heavy slice (glossary), then the host-bound slice (comments), with the remaining insight panes last. Phases with no dependency between them are explicitly marked parallel.
+
+### 16.1 Dependency Order
+
+The gating relationships, stated once so each phase below can reference them rather than restate them. **D2** (the serialized mark attr form, §11) gates every mark slice and must be settled before any code touches `attrs`. **Phase 1a** (selection tracking) gates the flyout enablement, both annotation add-actions, and the selection-scoped statistics. **Phase 1b** (the dock) gates every pane. **Phase 3a** (the Document Collections SPI) gates the glossary. The **docs/026 data-source registry** (already shipped) gates the Comment Source SPI's sibling shape and the broken-references pane. 1a and 1b have no dependency on each other and run in parallel; within Phase 1 they are the whole critical path.
+
+### 16.2 Phase 0 — Lock The Contracts
+
+A gate, not a build. Accept or amend the eight decisions in §11; the load-bearing one to settle before any mark code is **D2 — the mark reference attr form**, because it is the serialized shape and retrofitting it would break stored documents. The recommendation stands: kind-specific attrs (`{ term }`, `{ thread, snapshot? }`) mirroring `link`'s `href` ([marks.ts:126-137](../packages/editor/src/core/model/marks.ts#L126-L137)), generic `{ collection, item }` reserved for a future generic reference mark. No slice starts until D1–D8 and the D1 placement override are confirmed (§14).
+
+### 16.3 Phase 1 — Foundations
+
+Two independent slices, run in parallel; together they are the skeleton everything else mounts on. Neither ships a user-facing annotation feature.
+
+**1a — Selection-tracking prerequisite (§10).** Thread the real current selection — presence, range, and text — into the command/toolbar context, replacing the hardcoded `hasSelectedText: false` (docs/006 §951). It is a shared prerequisite with its own tests: it unblocks the flyout enablement, the comment and glossary add-actions, and the selection-scoped statistics together, and none of those should re-solve it. *Acceptance:* the §12 "selection context regression" guard — every selection-scoped slot lights up from one source.
+
+**1b — Side Panel SPI and the dock (§8).** A generic `registerSidePanel` registry modeled on [data-source-registry.ts](../packages/editor/src/view/spi/data-source-registry.ts) (module singleton, register-by-id, idempotent, registration-order listing); the one-tabbed-region dock reusing the singleton overlay portal seam ([react-view.tsx:497-502](../packages/editor/src/view/react-view.tsx#L497-L502)) and the `@idco/ui` responsive-collapse pattern; the `panelHost.open(paneId)` command seam; and `capabilities.review` flipped from the hardcoded boolean ([command-builtins.tsx:197-201](../packages/editor/src/view/chrome/surfaces/command-builtins.tsx#L197-L201)) to a function of the registry (§7.7). Ship it with **Outline as its first real pane** — Outline consumes `index.toc`, which the TOC node already reads, so it proves the dock with real content rather than a placeholder and cashes out the outline reunion of §8.4. *Acceptance:* the §13 "dock behavior" item — one pane visible, tab state preserved on switch, narrow-viewport sheet, virtual scroll position unperturbed (the §8.3 / docs/025 hazard).
+
+### 16.4 Phase 2 — Statistics Pane
+
+The cheapest end-to-end vertical slice (§9.4): a read-only pane over the existing `index.text`, with no new model and no host binding. It consumes 1a for selection-scoped counts. It goes here because it proves the "a pane is a consumer of the live document index inside the dock" pattern at the lowest risk before the heavy slices rely on it. *Grounding:* `index.text` already runs off-thread ([bake.ts](../packages/editor/src/core/bake/bake.ts), [use-document-index.ts](../packages/editor/src/view/controllers/use-document-index.ts)). *Acceptance:* the §13 "derive-don't-store" item — the pane stays correct as the author types with no manual refresh.
+
+### 16.5 Phase 3 — Document Collections SPI And Glossary
+
+The document-owned heavy slice, sequenced before comments because it is fully self-contained (no host source to stand up to demo it) and it forces the Collections SPI to be general by construction (§5.5).
+
+**3a — Document Collections SPI (§5).** The generic `collections` slot on [EditorDocumentSnapshot](../packages/editor/src/core/model/model.ts#L261); `registerDocumentCollection` / `getDocumentCollection` / `listDocumentCollections`; the load-bearing routing of collection edits through the same transaction and history chokepoint as node edits ([core/store/history.ts](../packages/editor/src/core/store/history.ts)) so a single action that touches both the collection and the node tree is one atomic, undoable transaction (§5.3); serialization (free — plain JSON on the snapshot); and the `indexEntries(items, doc)` pass folded into [buildDocumentIndex](../packages/editor/src/core/bake/bake.ts) so collection insight rides the existing idle-lane rebuild.
+
+**3b — Glossary model (§6).** The `GlossaryTerm` registry as the first collection tenant; the glossary mark storing `attrs: { term: termId }` (the D2 form); the two authoring flows (define-first through the pane; type-first through the selection flyout, which needs 1a); the Glossary pane (term table, inline-editable definition, occurrence count and jump-to, delete and merge with orphan handling, unused-term and orphaned-reference filters); and recommendation-only auto-mark (§6.4). *Acceptance:* the §13 "glossary single-source," "two flows converge," "orphan survival," and "recommendation-only" items, plus the §12 "undo across a collection edit" and "merge correctness" atomicity guards.
+
+**3c — Glossary reader output (§6.6).** The `<abbr>` inline render and the generated back-matter glossary. Specified here, but built in step with the docs/015 reader extraction rather than blocking the glossary feature on the reader tier — flagged, not folded.
+
+### 16.6 Phase 4 — Comment Source SPI And Comment Model
+
+The host-bound slice, carrying the one genuinely new view-layer slice, so it follows the self-contained work.
+
+**4a — Comment Source SPI (§7.1).** A new sibling registry `comment-source-registry.ts`, a near-copy of [data-source-registry.ts](../packages/editor/src/view/spi/data-source-registry.ts) with thread capabilities (load / resolve / create / reply / update / remove / setResolved) replacing record capabilities (decision D4); the `Thread` shape (§7.2); stale-while-revalidate resolve scheduling; and provenance gating — this is where `capabilities.review`'s truth lands for comments (§7.7).
+
+**4b — Comment mark and snapshot (§7.3).** The comment mark `attrs: { thread, snapshot? }` and the `{ ref, snapshot }` cache; render the snapshot instantly, resolve on mount, patch. The snapshot is the docs/026 §7.3 discipline applied to threads — the fallback that lets the editor and reader paint without a live host call.
+
+**4c — Live marks (§7.5).** The new view work: `renderAnnotationMark` ([mark-render.tsx:87-94](../packages/editor/src/view/render/mark-render.tsx#L87-L94)) gains read access to the resolved comment state for the mark's `thread` id, so the inert span becomes a visible highlight, a click target, and a reflection of resolved state.
+
+**4d — Comment pane, add-action, orphans.** The Comments pane (§7.4 — threads grouped unresolved/resolved, reply/edit/resolve/delete/jump, author filter, unresolved badge); the comment add-action in the selection flyout and the Review ribbon (needs 1a); and keep-and-flag orphan handling on anchor loss (§7.6). *Acceptance:* the §13 "comment host-ownership," "snapshot fallback," "provenance gating," and "orphan survival" items, plus the §12 "stale or unreachable comment host" and "reader divergence" guards.
+
+### 16.7 Phase 5 — Accessibility And Broken References
+
+The remaining document-health panes (§9.5–§9.6), recommendation-only.
+
+**5a — Accessibility lint (§9.5).** Heading-order and image alt-text first — highest value, lowest cost, off `index.toc` plus a small object-node walk — then table-headers and link-text. Each finding links to its node and explains the fix; none is auto-applied.
+
+**5b — Broken references (§9.6).** A list of reference blocks whose resolve failed or whose ref is dangling, read off the docs/026 resolve status. The Review-side payoff of the docs/026 resolve lifecycle; gated on docs/026 being in place.
+
+### 16.8 Phase 6 — Reserved
+
+Track-changes / suggested edits and AI-proposed changes (§9.7). Not built. The seam is already stated: a suggested edit is an annotation on a range with a thread and an accepted/resolved state — the comment model's shape — so when it is designed it extends the annotation/thread model and registers as another dock pane, rather than growing a parallel mechanism.
+
+### 16.9 Sequencing Rationale
+
+Two ordering calls carry the phasing and are worth restating.
+
+**Glossary before comments.** The document-owned slice is sequenced first because it needs no host to be testable end-to-end and it is what forces the Collections SPI to stay general (§5.5). The alternative — comments first, on the strength of the §2 "comments are the first tenant" framing — would require standing up a host comment source before anything is demoable, and would prove the Side Panel and index-consumer patterns against the more entangled feature.
+
+**Reader output split out.** The glossary `<abbr>` / back-matter render (3c) and the comment snapshot render both cross into the docs/015 reader tier. They are specified inside Phases 3 and 4 but built in step with the reader extraction, so the editor-side glossary and comment features are not blocked on the reader tier landing first.

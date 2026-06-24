@@ -108,12 +108,37 @@ export type CommandScope = {
   readonly activeObject: NodeId | null;
 };
 
+/**
+ * The side-panel dock seam a command opens a workspace pane through (docs/027 §8.2,
+ * §8.6). A toolbar/flyout command is the *trigger*; the dock owns the open/active
+ * state. A Review-tab command's `run` calls `ctx.panelHost?.open("comments")` and the
+ * registered dock surfaces that pane — so "which tab a pane belongs to" is just which
+ * command opens it, and the command registry and the side-panel registry stay
+ * separate (docs/027 §8.6). Optional on the context because the pure resolvers and the
+ * unit tests build a context with no dock mounted; only a command's `run` ever reads
+ * it, never `isAvailable`/`isActive` (those must stay pure functions of model state).
+ */
+export type PanelHost = {
+  /** Open (and switch to) a registered side panel by id, revealing the dock. */
+  readonly open: (paneId: string) => void;
+  /** Hide the dock; the panels stay registered, only the surface closes. */
+  readonly close: () => void;
+  /** Open the pane when closed or showing another; close it when already active. */
+  readonly toggle: (paneId: string) => void;
+};
+
 /** What every command predicate, `run`, and `contributeCommands` receives (docs/024 §5.4). */
 export type CommandContext = {
   readonly store: EditorStore;
   readonly selection: ToolbarSelectionFacts;
   readonly scope: CommandScope;
   readonly capabilities: ToolbarCapabilities;
+  /**
+   * The dock seam (docs/027 §8.2), present only when a command runs inside the
+   * composed editor that mounts a dock. A command opens a pane with
+   * `ctx.panelHost?.open(id)`; absent in bare/test contexts, so the call is optional.
+   */
+  readonly panelHost?: PanelHost;
 };
 
 /** A `dropdown`/`popover` command's render context adds the dismiss handle. */

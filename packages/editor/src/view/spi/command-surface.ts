@@ -43,6 +43,7 @@ import {
   type CommandPlacement,
   type CommandScope,
   type CommandSurface,
+  type PanelHost,
   type ToolbarCapabilities,
   type ToolbarSelectionFacts,
 } from "./command-registry";
@@ -65,7 +66,8 @@ export type CommandGroup =
   | "annotate" // link/comment/glossary
   | "insert" // callout/table/media/divider/…
   | "structure" // table/cell ops (scope-contributed)
-  | "object"; // object-instance ops (scope-contributed)
+  | "object" // object-instance ops (scope-contributed)
+  | "panel"; // open a side-panel workspace (Outline/Comments/Glossary/Insights, docs/027 §8.2)
 
 /** The single relative sequence every surface shares (docs/024 §5.6). */
 export const COMMAND_GROUP_ORDER: readonly CommandGroup[] = [
@@ -79,6 +81,7 @@ export const COMMAND_GROUP_ORDER: readonly CommandGroup[] = [
   "insert",
   "structure",
   "object",
+  "panel",
 ];
 
 /** One command resolved for a surface (docs/024 §5.5): identity + live predicate state. */
@@ -388,9 +391,13 @@ export function commandSelectionFacts(
 export function buildCommandContext(
   store: EditorStore,
   capabilities: ToolbarCapabilities,
+  panelHost?: PanelHost,
 ): CommandContext {
   return {
     capabilities,
+    // Spread the dock seam only when present so a bare/test context keeps the key
+    // absent (a command's `run` reads `ctx.panelHost?.open`, docs/027 §8.2).
+    ...(panelHost ? { panelHost } : {}),
     scope: computeCommandScope(store),
     selection: commandSelectionFacts(store),
     store,

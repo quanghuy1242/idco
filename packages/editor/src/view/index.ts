@@ -122,6 +122,19 @@ export {
   type DataSource,
   type DataSourcePickerProps,
 } from "./spi";
+// Side Panel SPI (docs/027 §8.2): a feature registers one `SidePanel` to add a dock
+// pane (Outline first; Comments/Glossary/Insights follow). `PanelHost` is the seam a
+// toolbar/flyout command opens a pane through. The dock host itself stays internal
+// chrome the composed `OwnedModelEditor` mounts.
+export {
+  getSidePanel,
+  listSidePanels,
+  registerSidePanel,
+  unregisterSidePanel,
+  type PanelHost,
+  type SidePanel,
+  type SidePanelRenderArgs,
+} from "./spi";
 export { sanitizeHtmlToCompat } from "./paste-html";
 export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
 export {

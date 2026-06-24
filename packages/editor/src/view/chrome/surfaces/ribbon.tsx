@@ -44,13 +44,7 @@
  * `Command`/tab/slot (docs/023 §5.8) and it appears; this file never grows a
  * branch for it.
  */
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { Fragment, useCallback, useState, type ReactNode } from "react";
 import {
   Button as AriaButton,
   Toolbar as AriaToolbar,
@@ -68,12 +62,14 @@ import {
 } from "@quanghuy1242/idco-ui";
 import type { EditorStore } from "../../../core";
 import { useStoreVersion } from "./use-store-version";
+import { useIsMobile } from "./use-is-mobile";
 import {
   buildCommandContext,
   computeToolbarLayout,
   DEFAULT_TOOLBAR_LAYOUT,
   listBlockTypes,
   type CommandContext,
+  type PanelHost,
   type ResolvedToolbarItem,
   type ResolvedToolbarSlot,
   type ResolvedToolbarTab,
@@ -114,20 +110,6 @@ type RowEntry = {
   /** Eligible to collapse into the overflow menu (auto slot + a menu-item kind). */
   readonly collapsible: boolean;
 };
-
-/** Track the mobile breakpoint so `auto` slots fall back to scroll, not collapse. */
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia?.("(max-width: 767px)");
-    if (!query) return;
-    const update = () => setIsMobile(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return isMobile;
-}
 
 /** Icon + label + optional shortcut for a collapsible item's overflow MenuItem. */
 function collapsedMeta(item: ResolvedToolbarItem): {
@@ -240,6 +222,8 @@ export function EditorToolbar(props: {
   readonly layout?: ToolbarLayoutConfig;
   /** Per-deployment capability flags (docs/023 §5.6); merged over the defaults. */
   readonly capabilities?: Partial<ToolbarCapabilities>;
+  /** The dock seam so a tab command (View → Outline, Review → …) can open a pane. */
+  readonly panelHost?: PanelHost;
 }) {
   const { store, focusEditor, onFind } = props;
   // Re-read query state whenever selection or content changes.
@@ -262,7 +246,11 @@ export function EditorToolbar(props: {
     ...DEFAULT_CAPABILITIES,
     ...props.capabilities,
   } as ToolbarCapabilities;
-  const ctx: CommandContext = buildCommandContext(store, capabilities);
+  const ctx: CommandContext = buildCommandContext(
+    store,
+    capabilities,
+    props.panelHost,
+  );
   // Find is a document-global utility, so it lives in the persistent `end` zone like
   // any other global control — but its handler is a host prop (`onFind`), not a store
   // command, so it can't be a self-registered action. Inject it as a `component` item

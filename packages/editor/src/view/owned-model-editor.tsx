@@ -24,16 +24,25 @@ import {
   useState,
   type Ref,
 } from "react";
-import type { OwnedEditorHandle } from "../core";
+import type { NodeId, OwnedEditorHandle } from "../core";
 import {
   EditorToolbar,
   EngineContextMenu,
   SelectionFlyout,
+  SidePanelDock,
   SlashMenu,
   useCommandSurfaces,
 } from "./chrome";
-import type { ToolbarCapabilities, ToolbarLayoutConfig } from "./spi";
+import type {
+  PanelHost,
+  ToolbarCapabilities,
+  ToolbarLayoutConfig,
+} from "./spi";
 import { getDataSource, registerDataSource } from "./spi";
+import {
+  createDocumentIndexStore,
+  type MutableDocumentIndexStore,
+} from "./controllers/document-index-store";
 import { FindBar, useFindController, type FindController } from "./chrome";
 import { LinkPopover, useLinkInteraction } from "./chrome";
 import {
@@ -192,7 +201,48 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
       }) as ToolbarCapabilities,
     [toolbarCapabilities],
   );
-  const surfaces = useCommandSurfaces(store, capabilities);
+  // --- The side-panel dock (docs/027 §8) --------------------------------------
+  // A document-index store shared with the dock so its panes read the same off-thread
+  // index the block tree does, not a second worker round-trip (docs/027 §2.2 — one
+  // pipeline). Created once and threaded into the view (which publishes into it) and
+  // the dock (whose panes subscribe through `useDocumentIndex`).
+  const indexStoreRef = useRef<MutableDocumentIndexStore | null>(null);
+  if (!indexStoreRef.current)
+    indexStoreRef.current = createDocumentIndexStore();
+  // The dock's only persistent state: open/closed plus the active pane id (docs/027
+  // §8.5 — no per-user tab layout persisted before there is evidence it is wanted).
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [activePanelId, setActivePanelId] = useState<string | null>(null);
+  // Jump-to-anchor for panes (docs/027 §9): the engine's scroll-to-block reaches a
+  // windowed-out node a plain `#hash` cannot under virtualization.
+  const revealNode = useCallback((id: NodeId) => {
+    viewRef.current?.scrollToBlock(id);
+  }, []);
+  // The panel host seam (docs/027 §8.2): a tab command opens a pane through this.
+  const panelHost = useMemo<PanelHost>(
+    () => ({
+      close: () => setPanelOpen(false),
+      open: (paneId) => {
+        setActivePanelId(paneId);
+        setPanelOpen(true);
+      },
+      toggle: (paneId) => {
+        // Toggling the active pane closes the dock; toggling another pane (or opening
+        // when closed) switches to and reveals it (docs/027 §8.2).
+        if (panelOpen && activePanelId === paneId) {
+          setPanelOpen(false);
+        } else {
+          setActivePanelId(paneId);
+          setPanelOpen(true);
+        }
+      },
+    }),
+    [activePanelId, panelOpen],
+  );
+
+  // The flat command surfaces share the capability set + the dock seam so a flyout
+  // command can open a pane too (docs/027 §8.2).
+  const surfaces = useCommandSurfaces(store, capabilities, panelHost);
   const { requestContextMenu, closeAll: closeSurfaces } = surfaces;
 
   // A click on an inert link mark opens the link editor over it (legacy
@@ -270,10 +320,19 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
           focusEditor={focusEditor}
           layout={toolbarLayout}
           onFind={openFind}
+          panelHost={panelHost}
           store={store}
         />
       ),
-    [capabilities, focusEditor, hideToolbar, openFind, store, toolbarLayout],
+    [
+      capabilities,
+      focusEditor,
+      hideToolbar,
+      openFind,
+      panelHost,
+      store,
+      toolbarLayout,
+    ],
   );
 
   return (
@@ -286,44 +345,72 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
         onKeyDown={onKeyDown}
       >
         {toolbar}
-        {/* `relative` so the find card floats over the editor's top-right corner
-            instead of pushing the surface down when it opens (no layout shift). */}
-        <div
-          className="relative"
-          data-engine-surface=""
-          onClick={onClick}
-          onContextMenu={onContextMenu}
-        >
-          <FindBar controller={find} />
-          <div className={proseClassName} data-engine-prose="">
-            <OwnedModelEditorView ref={viewRef} store={store} {...viewProps} />
+        {/* Surface + dock are a flex row so the dock is a *sibling* of the scroller,
+            never inside it (docs/027 §8.3/§8.4): opening it only narrows the surface's
+            width, which the virtual window already treats as a resize, so it cannot
+            corrupt offset measurement (docs/025). The dock renders nothing when closed,
+            so the surface reclaims the full width. */}
+        <div className="flex items-stretch" data-engine-editor-body="">
+          {/* `relative` so the find card floats over the surface's top-right corner
+              instead of pushing it down when it opens (no layout shift). `min-w-0` lets
+              the surface shrink when the dock takes its column. */}
+          <div
+            className="relative min-w-0 flex-1"
+            data-engine-surface=""
+            onClick={onClick}
+            onContextMenu={onContextMenu}
+          >
+            <FindBar controller={find} />
+            <div className={proseClassName} data-engine-prose="">
+              <OwnedModelEditorView
+                ref={viewRef}
+                store={store}
+                {...viewProps}
+                documentIndexStore={indexStoreRef.current}
+              />
+            </div>
+            <LinkPopover
+              focusEditor={focusEditor}
+              interaction={linkInteraction}
+              store={store}
+            />
+            {/* The three flat command surfaces, all driven by the one coordinator so
+                only one is open at a time (docs/024 §8). */}
+            <EngineContextMenu
+              close={closeSurfaces}
+              ctx={surfaces.ctx}
+              focusEditor={focusEditor}
+              pos={
+                surfaces.surface?.kind === "context" ? surfaces.surface : null
+              }
+              store={store}
+            />
+            <SelectionFlyout
+              close={closeSurfaces}
+              ctx={surfaces.ctx}
+              focusEditor={focusEditor}
+              open={surfaces.surface?.kind === "flyout"}
+              store={store}
+            />
+            <SlashMenu
+              close={closeSurfaces}
+              ctx={surfaces.ctx}
+              focusEditor={focusEditor}
+              slash={
+                surfaces.surface?.kind === "slash" ? surfaces.surface : null
+              }
+              store={store}
+            />
           </div>
-          <LinkPopover
-            focusEditor={focusEditor}
-            interaction={linkInteraction}
-            store={store}
-          />
-          {/* The three flat command surfaces, all driven by the one coordinator so
-              only one is open at a time (docs/024 §8). */}
-          <EngineContextMenu
-            close={closeSurfaces}
-            ctx={surfaces.ctx}
-            focusEditor={focusEditor}
-            pos={surfaces.surface?.kind === "context" ? surfaces.surface : null}
-            store={store}
-          />
-          <SelectionFlyout
-            close={closeSurfaces}
-            ctx={surfaces.ctx}
-            focusEditor={focusEditor}
-            open={surfaces.surface?.kind === "flyout"}
-            store={store}
-          />
-          <SlashMenu
-            close={closeSurfaces}
-            ctx={surfaces.ctx}
-            focusEditor={focusEditor}
-            slash={surfaces.surface?.kind === "slash" ? surfaces.surface : null}
+          <SidePanelDock
+            activeId={activePanelId}
+            capabilities={capabilities}
+            indexStore={indexStoreRef.current}
+            onClose={() => setPanelOpen(false)}
+            onSelect={setActivePanelId}
+            open={panelOpen}
+            panelHost={panelHost}
+            reveal={revealNode}
             store={store}
           />
         </div>

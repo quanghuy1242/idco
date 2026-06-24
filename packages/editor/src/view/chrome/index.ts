@@ -18,6 +18,7 @@
  * node view under `nodes/` (note.md VP5).
  */
 export * from "./surfaces";
+export * from "./panes";
 export * from "./link-popover";
 export * from "./find-bar";
 export * from "./chrome-commands";

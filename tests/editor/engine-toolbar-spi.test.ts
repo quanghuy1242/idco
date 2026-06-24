@@ -196,11 +196,13 @@ describe("ribbon layout — Home + Insert resolve (docs/023 §5.5/§7)", () => {
     expect(layout.defaultTab).toBe("home");
   });
 
-  it("drops the empty/capability-gated View/Review/Data/AI tabs", () => {
+  it("shows View (its Outline dock command) and drops empty/gated Review/Data/AI", () => {
     const ids = computeToolbarLayout(makeCtx(fakeStore())).tabs.map(
       (t) => t.id,
     );
-    expect(ids).not.toContain("view");
+    // View now ships the dock-opening Outline command (docs/027 §8.2), so it resolves
+    // non-empty; Review/Data/AI still have no slots / are capability-gated off.
+    expect(ids).toContain("view");
     expect(ids).not.toContain("review");
     expect(ids).not.toContain("data");
     expect(ids).not.toContain("ai");

@@ -31,6 +31,7 @@ import {
   buildCommandContext,
   resolveCommandList,
   type CommandContext,
+  type PanelHost,
   type ToolbarCapabilities,
 } from "../../spi";
 import { useStoreVersion } from "./use-store-version";
@@ -123,11 +124,12 @@ export type CommandSurfacesController = {
 export function useCommandSurfaces(
   store: EditorStore,
   capabilities: ToolbarCapabilities,
+  panelHost?: PanelHost,
 ): CommandSurfacesController {
   // Re-render (and re-run the driver effects) on every selection/commit change.
   const version = useStoreVersion(store);
   const [surface, setSurface] = useState<SurfaceState>(null);
-  const ctx = buildCommandContext(store, capabilities);
+  const ctx = buildCommandContext(store, capabilities, panelHost);
 
   // Track an in-progress pointer drag so the ambient flyout does not flicker mid-drag
   // (docs/024 §7.2 "settled"). `settleTick` bumps on pointerup so the flyout effect
@@ -192,7 +194,7 @@ export function useCommandSurfaces(
     (x: number, y: number): boolean => {
       // Resolve against fresh state at click time; an empty resolution yields the
       // native menu (docs/024 §9 — object with no contributions, click off a block).
-      const liveCtx = buildCommandContext(store, capabilities);
+      const liveCtx = buildCommandContext(store, capabilities, panelHost);
       const groups = resolveCommandList("contextMenu", liveCtx);
       if (groups.length === 0) return false;
       // Right-click is explicit: suppress the ambient flyout for this selection so it
@@ -201,7 +203,7 @@ export function useCommandSurfaces(
       setSurface({ kind: "context", x, y });
       return true;
     },
-    [store, capabilities],
+    [store, capabilities, panelHost],
   );
 
   const closeAll = useCallback(() => {

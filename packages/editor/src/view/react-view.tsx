@@ -59,6 +59,7 @@ import {
   DEFAULT_VIEWPORT_HEIGHT,
 } from "./controllers/constants";
 import { useViewRefs } from "./controllers/refs";
+import type { MutableDocumentIndexStore } from "./controllers/document-index-store";
 import { useVirtualWindow } from "./controllers/use-virtual-window";
 import { useFocusNavigation } from "./controllers/use-focus-navigation";
 import { useClipboard } from "./controllers/use-clipboard";
@@ -122,6 +123,13 @@ export type OwnedModelEditorViewProps = {
    * (tests/SSR, or where `Worker` is unavailable).
    */
   readonly createBakeWorker?: () => Worker | null;
+  /**
+   * A document-index store to share with a side-panel dock (docs/027 §2.2). When the
+   * composed `OwnedModelEditor` passes one, the off-thread index controller publishes
+   * into it and the dock's panes read the same live index; omitted, the view owns a
+   * private store as before. The block tree itself never re-renders on a publish.
+   */
+  readonly documentIndexStore?: MutableDocumentIndexStore;
 };
 
 export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
@@ -139,13 +147,14 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     viewportHeight = DEFAULT_VIEWPORT_HEIGHT,
     overscan = DEFAULT_OVERSCAN,
     createBakeWorker = defaultCreateBakeWorker,
+    documentIndexStore,
   } = props;
   const localSchedulerRef = useRef<EngineScheduler | null>(null);
   if (!providedScheduler && !localSchedulerRef.current) {
     localSchedulerRef.current = createEngineScheduler();
   }
   const scheduler = providedScheduler ?? localSchedulerRef.current!;
-  const refs = useViewRefs();
+  const refs = useViewRefs(documentIndexStore);
   const { registryRef, rootRef, contentRef, goalColumnRef } = refs;
   const order = useEditorOrder(store);
 

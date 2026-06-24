@@ -28,3 +28,4 @@ export * from "./block-type-registry";
 export * from "./command-registry";
 export * from "./command-surface";
 export * from "./toolbar-layout";
+export * from "./side-panel-registry";

@@ -16,8 +16,15 @@ import {
   type MutableDocumentIndexStore,
 } from "./document-index-store";
 
-/** Create the shared view refs once. The return type is the `ViewRefs` contract. */
-export function useViewRefs() {
+/**
+ * Create the shared view refs once. The return type is the `ViewRefs` contract.
+ *
+ * `documentIndexStore` lets a composed surface (`OwnedModelEditor`) pass in a store
+ * it *shares* with its side-panel dock, so the dock's panes read the same off-thread
+ * index the block tree does instead of a second worker round-trip (docs/027 §2.2 —
+ * one pipeline). Omitted (bare view), the view owns a private store as before.
+ */
+export function useViewRefs(documentIndexStore?: MutableDocumentIndexStore) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const heightCacheRef = useRef<Map<NodeId, number>>(new Map());
@@ -69,7 +76,7 @@ export function useViewRefs() {
   // index here so views (a TOC) re-render, while the ref stays a ref so the block
   // list does not (note.md read-side SPI). Created once per view instance.
   const documentIndexStoreRef = useRef<MutableDocumentIndexStore>(
-    createDocumentIndexStore(),
+    documentIndexStore ?? createDocumentIndexStore(),
   );
 
   return {

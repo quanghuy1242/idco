@@ -21,3 +21,5 @@ export * from "./slash-menu";
 export * from "./use-command-surfaces";
 export * from "./command-builtins";
 export * from "./use-store-version";
+export * from "./use-is-mobile";
+export * from "./side-panel-dock";

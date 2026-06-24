@@ -35,10 +35,12 @@ import {
 } from "../../../core";
 import {
   registerCommand,
+  registerSidePanel,
   registerToolbarSlot,
   registerToolbarTab,
   type CommandRenderContext,
 } from "../../spi";
+import { OutlinePane } from "../panes";
 import { listToggleCommand } from "../chrome-commands";
 
 /** The link editor body (docs/023 §7.3) — the migrated `set-link`/`clear-link` form. */
@@ -188,9 +190,11 @@ export function registerBuiltInCommands(): void {
   builtInCommandsRegistered = true;
 
   // --- Ribbon tabs (docs/023 §5.4/§7) ----------------------------------------
-  // Home and Insert ship with content; View/Review/Data/AI are registered so the
-  // model knows them but ship no slots/commands and so resolve empty and are
-  // dropped (docs/023 §7.4). Review/Data/AI gate on their capability to demo §5.6.
+  // Home and Insert ship with content; View ships the dock-opening commands
+  // (docs/027 §8.2). Review/Data/AI are registered so the model knows them but ship
+  // no slots until their features land (docs/027 phases), so they resolve empty and
+  // are dropped (docs/023 §7.4). Data/AI gate on their capability to demo §5.6;
+  // Review's visibility becomes registry-driven as its panes register (docs/027 §7.7).
   registerToolbarTab({ id: "home", label: "Home" });
   registerToolbarTab({ id: "insert", label: "Insert" });
   registerToolbarTab({ id: "view", label: "View" });
@@ -236,6 +240,9 @@ export function registerBuiltInCommands(): void {
     tab: "insert",
   });
   registerToolbarSlot({ display: "auto", id: "insert.blocks", tab: "insert" });
+  // View tab — dock-opening commands (docs/027 §8.2). Labelled because a panel name
+  // ("Outline") is the discoverability win, like Insert's block glyphs are.
+  registerToolbarSlot({ display: "labelled", id: "view.panels", tab: "view" });
 
   // --- Global edit-ops (docs/024 §7.1) — the context menu's former literals ----
   // Clipboard goes through the same model serialization the native Ctrl+C/X/V path
@@ -431,6 +438,31 @@ export function registerBuiltInCommands(): void {
     label: "Table",
     render: (ctx) => <TableInsertBody ctx={ctx} />,
     slot: "insert.tables",
+    surfaces: { ribbon: "primary" },
+  });
+
+  // --- Side panels — the dock (docs/027 §8) -----------------------------------
+  // Outline is the first dock pane and the outline "reunion" (docs/027 §8.4): a
+  // registered `SidePanel` (the tenant) opened by a View-tab command (the trigger)
+  // through `panelHost`. Two registrations joined only by `panelHost.toggle`, never
+  // fused (docs/027 §8.6). The command is ribbon-only — it opens a workspace, it is
+  // not a flat-surface action — so it carries the `panel` group and no flat surface.
+  registerSidePanel({
+    iconName: "ScrollText",
+    id: "outline",
+    render: ({ reveal }) => <OutlinePane reveal={reveal} />,
+    title: "Outline",
+  });
+  registerCommand({
+    group: "panel",
+    icon: "ScrollText",
+    id: "view.outline",
+    kind: "button",
+    label: "Outline",
+    // Toggle so the same tab press opens the dock on Outline and closes it again
+    // (docs/027 §8.2). A bare/no-dock context (`panelHost` absent) makes it a no-op.
+    run: (ctx) => ctx.panelHost?.toggle("outline"),
+    slot: "view.panels",
     surfaces: { ribbon: "primary" },
   });
 }
