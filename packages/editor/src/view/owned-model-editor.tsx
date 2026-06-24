@@ -350,13 +350,18 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
             width, which the virtual window already treats as a resize, so it cannot
             corrupt offset measurement (docs/025). The dock renders nothing when closed,
             so the surface reclaims the full width. */}
-        <div className="flex items-stretch" data-engine-editor-body="">
+        {/* `gap-1 p-1` puts one even 4px frame around the row and a single 4px gap
+            between the editor and the dock — the margin lives on the row, not on both
+            children, so the gap between them is not doubled. */}
+        <div
+          className="flex items-stretch gap-1 p-1"
+          data-engine-editor-body=""
+        >
           {/* `relative` so the find card floats over the surface's top-right corner
               instead of pushing it down when it opens (no layout shift). `min-w-0` lets
-              the surface shrink when the dock takes its column. `m-1` matches the dock's
-              margin so the editor has even space around it and a small gap to the dock. */}
+              the surface shrink when the dock takes its column. */}
           <div
-            className="relative m-1 min-w-0 flex-1"
+            className="relative min-w-0 flex-1"
             data-engine-surface=""
             onClick={onClick}
             onContextMenu={onContextMenu}

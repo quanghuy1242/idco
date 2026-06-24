@@ -131,14 +131,13 @@ export function SidePanelDock(props: SidePanelDockProps) {
   }
 
   // Wide viewport: a side column, a sibling of the scroller so it only narrows the
-  // surface's width (docs/027 §8.3/§8.4). `m-1` gives even space around the dock and
-  // between it and the editor (which carries the same `m-1`); `rounded-box` + full
-  // border make it a distinct card rather than a panel whose border doubles up against
-  // the chrome.
+  // surface's width (docs/027 §8.3/§8.4). Spacing is the editor body's `gap-1 p-1`, so
+  // the dock carries no margin of its own (that would double the gap to the editor);
+  // `rounded-box` + full border make it a distinct card.
   return (
     <aside
       aria-label="Document panels"
-      className="m-1 flex w-80 shrink-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100"
+      className="flex w-80 shrink-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100"
       data-engine-side-panel-dock=""
     >
       {body}

@@ -76,8 +76,9 @@
   - [16.5 Phase 3 — Document Collections SPI And Glossary](#165-phase-3--document-collections-spi-and-glossary)
   - [16.6 Phase 4 — Comment Source SPI And Comment Model](#166-phase-4--comment-source-spi-and-comment-model)
   - [16.7 Phase 5 — Accessibility And Broken References](#167-phase-5--accessibility-and-broken-references)
-  - [16.8 Phase 6 — Reserved](#168-phase-6--reserved)
-  - [16.9 Sequencing Rationale](#169-sequencing-rationale)
+  - [16.8 Phase 6 — Annotation Interaction](#168-phase-6--annotation-interaction)
+  - [16.9 Phase 7 — Reserved](#169-phase-7--reserved)
+  - [16.10 Sequencing Rationale](#1610-sequencing-rationale)
 
 ## 1. Purpose And Scope
 
@@ -509,11 +510,27 @@ The remaining document-health panes (§9.5–§9.6), recommendation-only.
 
 **5b — Broken references (§9.6).** A list of reference blocks whose resolve failed or whose ref is dangling, read off the docs/026 resolve status. The Review-side payoff of the docs/026 resolve lifecycle; gated on docs/026 being in place.
 
-### 16.8 Phase 6 — Reserved
+### 16.8 Phase 6 — Annotation Interaction
+
+The marks are visible after P3/P4 (the glossary `<abbr>`, the comment highlight) but still *passive* — you cannot click a marked word to read or manage it. This phase makes the annotations interactive on both tiers and is the natural payoff of the dock: a marked word becomes the entry point to its term/thread. It was surfaced during the first run-through (the marks felt inert next to the dock) and is sequenced after P5 because it depends on P3+P4 existing and reuses three seams already shipped.
+
+The interaction model, settled:
+
+- **Click only, both kinds (consistency).** A click on a glossary or comment mark is the single gesture; no hover-tooltip split between the two. Predictable, touch-friendly, and one code path.
+- **Popover first, then route.** The click opens a lightweight *read* popover anchored at the word — the glossary definition (resolved from the one collection, no copy), or the comment thread painted from its snapshot and revalidated (SWR, §7.3). The popover carries a "Manage" / "Open in…" action that opens the dock on the right pane *focused on that item*. Read-first keeps a quick read from yanking the author into the dock, while still making the dock one click away. This supersedes the earlier "comment routes straight to the dock" idea: both kinds get the same read-popover-then-route flow.
+
+This is **SPI work, not bespoke wiring** — the seams already exist:
+
+- **Click delegation reuses the link pattern.** The surface already delegates a click to `useLinkInteraction` by inspecting the target's mark element ([owned-model-editor.tsx](../packages/editor/src/view/owned-model-editor.tsx)). A sibling `useAnnotationInteraction(store)` extends that one delegated handler to `[data-engine-glossary-term]` / `[data-engine-comment-thread]` (the attrs the marks already emit, §6.1/§7.5) and opens one `AnnotationPopover` (the `LinkPopover` shape). Delegated, so it is virtualization-safe and adds no per-mark handler. A precedence rule settles a span that is both a link and an annotation (innermost mark wins, by the existing nesting ranks).
+- **Routing extends the dock seam.** `panelHost.open(paneId)` gains an optional focus target — `panelHost.open(paneId, focusId?)` — and each pane gains a "scroll this row/thread into view + transient highlight" contract in its `SidePanelRenderArgs`. The Glossary pane focuses the term row; the Comments pane focuses (and expands) the thread. Small additions to the `PanelHost` and `SidePanel` SPIs, not a new mechanism.
+
+The reader half is **docs/015 §12** (read-only `<abbr title>` for glossary, snapshot-only highlight/margin note for comments, never a host call) and is built with the reader extraction, not here. *Acceptance:* clicking a glossary word reads its definition and can open the Glossary pane on that term; clicking a comment reads its thread and can open the Comments pane focused on it; the click delegation is one handler (no per-mark handlers); and `panelHost.open(paneId, focusId)` reliably reveals + highlights the target in the pane.
+
+### 16.9 Phase 7 — Reserved
 
 Track-changes / suggested edits and AI-proposed changes (§9.7). Not built. The seam is already stated: a suggested edit is an annotation on a range with a thread and an accepted/resolved state — the comment model's shape — so when it is designed it extends the annotation/thread model and registers as another dock pane, rather than growing a parallel mechanism.
 
-### 16.9 Sequencing Rationale
+### 16.10 Sequencing Rationale
 
 Two ordering calls carry the phasing and are worth restating.
 
