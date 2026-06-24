@@ -37,6 +37,14 @@ const panelClass =
  * rest of the page); nested inside the non-modal selection flyout that overlay stacked over
  * the popover's own content and swallowed clicks, so its input could not be focused. Outside
  * press + Escape still dismiss a non-modal popover, so behavior is unchanged otherwise.
+ *
+ * A non-modal popover also runs `shouldCloseOnInteractOutside` on focus-out (React Aria's
+ * `onBlurWithin`), not just on a pointer press outside. When the popover is opened over an
+ * editing surface that pulls focus back to itself on a press (the table cell `…` popover —
+ * pressing a swatch refocuses the EditContext block so the cell selection survives), that
+ * focus bounce reads as an outside interaction and dismisses the popover on *pointerdown*,
+ * before the click applies. Pass `shouldCloseOnInteractOutside` to keep the popover open
+ * for those interior/blur targets (see `table-interactions.tsx`).
  */
 export function PopoverTrigger(props: {
   readonly trigger: ReactNode;
@@ -45,6 +53,7 @@ export function PopoverTrigger(props: {
   readonly isOpen?: boolean;
   readonly onOpenChange?: (isOpen: boolean) => void;
   readonly ariaLabel?: string;
+  readonly shouldCloseOnInteractOutside?: PopoverProps["shouldCloseOnInteractOutside"];
 }) {
   const {
     trigger,
@@ -52,6 +61,7 @@ export function PopoverTrigger(props: {
     placement = "bottom",
     isOpen,
     onOpenChange,
+    shouldCloseOnInteractOutside,
   } = props;
   return (
     <DialogTrigger isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -61,6 +71,7 @@ export function PopoverTrigger(props: {
         isNonModal
         offset={4}
         placement={placement}
+        shouldCloseOnInteractOutside={shouldCloseOnInteractOutside}
       >
         <Dialog aria-label={props.ariaLabel} className="outline-none">
           {({ close }) => children(close)}

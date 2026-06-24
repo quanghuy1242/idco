@@ -573,9 +573,21 @@ export function EditorToolbar(props: {
       aria-label="Editor toolbar"
       className={`border-b border-base-300 bg-base-100 ${props.className ?? ""}`}
       data-engine-toolbar=""
-      // Pressing a toolbar control must not blur the editing host; model selection
-      // survives focus loss, and we restore focus after the command.
-      onMouseDownCapture={(event) => event.preventDefault()}
+      // Pressing a toolbar *control* must not blur the editing host; model selection
+      // survives focus loss, and we restore focus after the command. But only suppress
+      // the default for presses on the bar's own DOM controls: a `popover` action
+      // (link / align / glossary / comment editor) portals its content to `document.body`,
+      // yet React routes that overlay's synthetic events through the React *tree* — so a
+      // mousedown inside the popover's text field still reaches this capture handler. A
+      // blanket preventDefault there cancels the field's caret placement, so the field
+      // could not be mouse-selected (keyboard-only — Shift+Arrow still worked). Gate on
+      // DOM containment: `event.target` inside the bar → a real control press (suppress);
+      // inside a portaled overlay → leave the field's own mouse behaviour intact.
+      onMouseDownCapture={(event) => {
+        if (event.currentTarget.contains(event.target as Node)) {
+          event.preventDefault();
+        }
+      }}
       role="group"
     >
       {/* Tab strip + the persistent quick-access zones: undo/redo (start) sit left of

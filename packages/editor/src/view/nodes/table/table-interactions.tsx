@@ -62,6 +62,33 @@ const FILL_COLORS: readonly string[] = [
   "#3f3f46",
 ];
 
+/**
+ * Whether an outside interaction/blur target should NOT dismiss the cell `…` popover.
+ *
+ * The popover is non-modal (`@idco/ui` `PopoverTrigger`), so React Aria's `useOverlay`
+ * runs `shouldCloseOnInteractOutside` for a press *inside* the popover too. This keeps it
+ * open for its own content (`[data-engine-cell-toolbar]` / `[data-engine-surface-child]`)
+ * so React Aria never reads a swatch/align press as an outside dismiss. A press truly
+ * outside the popover (anywhere in the editor or page chrome) is in neither region, so it
+ * dismisses — that is how click-outside-to-close keeps working.
+ *
+ * That alone is not enough: pressing a swatch bounces focus back to the editor's
+ * EditContext block (so the cell selection survives), and React Aria's non-modal
+ * `useOverlay` runs `shouldCloseOnInteractOutside` on that `onBlurWithin` with the editor
+ * block as `relatedTarget` — indistinguishable, by target, from a genuine click on the
+ * editor. So the panel below also flags `pressInsideRef` on its own `pointerdown`; while
+ * that flag is set (the focus bounce belongs to a press that started inside the popover)
+ * the dismiss is suppressed, but a fresh press that starts outside leaves it clear and
+ * still dismisses. Without this the fill/align never applied — the menu vanished on
+ * pointerdown, before the button's `onClick`/`onPress` ran.
+ */
+function keepCellPopoverOpen(element: Element): boolean {
+  return (
+    element.closest("[data-engine-cell-toolbar]") !== null ||
+    element.closest("[data-engine-surface-child]") !== null
+  );
+}
+
 /** Resolve a client point to the table cell under it, with its grid coordinates. */
 function cellHitAt(store: EditorStore, x: number, y: number): CellHit | null {
   if (typeof document.elementFromPoint !== "function") return null;
@@ -110,6 +137,11 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
   const hoveredRef = useRef<CellHit | null>(null);
   const pinnedRef = useRef<CellHit | null>(null);
   const anchorRef = useRef<CellHit | null>(null);
+  // Set the frame a `…`-popover press starts inside the popover, so the focus bounce it
+  // causes (focus returns to the editor block) is not read as a dismiss; cleared next
+  // frame so a later press that starts outside still closes the popover (see
+  // `keepCellPopoverOpen`).
+  const pressInsideRef = useRef(false);
   rangeRef.current = range;
 
   // Mirror the drag range into the per-store channel so the right-click context menu's
@@ -322,6 +354,9 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
                 ariaLabel="Cell actions"
                 placement="bottom end"
                 isOpen={open}
+                shouldCloseOnInteractOutside={(el) =>
+                  !keepCellPopoverOpen(el) && !pressInsideRef.current
+                }
                 onOpenChange={(next) => {
                   // Pin the cell the menu was opened on, so it stays put while
                   // the pointer roams onto the popover or off the table.
@@ -334,6 +369,16 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
                   <div
                     data-engine-cell-toolbar=""
                     className="flex w-56 flex-col gap-2"
+                    // Flag that this gesture started inside the popover, so the focus
+                    // bounce it triggers is not mistaken for an outside dismiss (see
+                    // `keepCellPopoverOpen`). Capture-phase + cleared next frame, after
+                    // React Aria's synchronous blur check has read it.
+                    onPointerDownCapture={() => {
+                      pressInsideRef.current = true;
+                      requestAnimationFrame(() => {
+                        pressInsideRef.current = false;
+                      });
+                    }}
                   >
                     {canMerge ? (
                       <AriaButton

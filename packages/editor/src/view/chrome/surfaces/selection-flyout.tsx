@@ -51,12 +51,30 @@ function selectionStartRect(store: EditorStore): DOMRect | null {
   return el ? caretClientRect(el, start.offset) : null;
 }
 
-/** Keep the flyout open while interacting within itself or a marked child overlay. */
-function insideFlyoutOrChild(element: Element): boolean {
+/**
+ * Whether an outside interaction/blur target should NOT dismiss the flyout. Keep it
+ * open while interacting within the flyout itself, a marked child overlay, or — the
+ * load-bearing case — when focus returns to the editing surface (docs/024 §8).
+ *
+ * React Aria's non-modal `useOverlay` runs `shouldCloseOnInteractOutside` not only on a
+ * pointer press outside the popover but also on `onBlurWithin` (focus leaving the
+ * popover, via `shouldCloseOnBlur`). After a flyout command runs, `run` calls
+ * `focusEditor()` to restore editor focus so the author can keep typing — that blur's
+ * `relatedTarget` is an editor block (`[data-engine-surface]`). Without treating the
+ * surface as "inside", that focus restore is read as an outside interaction and tears
+ * the sticky flyout down (it surfaced as: drag-select text, click Bold, flyout vanishes
+ * — the keyboard path only hid it because `focusEditor()` was a no-op when focus was
+ * already in the editor). Dismissal that *should* happen — clicking a different spot in
+ * the document — collapses/moves the selection, which the coordinator already turns into
+ * a close (`use-command-surfaces.ts`); a click truly outside the editor (page chrome,
+ * toolbar) is not within the surface, so it still dismisses here.
+ */
+function shouldKeepFlyoutOpen(element: Element): boolean {
   return (
     element.closest("[data-engine-flyout]") !== null ||
     element.closest("[data-engine-link-editor]") !== null ||
-    element.closest("[data-engine-surface-child]") !== null
+    element.closest("[data-engine-surface-child]") !== null ||
+    element.closest("[data-engine-surface]") !== null
   );
 }
 
@@ -153,7 +171,7 @@ export function SelectionFlyout(props: {
         }}
         placement="top"
         shouldCloseOnInteractOutside={(element) =>
-          !insideFlyoutOrChild(element)
+          !shouldKeepFlyoutOpen(element)
         }
         triggerRef={anchorRef}
       >
