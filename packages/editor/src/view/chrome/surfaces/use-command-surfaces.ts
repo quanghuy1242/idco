@@ -109,6 +109,22 @@ export function detectSlashTrigger(store: EditorStore): SlashTrigger | null {
  * Without this, the sticky flyout pops back over a context-menu-spawned link popover and
  * the two fight for focus.
  */
+/**
+ * True while one of the flyout's child command popovers (link / glossary-add / comment-add)
+ * is open: its portaled content is marked `data-engine-flyout-child` (the always-present
+ * trigger span is not). The ambient flyout must NOT close while a child is open, or it tears
+ * the child popover — and the input the author is typing in — out from under them. This
+ * regressed when the flyout re-evaluation became a debounced settle (b6c82bc): the delayed
+ * re-eval now lands *after* the modal child has opened, so without this guard a transient
+ * "don't show" verdict would dismiss the flyout and unmount the child mid-interaction.
+ */
+function flyoutChildOpen(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    document.querySelector("[data-engine-flyout-child]") !== null
+  );
+}
+
 function selectionSignature(store: EditorStore): string | null {
   const sel = store.selection;
   if (sel?.type !== "text") return null;
@@ -219,6 +235,10 @@ export function useCommandSurfaces(
     setSurface((prev) => {
       if (prev?.kind === "context" || prev?.kind === "slash") return prev;
       if (show) return prev?.kind === "flyout" ? prev : { kind: "flyout" };
+      // Keep the flyout open while one of its own child command popovers is open, so a
+      // delayed/transient "don't show" verdict never tears the child (and its focused
+      // input) out from under the author (docs/027 annotation-input focus).
+      if (prev?.kind === "flyout" && flyoutChildOpen()) return prev;
       return prev?.kind === "flyout" ? null : prev;
     });
   }, [store, version, settleTick]);

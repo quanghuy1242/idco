@@ -109,7 +109,11 @@ export function SelectionFlyout(props: {
               // types in this child popover. Without this, any command popover other
               // than the link editor (glossary/comment add) closes the flyout the
               // moment its input is focused, so the input never gets focus (docs/027).
-              <div data-engine-surface-child="">
+              // `data-engine-flyout-child` additionally marks an *open* child (the trigger
+              // span carries only `surface-child`), so the coordinator can keep the ambient
+              // flyout alive while a child popover is open (use-command-surfaces.ts) — else
+              // the debounced settle re-eval tears the child + its focused input out.
+              <div data-engine-flyout-child="" data-engine-surface-child="">
                 {command.render?.({ ...ctx, close: closeChild }) ?? null}
               </div>
             )}

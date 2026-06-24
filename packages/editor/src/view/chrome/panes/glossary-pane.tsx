@@ -13,7 +13,7 @@
  * is never asked to pick a flow. React Aria behavior + DaisyUI styling throughout, per
  * the package rule.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Badge, Button, Input, NavIcon } from "@quanghuy1242/idco-ui";
 import type { CommandRenderContext } from "../../spi";
 import { useDocumentIndex } from "../../document-index";
@@ -30,7 +30,7 @@ import {
   type GlossaryRow,
   type GlossaryTerm,
 } from "./glossary";
-import { useScrollToFocus } from "./use-reveal-focus";
+import { useAutoFocusWithin, useScrollToFocus } from "./use-reveal-focus";
 
 /** Mint a unique term id without a new mechanism (the document allocator). */
 function newTermId(store: EditorStore): string {
@@ -293,6 +293,9 @@ export function GlossaryAddPopover(props: {
   // seeded with the selected text so an exact match surfaces first.
   const [query, setQuery] = useState(selected);
   const [definition, setDefinition] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Autofocus the first field on open (the popover is non-modal, so this is explicit).
+  useAutoFocusWithin(rootRef);
   const needle = query.trim().toLowerCase();
   const filtered = needle
     ? terms.filter(
@@ -314,7 +317,7 @@ export function GlossaryAddPopover(props: {
   };
 
   return (
-    <div className="grid w-72 gap-2" data-engine-glossary-add="">
+    <div className="grid w-72 gap-2" data-engine-glossary-add="" ref={rootRef}>
       <span className="text-xs font-medium opacity-70">
         Add “{selected || "selection"}” to glossary
       </span>

@@ -29,6 +29,14 @@ const panelClass =
  * `MenuTrigger` (a list of actions) this hosts arbitrary content such as a small
  * form (e.g. a link editor). `children` receives a `close` callback so the
  * content can dismiss the popover after committing.
+ *
+ * The popover is **non-modal** (`isNonModal`): it is an anchored action/form popover (a
+ * link/align/glossary/comment editor opened from the selection flyout, the ribbon, or a
+ * table cell toolbar), not a blocking dialog. A modal popover renders React Aria's modal
+ * infrastructure (a body-portaled, pointer-events-capturing layer + `aria-hidden` on the
+ * rest of the page); nested inside the non-modal selection flyout that overlay stacked over
+ * the popover's own content and swallowed clicks, so its input could not be focused. Outside
+ * press + Escape still dismiss a non-modal popover, so behavior is unchanged otherwise.
  */
 export function PopoverTrigger(props: {
   readonly trigger: ReactNode;
@@ -48,7 +56,12 @@ export function PopoverTrigger(props: {
   return (
     <DialogTrigger isOpen={isOpen} onOpenChange={onOpenChange}>
       {trigger}
-      <AriaPopover className={panelClass} offset={4} placement={placement}>
+      <AriaPopover
+        className={panelClass}
+        isNonModal
+        offset={4}
+        placement={placement}
+      >
         <Dialog aria-label={props.ariaLabel} className="outline-none">
           {({ close }) => children(close)}
         </Dialog>

@@ -124,7 +124,10 @@ function renderGlossaryMark({ mark, child, key }: MarkRenderArgs): ReactNode {
   return (
     <abbr
       key={key}
-      className="cursor-help no-underline decoration-dotted underline-offset-2 [text-decoration-line:underline]"
+      // One dotted underline only: the `[data-engine-mark='glossary']` border-bottom
+      // (styles.ts) is the single source. The abbr's own text-decoration underline is
+      // suppressed (`no-underline`) so the term is not doubly-underlined (border + UA).
+      className="cursor-help no-underline"
       data-engine-glossary-term={typeof term === "string" ? term : undefined}
       data-engine-mark="glossary"
       data-engine-mark-id={mark.id}

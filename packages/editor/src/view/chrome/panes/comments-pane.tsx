@@ -9,7 +9,7 @@
  * No comment body, author, or resolved flag is ever read from the document — only the
  * anchor mark and its snapshot are.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Button, Input, NavIcon } from "@quanghuy1242/idco-ui";
 import type { CommandRenderContext, CommentSource, Thread } from "../../spi";
 import { activeCommentSource } from "../../spi";
@@ -21,7 +21,7 @@ import {
   nodeForThread,
   unanchorThread,
 } from "./comments";
-import { useScrollToFocus } from "./use-reveal-focus";
+import { useAutoFocusWithin, useScrollToFocus } from "./use-reveal-focus";
 
 /** Load threads from the host source with SWR semantics + a manual refresh (docs/027 §7.3). */
 function useCommentThreads(source: CommentSource): {
@@ -280,6 +280,9 @@ export function CommentAddPopover(props: {
   const source = activeCommentSource();
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  // Autofocus the comment field on open (the popover is non-modal, so this is explicit).
+  useAutoFocusWithin(formRef);
   if (!source) return null;
   const submit = () => {
     const text = body.trim();
@@ -302,13 +305,13 @@ export function CommentAddPopover(props: {
         event.preventDefault();
         submit();
       }}
+      ref={formRef}
     >
       <span className="text-xs font-medium opacity-70">
         Comment on “{ctx.selection.selectedText.trim() || "selection"}”
       </span>
       <Input
         ariaLabel="Comment"
-        autoFocus
         onChange={setBody}
         placeholder="Write a comment…"
         size="sm"

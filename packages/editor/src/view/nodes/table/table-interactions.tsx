@@ -171,9 +171,28 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
         target.closest("[data-engine-cell-toolbar]") !== null
       );
     }
+    // Whether the pointer landed on the editor surface itself (not a portaled overlay
+    // floating above it — the selection flyout, a glossary/comment add popover, a dialog).
+    // The cell hit test is *geometric* (`cellHitAt` by client coordinates), so without this
+    // a press inside a popover that happens to sit over the table would register a phantom
+    // cell hit: it would start a cell drag (hijacking the popover's own input — the input
+    // becomes unclickable) and paint the body-portaled range/hover overlays over the popover.
+    // The surface root carries `data-engine-view-root`; a portaled overlay is outside it.
+    function onSurface(target: EventTarget | null): boolean {
+      return (
+        target instanceof Element &&
+        target.closest("[data-engine-view-root]") !== null
+      );
+    }
     function onPointerDown(event: PointerEvent) {
       if (event.button !== 0 || inChrome(event.target)) return;
+      // A press anywhere clears a painted range, but only a press that lands on the surface
+      // (not a popover above it) may begin a new cell drag.
       if (rangeRef.current) setRange(null);
+      if (!onSurface(event.target)) {
+        dragRef.current = null;
+        return;
+      }
       const hit = cellHitAt(store, event.clientX, event.clientY);
       dragRef.current = hit ? { ...hit, moved: false } : null;
     }
@@ -198,6 +217,16 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
       // Over the toolbar/popover we keep the last hovered cell (inChrome), so
       // moving onto the button does not dismiss it.
       if (inChrome(event.target)) return;
+      // Over a portaled overlay (a popover/dialog floating above the table), clear the
+      // hover so the cell … toolbar never renders on top of that overlay (it would steal
+      // the overlay's pointer events / cover its input).
+      if (!onSurface(event.target)) {
+        if (hoveredRef.current) {
+          hoveredRef.current = null;
+          setHovered(null);
+        }
+        return;
+      }
       const hit = cellHitAt(store, event.clientX, event.clientY);
       if ((hit?.cellId ?? null) !== (hoveredRef.current?.cellId ?? null)) {
         hoveredRef.current = hit;

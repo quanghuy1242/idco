@@ -124,7 +124,9 @@ export const RICH_TEXT_TYPOGRAPHY_CSS =
   ".rt-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:color-mix(in srgb, currentColor 8%, transparent);padding:0.05em 0.3em;border-radius:3px;}" +
   ".rt-highlight,.rt-mark{background:color-mix(in srgb, var(--color-warning, gold) 45%, transparent);color:inherit;border-radius:2px;}" +
   ".rt-comment{background:color-mix(in srgb, var(--color-info, #38bdf8) 22%, transparent);border-radius:2px;}" +
-  ".rt-glossary{border-bottom:1px dotted currentColor;cursor:help;}" +
+  // One dotted underline: the `border-bottom` is the single source. `text-decoration:none`
+  // suppresses the `<abbr title>` UA underline so the term is not doubly-underlined.
+  ".rt-glossary{border-bottom:1px dotted currentColor;cursor:help;text-decoration:none;}" +
   // Divider: a themed horizontal rule. A `divider` object renders `<hr class="rt-hr">`
   // (docs/028 §4.1). No margin here on purpose: the article's single inter-block gap owns
   // spacing (docs/028 §4.5), and a margin in this unlayered `<style>` would beat the
