@@ -267,6 +267,8 @@ function stepTouchesNode(step: Step, node: NodeId): boolean {
         step.to.parent === node
       );
     case "set-settings":
+    case "set-collection":
+      // Document-level steps touch no body node.
       return false;
   }
 }

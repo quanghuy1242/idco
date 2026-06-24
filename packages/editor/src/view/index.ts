@@ -135,6 +135,16 @@ export {
   type SidePanel,
   type SidePanelRenderArgs,
 } from "./spi";
+// Document Collections SPI (docs/027 §5.2): a feature declares a document-owned
+// collection (glossary first) so the model carries its items and a pane can gate on
+// it. Item edits route through the `set-collection` command/step (history-undoable).
+export {
+  getDocumentCollection,
+  listDocumentCollections,
+  registerDocumentCollection,
+  unregisterDocumentCollection,
+  type DocumentCollectionDefinition,
+} from "./spi";
 export { sanitizeHtmlToCompat } from "./paste-html";
 export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
 export {

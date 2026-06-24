@@ -34,13 +34,20 @@ import {
   type EditorStore,
 } from "../../../core";
 import {
+  getDocumentCollection,
   registerCommand,
+  registerDocumentCollection,
   registerSidePanel,
   registerToolbarSlot,
   registerToolbarTab,
   type CommandRenderContext,
 } from "../../spi";
-import { OutlinePane, StatisticsPane } from "../panes";
+import {
+  GlossaryAddPopover,
+  GlossaryPane,
+  OutlinePane,
+  StatisticsPane,
+} from "../panes";
 import { listToggleCommand } from "../chrome-commands";
 
 /** The link editor body (docs/023 §7.3) — the migrated `set-link`/`clear-link` form. */
@@ -495,6 +502,49 @@ export function registerBuiltInCommands(): void {
     run: (ctx) => ctx.panelHost?.toggle("insights"),
     slot: "review.panels",
     surfaces: { ribbon: "primary" },
+  });
+
+  // --- Review: Glossary (docs/027 §6) -----------------------------------------
+  // Glossary is document-owned (docs/027 §6.5): register the collection so the model
+  // carries its terms and the pane/commands light up (the §7.7 gate — they check the
+  // collection is registered, demonstrating gating even though it ships on by default).
+  // A profile that omits glossary unregisters it and the pane/command vanish.
+  registerDocumentCollection({ id: "glossary" });
+  registerSidePanel({
+    iconName: "BookA",
+    id: "glossary",
+    isAvailable: () => getDocumentCollection("glossary") !== undefined,
+    render: ({ reveal, store }) => (
+      <GlossaryPane reveal={reveal} store={store} />
+    ),
+    title: "Glossary",
+  });
+  registerCommand({
+    group: "panel",
+    icon: "BookA",
+    id: "review.glossary",
+    isAvailable: () => getDocumentCollection("glossary") !== undefined,
+    kind: "button",
+    label: "Glossary",
+    run: (ctx) => ctx.panelHost?.toggle("glossary"),
+    slot: "review.panels",
+    surfaces: { ribbon: "primary" },
+  });
+  // Add-to-glossary: the type-first add action (docs/027 §6.2/§9.1), primary in the
+  // selection flyout (the context-first surface) and present in the Review ribbon for
+  // discoverability. Gated on the glossary collection; greyed (not removed) without a
+  // selection, so the ribbon control does not shimmer.
+  registerCommand({
+    group: "annotate",
+    icon: "BookA",
+    id: "glossary.add",
+    isAvailable: () => getDocumentCollection("glossary") !== undefined,
+    isDisabled: (ctx) => !ctx.selection.hasSelection,
+    kind: "popover",
+    label: "Add to glossary",
+    render: (ctx) => <GlossaryAddPopover ctx={ctx} />,
+    slot: "review.panels",
+    surfaces: { flyout: "primary", ribbon: "primary" },
   });
 }
 

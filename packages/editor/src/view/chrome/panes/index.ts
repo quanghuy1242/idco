@@ -10,3 +10,5 @@
 export * from "./outline-pane";
 export * from "./statistics-pane";
 export * from "./text-stats";
+export * from "./glossary";
+export * from "./glossary-pane";

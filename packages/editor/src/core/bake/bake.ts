@@ -28,6 +28,7 @@
 import {
   resolveBoundaryOffset,
   type BakedSnapshot,
+  type CollectionItem,
   type EditorDocumentSnapshot,
   type JsonValue,
   type NodeId,
@@ -79,17 +80,34 @@ export type TextIndexEntry = {
 
 /** One comment/glossary index entry, derived from a leaf's range marks. */
 export type CommentIndexEntry = {
+  /** The mark id (the occurrence's identity; used for orphan detection + removal). */
   readonly id: string;
   readonly node: NodeId;
   readonly kind: "comment" | "glossary";
   readonly text: string;
+  /**
+   * The reference the mark carries (docs/027 §4.1): a glossary mark's `attrs.term`
+   * (the collection item id) or a comment mark's `attrs.thread` (the host thread id).
+   * The join key a pane uses to count occurrences per term/thread and to detect an
+   * orphaned reference (a mark whose `ref` names no live item, docs/027 §6.3/§7.6).
+   * Absent on a legacy mark that carried no ref attr yet.
+   */
+  readonly ref?: string;
 };
 
-/** The pure derived index for a document (TOC + plain-text + comments). */
+/** The pure derived index for a document (TOC + plain-text + comments + collections). */
 export type DocumentIndex = {
   readonly toc: readonly TocEntry[];
   readonly text: readonly TextIndexEntry[];
   readonly comments: readonly CommentIndexEntry[];
+  /**
+   * Document-owned collections passed straight through from the snapshot (docs/027
+   * §5.4). The index carries the raw items (plain JSON, worker-safe) and a pane joins
+   * them with `comments` for occurrence counts — the glossary pane joins
+   * `collections.glossary` against `comments` of `kind: "glossary"`. Keeping the join
+   * pane-side keeps the worker index free of any per-collection function (§5.5).
+   */
+  readonly collections: Readonly<Record<string, readonly CollectionItem[]>>;
 };
 
 /** Bake one object, never throwing: an unbakeable object reports `invalid`. */
@@ -178,10 +196,16 @@ export function buildDocumentIndex(
         if (mark.kind !== "comment" && mark.kind !== "glossary") continue;
         const from = resolveBoundaryOffset(node.content, mark.from);
         const to = resolveBoundaryOffset(node.content, mark.to);
+        // The mark's reference id (docs/027 §4.1): a glossary mark points at a term,
+        // a comment mark at a host thread. Carried so a pane can join occurrences to
+        // their term/thread without re-walking the document.
+        const refAttr =
+          mark.kind === "glossary" ? mark.attrs?.term : mark.attrs?.thread;
         comments.push({
           id: mark.id,
           kind: mark.kind,
           node: id,
+          ...(typeof refAttr === "string" ? { ref: refAttr } : {}),
           text: content.slice(from, to),
         });
       }
@@ -190,7 +214,9 @@ export function buildDocumentIndex(
       if (plain) text.push({ id, text: plain, type: node.type });
     }
   }
-  return { comments, text, toc };
+  // Pass document-owned collections through unchanged (docs/027 §5.4): plain JSON, so
+  // a pane reads definitions from here and joins them with the occurrence marks above.
+  return { collections: snapshot.collections ?? {}, comments, text, toc };
 }
 
 /** A job the worker (or main thread) can run; both are pure compute. */

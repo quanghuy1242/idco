@@ -84,12 +84,37 @@ function renderLinkMark({
   );
 }
 
-/** Annotation marks (comment/glossary) render as an id-carrying span. */
+/** The comment mark renders as an id-carrying span (live highlight lands in docs/027 P4). */
 function renderAnnotationMark({ mark, child, key }: MarkRenderArgs): ReactNode {
   return (
     <span key={key} data-engine-mark={mark.kind} data-engine-mark-id={mark.id}>
       {child}
     </span>
+  );
+}
+
+/**
+ * The glossary mark (docs/027 §6.1): a *reference* to a term in the document's
+ * glossary collection (`attrs: { term: id }`), not a copy of the definition. It
+ * renders as a real `<abbr>` with a dotted underline so the occurrence is visible and
+ * navigable in the editor (no longer the inert span of docs/027 §3.3); the term id
+ * rides on `data-engine-glossary-term` so the Glossary pane can find and jump to every
+ * occurrence. The definition itself lives once in the collection — the reader resolves
+ * it into `<abbr title>` from the document snapshot (docs/027 §6.6, with the docs/015
+ * reader tier), so there is no second copy to drift.
+ */
+function renderGlossaryMark({ mark, child, key }: MarkRenderArgs): ReactNode {
+  const term = mark.attrs?.term;
+  return (
+    <abbr
+      key={key}
+      className="cursor-help no-underline decoration-dotted underline-offset-2 [text-decoration-line:underline]"
+      data-engine-glossary-term={typeof term === "string" ? term : undefined}
+      data-engine-mark="glossary"
+      data-engine-mark-id={mark.id}
+    >
+      {child}
+    </abbr>
   );
 }
 
@@ -127,7 +152,7 @@ const BUILT_IN_MARKS: readonly MarkDefinition[] = [
   elementMark("superscript", "sup", 9),
   { kind: "link", nestingRank: 0, render: renderLinkMark },
   { kind: "comment", nestingRank: 1, render: renderAnnotationMark },
-  { kind: "glossary", nestingRank: 2, render: renderAnnotationMark },
+  { kind: "glossary", nestingRank: 2, render: renderGlossaryMark },
 ];
 
 let builtInMarksRegistered = false;

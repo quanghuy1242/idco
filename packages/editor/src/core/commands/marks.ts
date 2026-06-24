@@ -1,8 +1,9 @@
-/** Mark command compilers: toggle-mark, set/clear link (docs/020 §7.5). */
+/** Mark command compilers: toggle-mark, set/clear link, ref marks (docs/020 §7.5). */
 import {
   boundaryAtOffset,
   resolveBoundaryOffset,
   type EditorSelection,
+  type JsonObject,
   type TextLeafNode,
   type TextMarkKind,
 } from "../model";
@@ -91,6 +92,38 @@ export function compileLink(
         to: boundaryAtOffset(node.content, to, "after"),
       });
     }
+  }
+  return tr.setSelection(store.selection as EditorSelection);
+}
+
+/**
+ * Add an *identity reference* mark over the selection (docs/027 §4.1) — a mark whose
+ * `attrs` point at an item in a collection or a host record (`{ term: id }` for
+ * glossary, `{ thread: id, snapshot }` for a comment). The shared engine of the
+ * glossary and comment "add" flows: it is the link path generalized off `href` to an
+ * arbitrary attr bag and any identity-mark kind. Returns the builder *without
+ * dispatching*, so a caller can compose it with `setCollection` in one atomic
+ * transaction (the type-first glossary flow: mark a range and add the term together,
+ * one undo, docs/027 §5.3/§6.2). Existing same-kind marks over the range are cleared
+ * first so the reference replaces rather than stacks.
+ */
+export function compileAddRefMark(
+  store: EditorStore,
+  kind: TextMarkKind,
+  attrs: JsonObject,
+): TransactionBuilder | null {
+  const leaves = leafRangesInSelection(store);
+  if (leaves.length === 0) return null;
+  const tr = store.transaction();
+  for (const { node, from, to } of leaves) {
+    removeMarkOverRange(tr, store, node, kind, from, to);
+    tr.addMark(node.id, {
+      attrs,
+      from: boundaryAtOffset(node.content, from, "before"),
+      id: store.nextMarkId(),
+      kind,
+      to: boundaryAtOffset(node.content, to, "after"),
+    });
   }
   return tr.setSelection(store.selection as EditorSelection);
 }

@@ -121,6 +121,7 @@ describe("Insights pane registration (docs/027 §9.4 / §7.7)", () => {
 
 describe("StatisticsPane render (docs/027 §9.4)", () => {
   const index: DocumentIndex = {
+    collections: {},
     comments: [],
     text: [
       { id: "p1" as never, text: "alpha beta gamma", type: "paragraph" },

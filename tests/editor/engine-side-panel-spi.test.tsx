@@ -213,6 +213,7 @@ describe("the dock (docs/027 §8.1/§8.3)", () => {
 
   it("Outline lists headings from the live document index and jumps on click", () => {
     const index: DocumentIndex = {
+      collections: {},
       comments: [],
       text: [],
       toc: [

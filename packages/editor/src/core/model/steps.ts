@@ -21,6 +21,7 @@
  *   collaboration does not require a history-layer rewrite.
  */
 import type {
+  CollectionItem,
   DocumentSettings,
   EditorNode,
   EditorSelection,
@@ -135,6 +136,22 @@ export type SetSettingsStep = {
   readonly to: DocumentSettings;
 };
 
+/**
+ * Replace one document-owned collection's whole item array (docs/027 §5.3). A
+ * document-level step, the sibling of `set-settings`: it carries both sides for
+ * inversion and never touches the body stream, so it does not affect position
+ * mapping. Routing glossary/bibliography edits through this step (not a side store)
+ * is what makes them undoable in the same stack as text — and lets a type-first
+ * glossary creation mark a range *and* add a term in one atomic transaction whose
+ * undo reverses both halves together (§5.3, §12 "undo across a collection edit").
+ */
+export type SetCollectionStep = {
+  readonly type: "set-collection";
+  readonly collection: string;
+  readonly from: readonly CollectionItem[];
+  readonly to: readonly CollectionItem[];
+};
+
 /** Closed Phase 3 mutation algebra for the owned model. */
 export type Step =
   | ReplaceTextStep
@@ -146,7 +163,8 @@ export type Step =
   | RemoveNodeStep
   | MoveNodeStep
   | SetObjectDataStep
-  | SetSettingsStep;
+  | SetSettingsStep
+  | SetCollectionStep;
 
 /** A command-produced transaction before dispatch captures inverses. */
 export type TransactionDraft = {

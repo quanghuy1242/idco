@@ -10,6 +10,7 @@ export type {
   CharacterId,
   CharacterRun,
   ClientId,
+  CollectionItem,
   DocumentSettings,
   EditorDocumentSnapshot,
   EditorNode,
@@ -87,6 +88,7 @@ export type {
   BakeObjectResult,
   BakeWorkerJob,
   BakeWorkerResult,
+  CommentIndexEntry,
   DocumentIndex,
   TextIndexEntry,
   TocEntry,
@@ -159,6 +161,7 @@ export { createEngineScheduler } from "./scheduler";
 export {
   activeScope,
   childrenOf,
+  compileAddRefMark,
   compileCommand,
   isDisposableEmpty,
   pendingFormatMarkSteps,

@@ -116,6 +116,8 @@ function mapPosThroughStep(
     case "set-node-attr":
     case "set-object-data":
     case "set-settings":
+    case "set-collection":
+      // Document-level steps do not move any body position.
       return pos;
   }
 }

@@ -257,6 +257,15 @@ export type DocumentSettings = JsonObject;
 
 export type EditorSnapshotNode = EditorNode;
 
+/**
+ * One item in a document-owned collection (docs/027 §5.1). The model core stores
+ * opaque items and leaves the shape to the registered collection (a `GlossaryTerm`, a
+ * future `Citation`), exactly as the node registry stores opaque object `data`. The
+ * only field the core relies on is `id`: it is what a reference mark's attr points at
+ * (`attrs: { term: id }`, docs/027 §4.1).
+ */
+export type CollectionItem = JsonObject & { readonly id: string };
+
 /** JSON-serializable owned-model persistence shape, not the mutable store. */
 export type EditorDocumentSnapshot = {
   readonly version: 1;
@@ -265,6 +274,14 @@ export type EditorDocumentSnapshot = {
     readonly blocks: Readonly<Record<NodeId, EditorSnapshotNode>>;
   };
   readonly settings: DocumentSettings;
+  /**
+   * Document-owned reference data (docs/027 §5.1): a keyed bag of opaque item
+   * arrays — `collections.glossary` holds `GlossaryTerm[]`, a future
+   * `collections.bibliography` holds `Citation[]`. One generic slot, many tenants;
+   * the model core knows none of the shapes. Optional and omitted when empty so a
+   * document with no collections serializes byte-identically to before (§5.4).
+   */
+  readonly collections?: Readonly<Record<string, readonly CollectionItem[]>>;
 };
 
 export type RichTextCompatNode = {

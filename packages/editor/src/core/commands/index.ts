@@ -1,6 +1,8 @@
 /** Command/query dispatch table + public re-exports (docs/020 §7.5). */
 import {
+  type CollectionItem,
   type EditorNode,
+  type JsonObject,
   type JsonValue,
   type NodeId,
   type TextLeafType,
@@ -15,7 +17,7 @@ import {
   compileInsertText,
   compileSplit,
 } from "./text";
-import { compileLink, compileToggleMark } from "./marks";
+import { compileAddRefMark, compileLink, compileToggleMark } from "./marks";
 import {
   compileApplyMarkdown,
   compileIndent,
@@ -55,6 +57,21 @@ export type EditorCommand =
       readonly href: string;
     }
   | { readonly type: "clear-link" }
+  | {
+      /**
+       * Add an identity reference mark over the selection (docs/027 §4.1): a glossary
+       * `{ term }` or comment `{ thread, snapshot }` reference. The generalized link.
+       */
+      readonly type: "add-ref-mark";
+      readonly mark: TextMarkKind;
+      readonly attrs: JsonObject;
+    }
+  | {
+      /** Replace a document-owned collection's items (docs/027 §5.3). */
+      readonly type: "set-collection";
+      readonly collection: string;
+      readonly items: readonly CollectionItem[];
+    }
   | {
       readonly type: "set-block-type";
       readonly blockType: TextLeafType;
@@ -143,6 +160,10 @@ type CommandCompiler = (
 ) => TransactionBuilder | null;
 
 const compilers: { [K in EditorCommandType]: CommandCompiler } = {
+  "add-ref-mark": (store, command) =>
+    command.type === "add-ref-mark"
+      ? compileAddRefMark(store, command.mark, command.attrs)
+      : null,
   "apply-markdown": (store, command) =>
     command.type === "apply-markdown"
       ? compileApplyMarkdown(store, command.shortcut)
@@ -204,6 +225,10 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
           command.listType,
         )
       : null,
+  "set-collection": (store, command) =>
+    command.type === "set-collection"
+      ? store.transaction().setCollection(command.collection, command.items)
+      : null,
   "set-link": (store, command) =>
     command.type === "set-link" ? compileLink(store, command.href) : null,
   "set-object-data": (store, command) =>
@@ -245,6 +270,11 @@ export function runQuery(
       return activeLinkHref(store);
   }
 }
+
+// The reference-mark compiler is exposed so a feature can compose it with a
+// `setCollection` in one atomic transaction (the type-first glossary flow, docs/027
+// §6.2) instead of going through the single-command `compileCommand` path.
+export { compileAddRefMark } from "./marks";
 
 // Re-export the shared scope/insertion helpers and type so the public
 // `core/commands` surface is unchanged after the split (docs/020 §7.5).

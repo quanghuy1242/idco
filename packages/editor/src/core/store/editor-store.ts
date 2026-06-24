@@ -35,6 +35,7 @@ import {
   resolvePointOffset,
   selectionsEqual,
   sliceTextContent,
+  type CollectionItem,
   type DocumentSettings,
   type EditorDocumentSnapshot,
   type EditorNode,
@@ -79,6 +80,7 @@ import {
   type ReplaceTextStep,
   type SetNodeAttrStep,
   type SetNodeTypeStep,
+  type SetCollectionStep,
   type SetObjectDataStep,
   type SetSettingsStep,
   type Step,
@@ -166,6 +168,8 @@ type MutableDispatchState = {
   readonly removedByStep: Map<Step, ReadonlySet<NodeId>>;
   settingsChanged: boolean;
   structureChanged: boolean;
+  /** A `set-collection` step ran; drives the commit's collections-changed flag. */
+  collectionsChanged: boolean;
 };
 
 /**
@@ -247,6 +251,21 @@ export class TransactionBuilder {
     return this.push({ ...step, type: "set-object-data" });
   }
 
+  /**
+   * Replace a document-owned collection's whole item array (docs/027 §5.3). `from`
+   * is captured by dispatch from live state for the inverse, so a caller passes only
+   * the next array. Composing this with `addMark` in one builder is the type-first
+   * glossary flow: one atomic transaction, one undo for both halves (§5.3).
+   */
+  setCollection(collection: string, items: readonly CollectionItem[]): this {
+    return this.push({
+      collection,
+      from: [],
+      to: items,
+      type: "set-collection",
+    });
+  }
+
   addMark(node: NodeId, mark: TextMark): this {
     return this.push({ mark, node, type: "add-mark" });
   }
@@ -311,6 +330,10 @@ export class EditorStore {
   #order: NodeId[] = [];
   #selection: EditorSelection | null;
   #settings: DocumentSettings = {};
+  // Document-owned collections (docs/027 §5.1): keyed item arrays (glossary terms,
+  // later citations). Mutated only through the `set-collection` step, so every edit is
+  // undoable in the same history stack as text and serializes with the document.
+  #collections: Record<string, readonly CollectionItem[]> = {};
   #pendingFormat: PendingFormat | null = null;
   #markCounter = 0;
   // Undo-coalescing bookkeeping (docs/011 §7.5, docs/018 §2.2). A typing run
@@ -342,6 +365,11 @@ export class EditorStore {
         this.#nodes.set(node.id, freezeNode(node));
       }
       this.#order = [...options.snapshot.body.order];
+      // Ingest document-owned collections (docs/027 §5.4); plain JSON, so it rides
+      // the existing snapshot transport with no special handling.
+      if (options.snapshot.collections) {
+        this.#collections = { ...options.snapshot.collections };
+      }
     }
     this.#rebuildParentIndex();
     this.assertParentInvariant();
@@ -371,6 +399,16 @@ export class EditorStore {
 
   get settings(): DocumentSettings {
     return this.#settings;
+  }
+
+  /** Every document-owned collection, keyed by id (docs/027 §5.1). */
+  get collections(): Readonly<Record<string, readonly CollectionItem[]>> {
+    return this.#collections;
+  }
+
+  /** One collection's items by id, or an empty array when none exists. */
+  getCollection(id: string): readonly CollectionItem[] {
+    return this.#collections[id] ?? [];
   }
 
   get order(): readonly NodeId[] {
@@ -900,11 +938,19 @@ export class EditorStore {
     const blocks = Object.fromEntries(
       [...this.#nodes.entries()].filter(([id]) => id !== ROOT_NODE_ID),
     ) as Record<NodeId, EditorNode>;
+    // Include `collections` only when something is stored, so a document with no
+    // collections serializes byte-identically to before this slot existed (docs/027
+    // §5.4) — existing snapshots and equality assertions stay unchanged.
+    const collections =
+      Object.keys(this.#collections).length > 0
+        ? { collections: this.#collections }
+        : {};
     return {
       body: {
         blocks,
         order: [...this.#order],
       },
+      ...collections,
       settings: this.#settings,
       version: 1,
     };
@@ -967,6 +1013,7 @@ export class EditorStore {
   ): CommittedTransaction {
     const inverses: Step[] = [];
     const state: MutableDispatchState = {
+      collectionsChanged: false,
       removedByStep: new Map<Step, ReadonlySet<NodeId>>(),
       settingsChanged: false,
       structureChanged: false,
@@ -986,6 +1033,7 @@ export class EditorStore {
       // This preserves the "dispatch is atomic" contract without snapshots.
       for (const inverse of inverses.toReversed()) {
         this.#applyAndInvert(inverse, {
+          collectionsChanged: false,
           removedByStep: new Map<Step, ReadonlySet<NodeId>>(),
           settingsChanged: false,
           structureChanged: false,
@@ -1154,6 +1202,8 @@ export class EditorStore {
         return this.#setObjectData(step, state);
       case "set-settings":
         return this.#setSettings(step, state);
+      case "set-collection":
+        return this.#setCollection(step, state);
     }
   }
 
@@ -1490,6 +1540,32 @@ export class EditorStore {
     this.#settings = step.to;
     state.settingsChanged = true;
     return { from: step.to, to: step.from, type: "set-settings" };
+  }
+
+  /**
+   * Apply a `set-collection` step (docs/027 §5.3). The inverse's `to` is the *live*
+   * pre-edit array, captured here rather than trusting the step's `from` (the
+   * side-effect-free builder cannot know live state), so undo restores exactly what
+   * was there. Collections are not position-sensitive, so last-write-wins is correct
+   * and no `from` validation is needed (unlike `set-settings`). An empty `to` drops
+   * the key so the collection round-trips out of the snapshot when emptied.
+   */
+  #setCollection(step: SetCollectionStep, state: MutableDispatchState): Step {
+    const current = this.#collections[step.collection] ?? [];
+    const next = { ...this.#collections };
+    if (step.to.length === 0) {
+      delete next[step.collection];
+    } else {
+      next[step.collection] = step.to;
+    }
+    this.#collections = next;
+    state.collectionsChanged = true;
+    return {
+      collection: step.collection,
+      from: step.to,
+      to: current,
+      type: "set-collection",
+    };
   }
 
   #notify(dirty: StoreDirty): void {

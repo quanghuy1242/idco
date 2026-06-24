@@ -137,6 +137,52 @@ export const DockOutline: Story = () => {
 };
 
 /**
+ * The Glossary pane + type-first add flow (docs/027 §6). Two terms are pre-seeded
+ * (define-first) so the pane shows them as "unused"; select a word and choose
+ * "Add to glossary" in the selection flyout (or the Review ribbon) to link an existing
+ * term or create a new one — one atomic, undoable transaction (§5.3/§6.2). A marked
+ * occurrence renders as a dotted-underline abbr (§6.1), counts toward the term's
+ * occurrence badge, and jumps from the pane. Editing a definition once updates the
+ * single stored item — there is no second copy to drift (§6.1).
+ */
+export const DockGlossary: Story = () => {
+  const store = useMemo(() => {
+    const built = createEditorStoreFromCompat(OUTLINE_SAMPLE);
+    // Seed two terms (define-first); they start unused until the author marks words.
+    built.command({
+      collection: "glossary",
+      items: [
+        {
+          definition:
+            "Service Provider Interface — the editor's extension seams.",
+          id: "g-spi",
+          term: "SPI",
+        },
+        {
+          definition: "The off-thread pass that derives the document index.",
+          id: "g-bake",
+          term: "bake",
+        },
+      ],
+      type: "set-collection",
+    });
+    return built;
+  }, []);
+  return (
+    <div style={{ height: 520, maxWidth: 980 }}>
+      <OwnedModelEditor store={store} viewportHeight={460} />
+      <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
+        Glossary (docs/027 §6): open <strong>Review → Glossary</strong> to
+        manage terms, or select a word and pick <em>Add to glossary</em> in the
+        flyout. The term registry is the single source of truth — a glossary
+        mark stores only a reference, so editing a definition updates every
+        occurrence and there is no copy to drift.
+      </p>
+    </div>
+  );
+};
+
+/**
  * The Insights pane (docs/027 §9.4): the first Review surface and what makes the
  * Review tab appear (§7.7 — registry-driven). Open Review → Insights for live
  * word/character/sentence counts, reading time, and a Flesch readability estimate,
