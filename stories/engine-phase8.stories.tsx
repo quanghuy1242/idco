@@ -15,14 +15,17 @@ import {
   createEditorStoreFromCompat,
   importPayloadLexical,
   registerCommand,
+  registerCommentSource,
   registerDataSource,
   unregisterCommand,
+  unregisterCommentSource,
   unregisterDataSource,
   type DataSourcePickerProps,
   type EditorStore,
   type RichTextCompatNode,
   type UploadImage,
 } from "../packages/editor/src";
+import { createInMemoryCommentSource } from "./_fake-comment-source";
 
 export default {
   title: "Engine / Phase 8",
@@ -669,7 +672,11 @@ export const MediaGallery: Story = () => {
   );
 };
 
-/** The full opt-in editing surface: toolbar, find, marks, objects, autosave. */
+/**
+ * The full opt-in editing surface: toolbar, find, marks, objects, autosave, plus the
+ * docs/027 Review dock — Comments (a fake in-memory source), Glossary (two seeded
+ * terms), Insights, Accessibility, and Broken refs — and the View → Outline pane.
+ */
 export const FullEditor: Story = () => {
   const { store, report } = usePhase8Store();
   const [saved, setSaved] = useState("clean");
@@ -717,6 +724,28 @@ export const FullEditor: Story = () => {
       load: { mode: "paginated", load: paginate(POSTS, 3) },
       resolve: resolveById(POSTS),
     });
+    // Light up the full Review dock (docs/027): a fake comment source enables the
+    // Comments pane + the flyout "Comment" action (§7.7), and two seeded glossary
+    // terms give the Glossary pane content. Insights, Accessibility, and Broken refs
+    // are always-on derived panes. So the Review tab here carries every §9 surface.
+    registerCommentSource(createInMemoryCommentSource());
+    store.command({
+      collection: "glossary",
+      items: [
+        {
+          definition:
+            "An editor whose model is the source of truth, not the DOM.",
+          id: "g-owned",
+          term: "owned model",
+        },
+        {
+          definition: "The off-thread pass that derives the document index.",
+          id: "g-bake",
+          term: "bake",
+        },
+      ],
+      type: "set-collection",
+    });
     return null;
   });
   // Drop the command + sources on unmount so they do not leak into the other
@@ -726,6 +755,7 @@ export const FullEditor: Story = () => {
       unregisterCommand("story.save");
       unregisterDataSource("media");
       unregisterDataSource("posts");
+      unregisterCommentSource("comments");
     },
     [],
   );
@@ -767,7 +797,11 @@ export const FullEditor: Story = () => {
         vertical align; hover an edge to insert/delete a row/column; drag a
         column boundary to resize; the gear toggles header row/column. Also:
         toolbar marks, <code># </code>/<code>- </code> shortcuts,{" "}
-        <kbd>Ctrl/Cmd+F</kbd> to find, click the image to edit/upload.
+        <kbd>Ctrl/Cmd+F</kbd> to find, click the image to edit/upload. Open{" "}
+        <strong>Review</strong> for the document-insight dock (docs/027):
+        Comments, Glossary, Insights, Accessibility, and Broken refs — or{" "}
+        <strong>View → Outline</strong>. Select text for the flyout’s Comment
+        and Add-to-glossary actions.
       </p>
       <p
         style={{

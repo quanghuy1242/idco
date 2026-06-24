@@ -7,8 +7,8 @@ import {
   unregisterCommentSource,
   type EditorStore,
   type RichTextCompatDocument,
-  type Thread,
 } from "../packages/editor/src";
+import { createInMemoryCommentSource } from "./_fake-comment-source";
 
 /**
  * Stories for the Review surfaces (docs/027): the side-panel dock and its panes.
@@ -220,54 +220,7 @@ function useInMemoryCommentSource(): void {
   // Register on first render (before the editor gates its surfaces), tear down on
   // unmount so it does not leak into the other stories (the registry is a singleton).
   useState(() => {
-    const threads = new Map<string, Thread>();
-    let seq = 0;
-    const now = () => "just now";
-    registerCommentSource({
-      create: async (anchor, body) => {
-        seq += 1;
-        const thread: Thread = {
-          author: { id: "me", name: "You" },
-          body,
-          createdAt: now(),
-          excerpt: anchor.excerpt,
-          id: `c${seq}`,
-          replies: [],
-          resolved: false,
-          updatedAt: now(),
-        };
-        threads.set(thread.id, thread);
-        return thread;
-      },
-      id: "comments",
-      load: async () => [...threads.values()],
-      remove: async (id) => {
-        threads.delete(id);
-      },
-      reply: async (id, body) => {
-        const thread = threads.get(id)!;
-        const next: Thread = {
-          ...thread,
-          replies: [
-            ...thread.replies,
-            {
-              author: { id: "me", name: "You" },
-              body,
-              createdAt: now(),
-              id: `r${seq++}`,
-            },
-          ],
-        };
-        threads.set(id, next);
-        return next;
-      },
-      resolve: async (id) => threads.get(id) ?? null,
-      setResolved: async (id, resolved) => {
-        const thread = threads.get(id);
-        if (thread) threads.set(id, { ...thread, resolved });
-      },
-      update: async () => {},
-    });
+    registerCommentSource(createInMemoryCommentSource());
     return null;
   });
   useEffect(() => () => unregisterCommentSource("comments"), []);
