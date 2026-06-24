@@ -20,6 +20,7 @@
 export * from "./surfaces";
 export * from "./panes";
 export * from "./annotation-popover";
+export * from "./comment-affordance";
 export * from "./link-popover";
 export * from "./find-bar";
 export * from "./chrome-commands";

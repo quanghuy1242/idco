@@ -46,6 +46,7 @@ import {
 import { FindBar, useFindController, type FindController } from "./chrome";
 import { LinkPopover, useLinkInteraction } from "./chrome";
 import { AnnotationPopover, useAnnotationInteraction } from "./chrome";
+import { CommentAffordance } from "./chrome";
 import {
   OwnedModelEditorView,
   type OwnedModelEditorViewHandle,
@@ -400,6 +401,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
               panelHost={panelHost}
               store={store}
             />
+            <CommentAffordance panelHost={panelHost} store={store} />
             {/* The three flat command surfaces, all driven by the one coordinator so
                 only one is open at a time (docs/024 §8). */}
             <EngineContextMenu

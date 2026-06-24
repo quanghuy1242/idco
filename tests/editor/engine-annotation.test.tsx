@@ -7,9 +7,11 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import {
+  boundaryAtOffset,
   createEditorStore,
   createIdAllocator,
   makeTextNode,
+  pointAtOffset,
   type DocumentIndex,
   type EditorStore,
   type PanelHost,
@@ -19,6 +21,8 @@ import { registerBuiltInNodeViews } from "../../packages/editor/src/view/nodes";
 import { registerBuiltInMarks } from "../../packages/editor/src/view/render";
 import {
   AnnotationPopover,
+  caretCommentHit,
+  CommentAffordance,
   GlossaryPane,
   registerBuiltInCommands,
   useAnnotationInteraction,
@@ -126,6 +130,83 @@ describe("useAnnotationInteraction + AnnotationPopover (docs/027 §16 P6)", () =
     const { getByText } = render(<Probe />);
     fireEvent.click(getByText("plain"));
     expect(interactionResult.value).toBe(false);
+  });
+});
+
+/** A store whose only block has a comment mark over [0,5) on the thread "c1". */
+function commentStore(caret: number): EditorStore {
+  const allocator = createIdAllocator("idco_client_comment_aff");
+  const content = allocator.createTextSlice("alpha beta");
+  const node = makeTextNode({
+    content,
+    id: allocator.createNodeId(),
+    marks: [
+      {
+        attrs: {
+          snapshot: { author: "R", excerpt: "alpha", resolved: false },
+          thread: "c1",
+        },
+        from: boundaryAtOffset(content, 0, "before"),
+        id: "cm1",
+        kind: "comment",
+        to: boundaryAtOffset(content, 5, "after"),
+      },
+    ],
+  });
+  const store = createEditorStore({
+    allocator,
+    snapshot: {
+      body: { blocks: { [node.id]: node }, order: [node.id] },
+      settings: {},
+      version: 1,
+    },
+  });
+  store.dispatch({
+    origin: "local",
+    selectionAfter: {
+      anchor: pointAtOffset(node.id, content, caret),
+      focus: pointAtOffset(node.id, content, caret),
+      type: "text",
+    },
+    steps: [],
+  });
+  return store;
+}
+
+describe("comment caret affordance (docs/027 §16 P6)", () => {
+  it("detects a comment under a collapsed caret, not outside it", () => {
+    expect(caretCommentHit(commentStore(2))).toEqual({
+      markId: "cm1",
+      threadId: "c1",
+    });
+    expect(caretCommentHit(commentStore(8))).toBeNull();
+  });
+
+  it("routes straight to the dock when the chip is clicked (no popover)", () => {
+    const host = fakePanelHost();
+    const store = commentStore(2);
+    // The affordance anchors to the comment's highlight span; render one so the DOM
+    // lookup resolves (jsdom returns a zero rect, which still renders the chip). In
+    // the real editor the span pre-exists and `useStoreVersion` re-renders the
+    // affordance over it; here a second render makes the sibling span present first.
+    const tree = () => (
+      <div>
+        <span data-engine-mark="comment" data-engine-mark-id="cm1">
+          alpha
+        </span>
+        <CommentAffordance panelHost={host} store={store} />
+      </div>
+    );
+    // A fresh element each render so React does not bail out on identical-element
+    // identity; the second pass sees the now-committed sibling span.
+    const { container, rerender } = render(tree());
+    rerender(tree());
+    const chip = container.querySelector<HTMLElement>(
+      "[data-engine-comment-affordance] button",
+    );
+    expect(chip).not.toBeNull();
+    fireEvent.click(chip!);
+    expect(host.calls).toEqual(["open:comments:c1"]);
   });
 });
 
