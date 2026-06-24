@@ -586,7 +586,7 @@ export function registerBuiltInCommands(): void {
     isAvailable: () => activeCommentSource() !== undefined,
     isDisabled: (ctx) => !ctx.selection.hasSelection,
     kind: "popover",
-    label: "Comment",
+    label: "Add a comment",
     render: (ctx) => <CommentAddPopover ctx={ctx} />,
     slot: "review.panels",
     surfaces: { flyout: "primary", ribbon: "primary" },

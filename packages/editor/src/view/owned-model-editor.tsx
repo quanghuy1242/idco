@@ -407,7 +407,6 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
             capabilities={capabilities}
             indexStore={indexStoreRef.current}
             onClose={() => setPanelOpen(false)}
-            onSelect={setActivePanelId}
             open={panelOpen}
             panelHost={panelHost}
             reveal={revealNode}

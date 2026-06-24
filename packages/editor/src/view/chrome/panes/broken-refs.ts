@@ -14,14 +14,38 @@ import type { EditorStore, JsonObject, NodeId } from "../../../core";
 export type BrokenRef = {
   readonly node: NodeId;
   readonly type: string;
-  /** `invalid` (resolve failed / bad data) or `unresolved` (never resolved / dangling). */
+  /** `invalid` (resolve failed / bad data) or `unresolved` (no record picked / dangling). */
   readonly status: "invalid" | "unresolved";
   /** A human label from the stale snapshot (last good title/alt) or the ref/type. */
   readonly label: string;
+  /** What the author can do about it, in one line. */
+  readonly message: string;
 };
 
+function snapshotOf(data: JsonObject): JsonObject | undefined {
+  const snapshot = data.snapshot;
+  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    ? (snapshot as JsonObject)
+    : undefined;
+}
+
+/**
+ * Whether the block has a usable persisted projection — an image src, a post
+ * url/title. Such a block renders fine from its snapshot (docs/026 §7.3) even when
+ * `unresolved`, so it is *not* a broken reference (it is a plain inline asset, not a
+ * dangling pointer the author must fix). This is what keeps a pasted/inline image off
+ * the broken list (docs/027 §9.6, the false-positive guard).
+ */
+function hasUsableSnapshot(data: JsonObject): boolean {
+  const snapshot = snapshotOf(data);
+  if (!snapshot) return false;
+  return ["src", "url", "title"].some(
+    (key) => typeof snapshot[key] === "string" && snapshot[key].length > 0,
+  );
+}
+
 function labelFor(data: JsonObject, fallback: string): string {
-  const snapshot = data.snapshot as JsonObject | undefined;
+  const snapshot = snapshotOf(data);
   const fromSnapshot = snapshot?.title ?? snapshot?.alt;
   if (typeof fromSnapshot === "string" && fromSnapshot.length > 0) {
     return fromSnapshot;
@@ -31,22 +55,36 @@ function labelFor(data: JsonObject, fallback: string): string {
 }
 
 /**
- * Every reference block whose resolve failed or whose ref dangles (docs/027 §9.6).
- * The label prefers the last-good snapshot so a dangling ref is recognizable, not
- * blank — the same stale-but-useful copy the block itself paints (docs/026 §7.3).
+ * Every reference block the author must act on (docs/027 §9.6): a failed resolve
+ * (`invalid` — the linked record is gone or returned bad data) or a block that has no
+ * record picked and no usable snapshot to fall back on (`unresolved` + empty). A block
+ * that still renders from a good snapshot is deliberately excluded — it is not broken,
+ * just not live-resolved (docs/026 §7.3), so it does not clutter the list with a
+ * non-actionable entry.
  */
 export function brokenReferences(store: EditorStore): BrokenRef[] {
   const out: BrokenRef[] = [];
   for (const id of store.order) {
     const node = store.getNode(id);
     if (node?.kind !== "object") continue;
-    if (node.status !== "invalid" && node.status !== "unresolved") continue;
-    out.push({
-      label: labelFor(node.data as JsonObject, node.type),
-      node: id,
-      status: node.status,
-      type: node.type,
-    });
+    const data = node.data as JsonObject;
+    if (node.status === "invalid") {
+      out.push({
+        label: labelFor(data, node.type),
+        message: "Couldn’t resolve — the linked record may have been deleted.",
+        node: id,
+        status: "invalid",
+        type: node.type,
+      });
+    } else if (node.status === "unresolved" && !hasUsableSnapshot(data)) {
+      out.push({
+        label: labelFor(data, node.type),
+        message: "No record selected — pick one to complete this block.",
+        node: id,
+        status: "unresolved",
+        type: node.type,
+      });
+    }
   }
   return out;
 }

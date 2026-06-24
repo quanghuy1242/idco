@@ -760,7 +760,9 @@ export const FullEditor: Story = () => {
     [],
   );
   return (
-    <div style={{ maxWidth: 900 }}>
+    // Old editor width (~900) plus the dock column (w-80 + margins), so opening the
+    // Review dock does not squeeze the document (docs/027 §8.3).
+    <div style={{ maxWidth: 1248 }}>
       <OwnedModelEditor
         autosave={{
           delayMs: 600,

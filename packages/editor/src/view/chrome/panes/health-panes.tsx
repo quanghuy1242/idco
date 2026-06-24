@@ -72,19 +72,21 @@ export function BrokenRefsPane(props: {
     <div className="grid gap-2 p-3" data-engine-broken-refs="">
       {refs.map((ref) => (
         <button
-          className="flex items-center gap-2 rounded-box border border-base-200 p-2 text-left outline-none hover:border-primary"
+          className="grid gap-1 rounded-box border border-base-200 p-2 text-left outline-none hover:border-primary"
           key={ref.node}
           onClick={() => reveal(ref.node)}
           type="button"
         >
-          <Badge
-            size="sm"
-            tone={ref.status === "invalid" ? "warning" : "neutral"}
-          >
-            {ref.status}
-          </Badge>
-          <span className="min-w-0 flex-1 truncate text-sm">{ref.label}</span>
-          <span className="text-xs opacity-60">{ref.type}</span>
+          <span className="flex items-center gap-2">
+            <Badge
+              size="sm"
+              tone={ref.status === "invalid" ? "warning" : "neutral"}
+            >
+              {ref.type}
+            </Badge>
+            <span className="min-w-0 flex-1 truncate text-sm">{ref.label}</span>
+          </span>
+          <span className="text-xs text-base-content/60">{ref.message}</span>
         </button>
       ))}
     </div>

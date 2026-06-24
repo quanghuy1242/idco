@@ -165,7 +165,6 @@ describe("the dock (docs/027 §8.1/§8.3)", () => {
         capabilities={CAPS}
         indexStore={indexStore}
         onClose={() => {}}
-        onSelect={() => {}}
         open={open}
         panelHost={host}
         reveal={noopReveal}
@@ -241,7 +240,6 @@ describe("the dock (docs/027 §8.1/§8.3)", () => {
         capabilities={CAPS}
         indexStore={indexStore}
         onClose={() => {}}
-        onSelect={() => {}}
         open
         panelHost={host}
         reveal={(id) => jumps.push(id)}

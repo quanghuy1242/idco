@@ -276,15 +276,21 @@ export function GlossaryAddPopover(props: {
         : store.getCollection("glossary").map(asGlossaryTerm),
     [index, store],
   );
-  const matches = useMemo(() => {
-    const needle = selected.toLowerCase();
-    return terms.filter(
-      (term) =>
-        term.term.toLowerCase() === needle ||
-        (term.aliases ?? []).some((alias) => alias.toLowerCase() === needle),
-    );
-  }, [terms, selected]);
+  // Search the *whole* registry to link the selection to any existing term
+  // (docs/027 §6.2 — link-existing is by search, not only an exact-name match),
+  // seeded with the selected text so an exact match surfaces first.
+  const [query, setQuery] = useState(selected);
   const [definition, setDefinition] = useState("");
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? terms.filter(
+        (term) =>
+          term.term.toLowerCase().includes(needle) ||
+          (term.aliases ?? []).some((alias) =>
+            alias.toLowerCase().includes(needle),
+          ),
+      )
+    : terms;
 
   const create = () => {
     createTermOverSelection(store, {
@@ -300,27 +306,42 @@ export function GlossaryAddPopover(props: {
       <span className="text-xs font-medium opacity-70">
         Add “{selected || "selection"}” to glossary
       </span>
-      {matches.length > 0 ? (
+      {terms.length > 0 ? (
         <div className="grid gap-1">
           <span className="text-xs opacity-60">Link to an existing term</span>
-          {matches.map((term) => (
-            <Button
-              ariaLabel={`Link to ${term.term}`}
-              key={term.id}
-              onClick={() => {
-                linkTermOverSelection(store, term.id);
-                ctx.close();
-              }}
-              size="sm"
-              variant="secondary"
-            >
-              {term.term}
-            </Button>
-          ))}
+          <Input
+            ariaLabel="Search terms"
+            onChange={setQuery}
+            placeholder="Search terms…"
+            size="sm"
+            value={query}
+          />
+          <div className="grid max-h-40 gap-1 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <span className="px-1 py-2 text-xs opacity-50">
+                No matching term.
+              </span>
+            ) : (
+              filtered.map((term) => (
+                <Button
+                  ariaLabel={`Link to ${term.term}`}
+                  key={term.id}
+                  onClick={() => {
+                    linkTermOverSelection(store, term.id);
+                    ctx.close();
+                  }}
+                  size="sm"
+                  variant="secondary"
+                >
+                  {term.term}
+                </Button>
+              ))
+            )}
+          </div>
         </div>
       ) : null}
       <form
-        className="grid gap-2"
+        className="grid gap-2 border-t border-base-200 pt-2"
         onSubmit={(event) => {
           event.preventDefault();
           create();
@@ -329,9 +350,8 @@ export function GlossaryAddPopover(props: {
         <span className="text-xs opacity-60">Or define a new term</span>
         <Input
           ariaLabel="Definition"
-          autoFocus
           onChange={setDefinition}
-          placeholder="Definition"
+          placeholder={`Definition of “${selected}”`}
           size="sm"
           value={definition}
         />

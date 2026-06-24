@@ -1,12 +1,14 @@
 /**
  * The side-panel dock — the editor-chrome host for workspace panes (docs/027 §8).
  *
- * One region, docked to one side, showing the registered, available panes as tabs
- * with exactly one pane visible at a time (docs/027 §8.1). Not split panes: the
- * paginated book layout's width budget makes two simultaneous columns crowd the page,
- * so tabs give switching without spending width (docs/027 §8.1, decision D5). The dock
- * is *generic chrome*: it reads `listSidePanels()`, gates each by `isAvailable`, and
- * renders the active one's `render(...)` — it holds zero knowledge of Outline /
+ * One region, docked to one side, showing exactly *one* pane at a time (docs/027 §8.1).
+ * It is **contextual**, not a tab bar of every registered pane: the dock shows the pane
+ * the author opened (through a ribbon/flyout command's `panelHost.open`), with an
+ * icon+title header and a close button — so it does not duplicate the Review ribbon's
+ * row of pane commands. Switching panes is done from the ribbon (the one switcher),
+ * which keeps the dock a focused workspace rather than a second navigation surface. The
+ * dock is *generic chrome*: it reads `listSidePanels()`, gates each by `isAvailable`,
+ * and renders the active one's `render(...)` — it holds zero knowledge of Outline /
  * Comments / Glossary, exactly as the ribbon holds none of its commands (docs/027 §8.2).
  *
  * Editor chrome, not host layout (docs/027 §8.4): the dock is edit-mode-only, a sibling
@@ -22,7 +24,7 @@
  * a `DocumentIndexProvider` so a pane's `useDocumentIndex()` resolves against the one
  * live index rather than a second worker round-trip (docs/027 §2.2 — one pipeline).
  */
-import { Button, Drawer, Tabs } from "@quanghuy1242/idco-ui";
+import { Button, Drawer, NavIcon } from "@quanghuy1242/idco-ui";
 import type { EditorStore, NodeId } from "../../../core";
 import {
   buildCommandContext,
@@ -45,8 +47,6 @@ export type SidePanelDockProps = {
   readonly open: boolean;
   /** The pane the dock shows; falls back to the first available pane when stale/null. */
   readonly activeId: string | null;
-  /** Switch the active pane (a tab click). */
-  readonly onSelect: (id: string) => void;
   /** Close the dock (the header X, the Drawer backdrop, a pane's done). */
   readonly onClose: () => void;
   /** The engine's scroll-to-block, handed to panes for jump-to-anchor (docs/027 §9). */
@@ -62,7 +62,6 @@ export function SidePanelDock(props: SidePanelDockProps) {
     panelHost,
     open,
     activeId,
-    onSelect,
     onClose,
     reveal,
     indexStore,
@@ -83,25 +82,17 @@ export function SidePanelDock(props: SidePanelDockProps) {
   if (!open || panels.length === 0) return null;
 
   const active = panels.find((panel) => panel.id === activeId) ?? panels[0]!;
-  const tabItems = panels.map((panel) => ({
-    id: panel.id,
-    label: panel.title,
-  }));
 
   const body = (
     <DocumentIndexProvider revealNode={reveal} store={indexStore}>
       <div className="flex h-full min-h-0 flex-col">
-        <div className="flex items-center gap-1 border-b border-base-300 px-2 py-1">
-          <div className="min-w-0 flex-1 overflow-x-auto">
-            <Tabs
-              ariaLabel="Document panels"
-              items={tabItems}
-              onSelectionChange={onSelect}
-              selectedKey={active.id}
-              size="sm"
-              variant="border"
-            />
-          </div>
+        {/* Contextual header: just the active pane's identity + close — not a tab row
+            duplicating the ribbon's pane commands (docs/027 §8.1). */}
+        <div className="flex items-center gap-2 border-b border-base-300 px-3 py-2">
+          <NavIcon name={active.iconName} />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+            {active.title}
+          </span>
           <Button
             ariaLabel="Close panel"
             iconName="X"
@@ -122,8 +113,8 @@ export function SidePanelDock(props: SidePanelDockProps) {
     </DocumentIndexProvider>
   );
 
-  // Narrow viewport: an overlay sheet with the same tabs/panes (docs/027 §8.3). The
-  // Drawer owns its own dismissal (backdrop / Esc), routed back to `onClose`.
+  // Narrow viewport: an overlay sheet with the same pane (docs/027 §8.3). The Drawer
+  // owns its own dismissal (backdrop / Esc), routed back to `onClose`.
   if (isMobile) {
     return (
       <Drawer
@@ -140,11 +131,13 @@ export function SidePanelDock(props: SidePanelDockProps) {
   }
 
   // Wide viewport: a side column, a sibling of the scroller so it only narrows the
-  // surface's width (docs/027 §8.3/§8.4). `shrink-0` keeps its width fixed.
+  // surface's width (docs/027 §8.3/§8.4). The margin gives a little space below the
+  // toolbar and between the editor and the dock; `rounded-box` + full border make it a
+  // distinct card rather than a panel whose border doubles up against the chrome.
   return (
     <aside
       aria-label="Document panels"
-      className="flex w-80 shrink-0 flex-col border-l border-base-300 bg-base-100"
+      className="my-2 mr-2 flex w-80 shrink-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100"
       data-engine-side-panel-dock=""
     >
       {body}

@@ -103,9 +103,16 @@ export function SelectionFlyout(props: {
               />
             }
           >
-            {(closeChild) =>
-              command.render?.({ ...ctx, close: closeChild }) ?? null
-            }
+            {(closeChild) => (
+              // Mark the *portaled* popover content (not just the trigger) so the
+              // flyout's `shouldCloseOnInteractOutside` keeps it open while the author
+              // types in this child popover. Without this, any command popover other
+              // than the link editor (glossary/comment add) closes the flyout the
+              // moment its input is focused, so the input never gets focus (docs/027).
+              <div data-engine-surface-child="">
+                {command.render?.({ ...ctx, close: closeChild }) ?? null}
+              </div>
+            )}
           </PopoverTrigger>
         </span>
       );
