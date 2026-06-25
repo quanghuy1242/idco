@@ -175,13 +175,14 @@ function wrapMark(
       );
     }
     case "glossary": {
+      // Wrap the run's content (the `child`, which may already carry bold/italic) in the abbr;
+      // the resolved definition is only the hover title. Substituting a `term` string here used
+      // to drop a formatted glossary run, because its `child` is a React element, not a string.
       const definition = glossaryDefinition(snapshot, mark.attrs?.term);
       return (
-        <RichTextGlossary
-          definition={definition}
-          key={key}
-          term={typeof child === "string" ? child : ""}
-        />
+        <RichTextGlossary definition={definition} key={key}>
+          {child}
+        </RichTextGlossary>
       );
     }
     default:

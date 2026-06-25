@@ -137,6 +137,21 @@ function blockRect(
   return rect;
 }
 
+/**
+ * The viewport rect of an object block's config gear (the chrome's settings affordance), if it
+ * is mounted with measurable geometry. A block config popover drops from this, not the block's
+ * origin — the same affordance-anchored rule as the table cell `…` button (docs/029 R1-E/R1-G).
+ * Returns null when the gear is absent (a custom chrome) or has no box (off-window / hidden),
+ * so the caller falls back to the block rect.
+ */
+function gearRect(doc: Document, blockId: NodeId): RectLike | null {
+  const el = doc.querySelector<HTMLElement>(
+    `[data-engine-block-id="${blockId}"] [data-engine-object-gear]`,
+  );
+  const rect = el ? toRectLike(el.getBoundingClientRect()) : null;
+  return isDegenerate(rect) ? null : rect;
+}
+
 /** The viewport rect of a mark element by its mark id, or null. */
 function markRect(doc: Document, markId: string): RectLike | null {
   const el = doc.querySelector<HTMLElement>(
@@ -173,7 +188,13 @@ export function resolveAnchorRect(
         ? { height: 0, left: anchor.at.x, top: anchor.at.y, width: 0 }
         : blockRect(store, doc, anchor.cellId, opts);
     case "block":
-      return blockRect(store, doc, anchor.blockId, opts);
+      // The object-config popover anchors to the block's gear (its top-right settings affordance),
+      // dropping from it like the cell `…` popover, rather than covering the whole block. Falls
+      // back to the block rect when the gear is not measurable (custom chrome / off-window).
+      return (
+        gearRect(doc, anchor.blockId) ??
+        blockRect(store, doc, anchor.blockId, opts)
+      );
     case "mark":
       return markRect(doc, anchor.markId);
     case "point":

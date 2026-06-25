@@ -52,21 +52,20 @@ export function RichTextMark({ children }: RichTextChildrenProps) {
 }
 
 /**
- * A glossary term (docs/015 §12). Content the reader is entitled to render fully: it
- * resolves the definition from the document's own snapshot and emits the native `<abbr
- * title>` hover affordance — the same element the editor and legacy export use, from one
- * place so they cannot disagree.
+ * A glossary term (docs/015 §12). Wraps the term's marked content in a native `<abbr title>`
+ * hover affordance, the same element the editor's `renderGlossaryMark` emits — `children` is
+ * the actual run (which may itself carry bold/italic/etc. marks, since glossary nests *outside*
+ * them, MARK_RANK), so the text is always rendered; only the hover `title` comes from the
+ * resolved definition. (Rendering a separate `term` string here would drop a formatted run's
+ * content, because a glossary-over-bold child arrives as a `<strong>` element, not a string.)
  */
 export function RichTextGlossary({
-  term,
   definition,
-}: {
-  readonly term: string;
-  readonly definition: string;
-}) {
+  children,
+}: RichTextChildrenProps & { readonly definition: string }) {
   return (
     <abbr className={RT_MARK_CLASS.glossary} title={definition}>
-      {term}
+      {children}
     </abbr>
   );
 }

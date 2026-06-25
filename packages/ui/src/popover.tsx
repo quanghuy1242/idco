@@ -9,6 +9,18 @@ import {
   type PopoverProps,
 } from "react-aria-components";
 
+/**
+ * Re-export of React Aria's `UNSAFE_PortalProvider` (from `react-aria`, a direct dependency of
+ * this package; `react-aria-components` does not re-export it). It sets the portal container
+ * every nested React Aria overlay — a `Select`/`ComboBox` listbox, a `Menu`, a nested `Popover` —
+ * renders into. A consumer that hosts its own overlay layer (the editor's authority) wraps that
+ * layer with it so nested overlays land inside the layer rather than `document.body`, keeping
+ * containment checks accurate. Named `UNSAFE_` by React Aria because an arbitrary container can
+ * break positioning; a transform-free, overflow-free container (the editor's overlay layer) is
+ * the supported case.
+ */
+export { UNSAFE_PortalProvider } from "react-aria";
+
 type Placement =
   | "top"
   | "bottom"

@@ -779,6 +779,13 @@ export function useOverlayAuthority(
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
+      // A press anywhere inside the editor's overlay world is never an "outside" press — this
+      // covers a surface's own body AND the nested React Aria overlays (a config form's Select/
+      // ComboBox listbox, a Menu) that the overlay layer routes into its container via
+      // `UNSAFE_PortalProvider` and registers in the ownership registry (docs/029 §7.4 / #2).
+      // Without this, clicking a portaled dropdown option dismissed the surface that owns it
+      // before the option's own click could land — keyboard worked, the real mouse "collapsed".
+      if (ownership.isWithin(target)) return;
       const signatures = computeSignatures(store);
       for (const env of envelopesRef.current) {
         if (env.focusMode !== "taking") continue;

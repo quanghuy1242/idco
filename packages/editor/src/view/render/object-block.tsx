@@ -19,7 +19,6 @@ import { type EditorStore, type NodeId, type ObjectNode } from "../../core";
 import {
   getNodeView,
   registerOverlay,
-  type NodeViewResourceConfigField,
   type OverlaySurfaceContext,
 } from "../spi";
 import { useObjectEditorRegistry } from "./object-editor-registry";
@@ -196,11 +195,7 @@ export function EngineObjectBlock(props: {
         <BakedObjectView node={node} store={store} />
       )}
       {!live && referenceField ? (
-        <ReferenceStateChrome
-          field={referenceField}
-          node={node}
-          store={store}
-        />
+        <ReferenceStateChrome node={node} store={store} />
       ) : null}
     </div>
   );
@@ -348,10 +343,12 @@ function renderObjectConfig(
     });
   }
   if (view?.configurable === false) return null;
-  // The gear is the popover's anchor (via `gearRef`), so the settings open beside
-  // it — the same placement as the callout/code chrome (docs/018 §2.11 follow-up).
+  // The gear is the config surface's anchor: the overlay anchor resolver finds
+  // `[data-engine-object-gear]` inside the active block and drops the settings popover from it
+  // (the same rule as the table cell `…`, docs/029 R1-E/R1-G), instead of covering the whole
+  // block. `gearRef` stays for the in-place chrome menus that still anchor to it directly.
   return (
-    <span ref={gearRef}>
+    <span data-engine-object-gear="" ref={gearRef}>
       <ChromeButton
         icon="Settings"
         label={`${view?.ariaLabel ?? node.type} settings`}
@@ -396,9 +393,8 @@ function BakedObjectView(props: {
 function ReferenceStateChrome(props: {
   readonly node: ObjectNode;
   readonly store: EditorStore;
-  readonly field: NodeViewResourceConfigField;
 }) {
-  const { node, store, field } = props;
+  const { node, store } = props;
   if (node.status === "ready" || node.status === "dirty") return null;
   const hasRef = refField(node.data) !== "";
   if (node.status === "unresolved" && hasRef) {
@@ -412,18 +408,20 @@ function ReferenceStateChrome(props: {
       </span>
     );
   }
-  const invalid = node.status === "invalid";
+  // The empty-state "Pick a …" CTA is gone (docs/029 follow-up): an unconfigured reference block
+  // is set up through the chrome gear — its config form holds the picker — so a second entry
+  // point painted over the block is redundant. Only the `invalid` repair badge remains, because
+  // it surfaces a refresh error the gear alone does not.
+  if (node.status !== "invalid") return null;
   return (
     <button
-      className={`badge badge-sm absolute bottom-1 left-1 z-10 cursor-pointer ${
-        invalid ? "badge-warning" : "badge-outline"
-      }`}
-      data-engine-reference-state={invalid ? "invalid" : "empty"}
+      className="badge badge-warning badge-sm absolute bottom-1 left-1 z-10 cursor-pointer"
+      data-engine-reference-state="invalid"
       onClick={() => store.activateObject(node.id)}
       onMouseDown={(event) => event.stopPropagation()}
       type="button"
     >
-      {invalid ? "Couldn’t refresh" : `Pick a ${field.label.toLowerCase()}`}
+      Couldn’t refresh
     </button>
   );
 }

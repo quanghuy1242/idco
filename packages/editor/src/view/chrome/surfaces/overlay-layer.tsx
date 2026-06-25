@@ -19,6 +19,7 @@
  * selection bar); `render`-bearing forms/cards/panels render their own body.
  */
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -26,7 +27,10 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { POPOVER_SURFACE_CLASS } from "@quanghuy1242/idco-ui";
+import {
+  POPOVER_SURFACE_CLASS,
+  UNSAFE_PortalProvider,
+} from "@quanghuy1242/idco-ui";
 import type { EditorStore } from "../../../core";
 import type { OffsetModel } from "../../../core/offset-model";
 import { resolveAnchorRect, type ScrollerGeometry } from "../../overlays";
@@ -41,6 +45,12 @@ import {
   type ToolbarCapabilities,
 } from "../../spi";
 import { OverlayContent } from "./overlay-content";
+
+/** The reserved ownership-registry id for the overlay-layer container itself (docs/029 §7.4):
+ *  registering it makes `ownership.isWithin` recognize any press inside the editor's overlay
+ *  world — including nested React Aria overlays routed here by `UNSAFE_PortalProvider` — so the
+ *  authority does not mistake a press on a portaled dropdown option for an outside press. */
+const OVERLAY_LAYER_OWNERSHIP_ID = "__overlay_layer__";
 
 /** Warn in dev if the portal layer carries a transform — it breaks `fixed` positioning. */
 function assertTransformFree(el: HTMLElement): void {
@@ -97,9 +107,23 @@ function EnvelopeBox(props: {
     id: string,
     size: { width: number; height: number },
   ) => void;
+  /** True once the surface has been dismissed: the box plays the exit animation, then unmounts. */
+  readonly exiting: boolean;
+  /** Called when the exit animation finishes (or its fallback timer fires), to unmount the box. */
+  readonly onExited: (id: string) => void;
 }): ReactNode {
-  const { envelope, placement, authority, onMeasure } = props;
+  const { envelope, placement, authority, onMeasure, exiting, onExited } =
+    props;
   const ref = useRef<HTMLDivElement | null>(null);
+  // Drive the exit: when `exiting` flips true the box plays `animate-popover-out` in place
+  // (frozen at its last placement), then the parent unmounts it on `onAnimationEnd`. A fallback
+  // timer covers the case where no animation runs (prefers-reduced-motion → no `animationend`),
+  // so a closing surface can never get stuck mounted.
+  useEffect(() => {
+    if (!exiting) return undefined;
+    const t = setTimeout(() => onExited(envelope.id), 220);
+    return () => clearTimeout(t);
+  }, [exiting, envelope.id, onExited]);
   // Until the box has been measured once, the central solve only has a zero size, so the first
   // frame would paint it at the anchor and the second (measured) frame would snap it to its real
   // placement — a visible jump on every open (the symptom the selection-form open shows). Gate
@@ -118,12 +142,15 @@ function EnvelopeBox(props: {
   // `measured` so the placed box becomes visible. setState in a layout effect re-renders before
   // paint, so the user never sees the pre-measure frame.
   useLayoutEffect(() => {
+    // A closing box is frozen at its last size — don't re-measure it (it would perturb the live
+    // collision solve as it animates out).
+    if (exiting) return;
     const el = ref.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     onMeasure(envelope.id, { height: rect.height, width: rect.width });
     setMeasured(true);
-  }, [envelope, onMeasure]);
+  }, [envelope, onMeasure, exiting]);
 
   // Focus policy (docs/029 §7.1, replaces useAutoFocusWithin): a focus-owning `form`
   // (`taking` or `sticky`) autofocuses its first field deterministically *after* layout; a
@@ -131,6 +158,7 @@ function EnvelopeBox(props: {
   // surface identity.
   useEffect(() => {
     if (
+      exiting ||
       (envelope.focusMode !== "taking" && envelope.focusMode !== "sticky") ||
       envelope.contentKind !== "form"
     ) {
@@ -142,7 +170,7 @@ function EnvelopeBox(props: {
         ?.focus();
     });
     return () => cancelAnimationFrame(id);
-  }, [envelope.id, envelope.focusMode, envelope.contentKind]);
+  }, [envelope.id, envelope.focusMode, envelope.contentKind, exiting]);
 
   const ctx = authority.surfaceContext(envelope.target);
   // The box chrome (DaisyUI 5 popover surface) is owned by the layer; the content fills it.
@@ -155,19 +183,22 @@ function EnvelopeBox(props: {
     <div
       // The DaisyUI popover surface chrome is the one shared `@idco/ui` token
       // (`POPOVER_SURFACE_CLASS`), so authority-owned overlays match every other popover's box
-      // and cannot drift from it. Padding varies by content-kind; the entrance plays once on
-      // first appear (gated by `measured`) — a controlled box cannot use RA's `data-[entering]`
-      // variant, so `animate-popover-in` is applied directly (exit animation needs presence
-      // management the controlled layer does not have yet).
-      className={`${POPOVER_SURFACE_CLASS} ${pad} ${measured ? "animate-popover-in" : ""}`}
+      // and cannot drift from it. Padding varies by content-kind. A controlled box cannot use
+      // RA's `data-[entering]/[exiting]` variants, so the animation classes are applied directly:
+      // entrance once on first appear (gated by `measured`), exit while `exiting` (the parent's
+      // presence layer keeps the box mounted, frozen at its last placement, until it ends).
+      className={`${POPOVER_SURFACE_CLASS} ${pad} ${exiting ? "animate-popover-out" : measured ? "animate-popover-in" : ""}`}
       data-engine-overlay={envelope.target}
+      onAnimationEnd={exiting ? () => onExited(envelope.id) : undefined}
       ref={ref}
       style={{
         left: placement?.left ?? 0,
-        pointerEvents: "auto",
+        // A closing box must not eat pointer events as it fades (a click should reach what is
+        // behind it).
+        pointerEvents: exiting ? "none" : "auto",
         position: "fixed",
         top: placement?.top ?? 0,
-        visibility: measured ? "visible" : "hidden",
+        visibility: exiting || measured ? "visible" : "hidden",
         zIndex: envelope.z,
       }}
     >
@@ -193,6 +224,26 @@ export function OverlayLayer(props: {
   const [sizes, setSizes] = useState<
     Record<string, { width: number; height: number }>
   >({});
+  // Exit-animation presence state (see the presence block below). `exitingRef` holds the boxes
+  // still animating out, each frozen at its last `{envelope, placement}`; `prevLiveRef` is the
+  // previous render's live ids (for the during-render live→exiting diff); `renderBump` forces a
+  // re-render when a finished exit box is dropped. The diff runs during render (not in an effect)
+  // so a dismissed box keeps its React instance and animates out in place — an effect would
+  // unmount it for one frame first, killing the animation.
+  const exitingRef = useRef(
+    new Map<
+      string,
+      { envelope: ResolvedEnvelope; placement: EnvelopePlacement }
+    >(),
+  );
+  const [, setRenderBump] = useState(0);
+  const cacheRef = useRef(
+    new Map<
+      string,
+      { envelope: ResolvedEnvelope; placement: EnvelopePlacement }
+    >(),
+  );
+  const prevLiveRef = useRef<readonly string[]>([]);
 
   // Foreign-modal coordination (docs/029 §7.6). A foreign app modal — the theme/confirm
   // dialog, command palette, drawer — opens with React Aria's `ariaHideOutside`, which sets
@@ -214,6 +265,22 @@ export function OverlayLayer(props: {
     });
     observer.observe(container, { attributeFilter: ["aria-hidden"] });
     return () => observer.disconnect();
+  }, [container]);
+
+  // Register the overlay-layer container in the ownership registry (docs/029 §7.4) so any press
+  // inside the editor's overlay world counts as "within" — including the nested React Aria
+  // overlays (a config form's Select / ComboBox listbox, a Menu) that the `UNSAFE_PortalProvider`
+  // below routes INTO this container instead of `document.body`. Without this, clicking such a
+  // portaled option read as an outside press and the authority's dismissal tore the surface down
+  // (the "dropdown collapses on a real mouse click" bug). `ownership` is stable across authority
+  // re-renders, so a ref keeps this registered once per container, with no churn.
+  const ownershipRef = useRef(authority.ownership);
+  ownershipRef.current = authority.ownership;
+  useEffect(() => {
+    if (!container) return undefined;
+    const ownership = ownershipRef.current;
+    ownership.register(OVERLAY_LAYER_OWNERSHIP_ID, container, null);
+    return () => ownership.unregister(OVERLAY_LAYER_OWNERSHIP_ID);
   }, [container]);
 
   const onMeasure = useRef(
@@ -267,17 +334,68 @@ export function OverlayLayer(props: {
   );
   const placementById = new Map(placements.map((p) => [p.id, p]));
 
+  // Exit-animation presence (docs/029 §4.7D). The authority drops a dismissed surface from
+  // `envelopes` at once, but unmounting its box immediately kills the close animation. So the
+  // layer keeps a just-removed box mounted — SAME React key, so the same instance transitions
+  // live→exiting in place (no unmount/remount flicker) — frozen at its last `{envelope,
+  // placement}`, until `animate-popover-out` ends (`onExited`). The live→exiting diff runs
+  // DURING render, not in an effect: an effect would compute `boxes` for the dismiss frame before
+  // it fired, unmounting the box for a frame first (the exit never plays). `exitingRef`/
+  // `prevLiveRef` are refs mutated here like a memo cache — idempotent under double-render.
+  const liveById = new Map(resolved.map((entry) => [entry.envelope.id, entry]));
+  for (const { envelope } of resolved) {
+    const placement = placementById.get(envelope.id);
+    if (placement) cacheRef.current.set(envelope.id, { envelope, placement });
+  }
+  // Promote ids that were live last render but are gone now to "exiting" (from their cached
+  // frame); cancel the exit of any id that came back live.
+  for (const id of prevLiveRef.current) {
+    const cached = cacheRef.current.get(id);
+    if (!liveById.has(id) && !exitingRef.current.has(id) && cached) {
+      exitingRef.current.set(id, cached);
+    }
+  }
+  for (const id of liveById.keys()) exitingRef.current.delete(id);
+  prevLiveRef.current = [...liveById.keys()];
+  const onExited = useCallback((id: string) => {
+    exitingRef.current.delete(id);
+    cacheRef.current.delete(id);
+    setRenderBump((n) => n + 1);
+  }, []);
+
   if (!container) return null;
+  // One box per id: live surfaces (entering/steady) + still-exiting surfaces (from the cache).
+  const boxes = [
+    ...resolved.map((entry) => ({
+      envelope: entry.envelope,
+      exiting: false,
+      placement: placementById.get(entry.envelope.id),
+    })),
+    ...[...exitingRef.current.entries()]
+      .filter(([id]) => !liveById.has(id))
+      .map(([, c]) => ({
+        envelope: c.envelope,
+        exiting: true,
+        placement: c.placement,
+      })),
+  ];
   return createPortal(
-    resolved.map(({ envelope }) => (
-      <EnvelopeBox
-        authority={authority}
-        envelope={envelope}
-        key={envelope.id}
-        onMeasure={onMeasure}
-        placement={placementById.get(envelope.id)}
-      />
-    )),
+    // Route nested React Aria overlays (a config form's Select/ComboBox listbox, a Menu) into
+    // this transform-free layer instead of `document.body`, so the ownership registry sees them
+    // and a click on a dropdown option is not mistaken for an outside press (docs/029 §7.4 / #2).
+    <UNSAFE_PortalProvider getContainer={() => container}>
+      {boxes.map((box) => (
+        <EnvelopeBox
+          authority={authority}
+          envelope={box.envelope}
+          exiting={box.exiting}
+          key={box.envelope.id}
+          onExited={onExited}
+          onMeasure={onMeasure}
+          placement={box.placement}
+        />
+      ))}
+    </UNSAFE_PortalProvider>,
     container,
   );
 }

@@ -83,6 +83,16 @@ function structural(
   return { kids: children, attrs, id: nextId(), kind: "structural", type };
 }
 
+/** A mark boundary at a literal offset (the char anchor never matches an empty `runs`, so the
+ *  resolver falls back to `offset`), for building marked leaves in tests. */
+function boundaryAt(offset: number, stickiness: "before" | "after") {
+  return {
+    anchor: { id: { client: "x", clock: 0 }, kind: "char" as const },
+    offset,
+    stickiness,
+  };
+}
+
 function flatten(node: Built, blocks: Record<string, ReaderBlockNode>): void {
   if (node.kind === "structural") {
     const children = node.kids.map((child) => {
@@ -144,6 +154,49 @@ describe("Reader — L1 render + .rt-* contract", () => {
     expect(container.querySelector("style")?.textContent).toBe(
       RICH_TEXT_TYPOGRAPHY_CSS,
     );
+  });
+
+  it("keeps a glossary run's text when it also carries a format mark", () => {
+    // Regression: the Preview rendered "with , ," for bold/italic glossary terms because the
+    // glossary render substituted a resolved `term` string and discarded its child — so a
+    // glossary-over-bold run (whose child is a `<strong>` element, not a string) rendered an
+    // EMPTY `<abbr>` and the word vanished. The run text must survive, nested
+    // `<abbr title=def><strong>…</strong></abbr>`. Both marks span [0,4) ("bold"); with no runs
+    // the char anchors fall back to their stored offsets.
+    const leaf: ReaderBlockNode = {
+      content: { runs: [], text: "bold" },
+      id: "leaf-gloss",
+      kind: "text",
+      marks: [
+        {
+          from: boundaryAt(0, "after"),
+          id: "m-b",
+          kind: "bold",
+          to: boundaryAt(4, "before"),
+        },
+        {
+          attrs: { term: "t1" },
+          from: boundaryAt(0, "after"),
+          id: "m-g",
+          kind: "glossary",
+          to: boundaryAt(4, "before"),
+        },
+      ],
+      type: "paragraph",
+    };
+    const doc = {
+      body: { blocks: { "leaf-gloss": leaf }, order: ["leaf-gloss"] },
+      collections: {
+        glossary: [{ definition: "weighty", id: "t1", term: "bold" }],
+      },
+      settings: {},
+      version: 1,
+    } as ReaderSnapshot;
+    const { container } = render(<Reader value={doc} />);
+    const abbr = container.querySelector("abbr");
+    expect(abbr?.getAttribute("title")).toBe("weighty");
+    expect(abbr?.textContent).toBe("bold"); // the word is not dropped
+    expect(abbr?.querySelector("strong")?.textContent).toBe("bold"); // still bold
   });
 
   it("wraps top-level units in a content-visibility container (CSS virtualization)", () => {
