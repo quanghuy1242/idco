@@ -11,6 +11,7 @@
  * - `touch-selection.tsx`   — touch range-handle interaction over the overlay
  * - `navigation.ts`         — caret/grapheme/word/line navigation over the DOM
  * - `geometry.ts`           — DOM rect / point math shared by the above
+ * - `overlay-anchor.ts`     — `AnchorRef` → viewport rect for the overlay authority (docs/029 §7.4)
  * - `gap-cursor.ts`         — gap-cursor geometry (self-contained helpers)
  *
  * Importers use `from "./overlays"` / `from "../overlays"` so the folder is the unit.
@@ -19,4 +20,5 @@ export * from "./selection-overlay";
 export * from "./touch-selection";
 export * from "./navigation";
 export * from "./geometry";
+export * from "./overlay-anchor";
 export * from "./gap-cursor";

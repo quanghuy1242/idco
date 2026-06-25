@@ -349,6 +349,20 @@ export class EditorStore {
   #provisionalInsertId: NodeId | null = null;
   #composition: CompositionRange | null = null;
   readonly #activeObjectSubscribers = new Set<() => void>();
+  // Focus-reclaim gate (docs/029 §7.1, R1-B). The editor aggressively reclaims DOM
+  // focus to serve the model selection — `focusSelectionSoon` (the per-leaf EditContext
+  // host re-grab, text-block.tsx), the focus-navigation `syncFocusToSelection`, and the
+  // host `focus()` (`focusEditor`). A focus-*taking* overlay (a link/glossary/comment
+  // form) must hold focus against that reclaim, or its field loses focus the instant the
+  // editor re-grabs (the "focus steal" class, commits 4ee6d7d/2bbefc7). The overlay
+  // authority suspends the reclaim while a taking surface owns focus and resumes it on
+  // dismissal; the view auto-refocus paths consult `isReclaimSuspended()` before grabbing
+  // focus. This is the view→core seam (docs/029 §7.1): core never learns *why* it is
+  // suspended — only that it must not auto-grab — so the dependency points the right way
+  // (view drives a neutral core flag; core does not import view policy). A counter, not a
+  // boolean, so a drill-in pushed over another taking level each balances its own
+  // suspend/resume and an inner resume does not prematurely re-enable the reclaim.
+  #reclaimSuspendCount = 0;
   #order: NodeId[] = [];
   #selection: EditorSelection | null;
   #settings: DocumentSettings = {};
@@ -600,6 +614,38 @@ export class EditorStore {
       }
     }
     this.#notifyActiveObject();
+  }
+
+  /**
+   * Suspend the editor's automatic focus reclaim (docs/029 §7.1, R1-B). The overlay
+   * authority calls this when a focus-taking surface opens, so the surface's field keeps
+   * DOM focus instead of losing it to `focusSelectionSoon`/`syncFocusToSelection`/the host
+   * `focus()`. Balanced by `resumeReclaim`; nesting-safe via a counter so a drill-in over a
+   * drill-in suspends twice and resumes twice. Core does not act on focus itself — it only
+   * holds the flag the view paths read, keeping the view→core dependency one-directional.
+   */
+  suspendReclaim(): void {
+    this.#reclaimSuspendCount += 1;
+  }
+
+  /**
+   * Resume the automatic focus reclaim (docs/029 §7.1). Clamped at zero so an unbalanced
+   * resume cannot drive the counter negative and leave the reclaim permanently extra-on;
+   * the worst an unbalanced resume can do is no-op.
+   */
+  resumeReclaim(): void {
+    if (this.#reclaimSuspendCount > 0) this.#reclaimSuspendCount -= 1;
+  }
+
+  /**
+   * Whether the automatic focus reclaim is currently suspended (docs/029 §7.1). The view
+   * auto-refocus paths (`focusSelectionSoon`, `syncFocusToSelection`, `focusEditor`)
+   * consult this and skip the grab when it is true, so a focus-taking overlay is not
+   * fought for focus. False whenever no taking surface is open (the default), so the
+   * editor's normal focus-follows-caret behavior is unchanged.
+   */
+  isReclaimSuspended(): boolean {
+    return this.#reclaimSuspendCount > 0;
   }
 
   /** True when an object's data is a reference projection with no picked ref yet. */

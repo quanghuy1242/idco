@@ -342,6 +342,11 @@ export function useFocusNavigation(args: {
     // not flicker. Only fall back to the next frame when the destination is not
     // mounted yet (e.g. paste inserting fresh blocks above the caret).
     const apply = (): boolean => {
+      // Focus-reclaim seam (docs/029 §7.1): while a focus-taking overlay (a link/
+      // glossary/comment form) owns focus, do not auto-grab it back to the block the
+      // caret names — that is the "focus steal" this seam exists to stop. Report handled
+      // so no retry frame is scheduled; the authority restores focus on dismissal.
+      if (store.isReclaimSuspended()) return true;
       const sel = store.selection;
       const focusNode = sel?.type === "text" ? sel.focus.node : null;
       if (!focusNode) return false;

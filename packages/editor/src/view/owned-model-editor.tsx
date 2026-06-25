@@ -158,8 +158,14 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   }, [allowedEmbedDomains]);
 
   const focusEditor = useCallback(() => {
+    // Focus-reclaim seam (docs/029 §7.1): the courtesy "return focus to the editor" call
+    // that surfaces fire after a command must not steal focus from a focus-taking overlay
+    // that is currently open (a link/glossary/comment form). The authority resumes the
+    // reclaim and restores focus itself on dismissal, so this no-ops only while a taking
+    // surface owns focus and behaves exactly as before otherwise.
+    if (store.isReclaimSuspended()) return;
     viewRef.current?.getEditorHandle().focus();
-  }, []);
+  }, [store]);
 
   // Drag-drop an image file: route through the host upload binding and insert a
   // media node with the resolved src (AC10, §10.5). Inert without a binding.

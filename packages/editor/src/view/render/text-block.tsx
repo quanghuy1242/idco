@@ -480,6 +480,10 @@ export function EngineTextBlock(props: {
   // same node and the `focusNode === node.id` branch below just re-syncs it.
   const focusSelectionSoon = useCallback(() => {
     const apply = (): boolean => {
+      // Focus-reclaim seam (docs/029 §7.1): a focus-taking overlay owns DOM focus, so the
+      // per-leaf EditContext host must not re-grab it after this command. Report handled so
+      // no retry frame is scheduled; the authority restores editor focus on dismissal.
+      if (store.isReclaimSuspended()) return true;
       const sel = store.selection;
       // A command may leave the caret at a gap (e.g. removing an empty block at
       // the doc top): hand focus to the surface root so the gap key handler

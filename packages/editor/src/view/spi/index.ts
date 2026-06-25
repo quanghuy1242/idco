@@ -12,6 +12,9 @@
  * - `block-type-registry.ts` — text-leaf block types (chooser + aria role)
  * - `command-registry.ts` — surface-neutral command descriptors (docs/024 §5.2)
  * - `command-surface.ts`  — the flat-surface projector `resolveCommandList` (docs/024 §5.5)
+ * - `anchor-target.ts`    — overlay contributor contracts + registry (docs/029 §4.6/§4.7)
+ * - `overlay-positioning.ts` — pure central positioning solve (docs/029 §7.4)
+ * - `overlay-authority.ts` — the overlay authority engine + `useOverlayAuthority` (docs/029 §4/§7)
  * - `toolbar-layout.ts`   — ribbon tabs/slots + the pure `computeToolbarLayout` (docs/023 §5.5)
  *
  * `node-view` depends on `structural-view` (an object block may host structure);
@@ -28,6 +31,9 @@ export * from "./mark-registry";
 export * from "./block-type-registry";
 export * from "./command-registry";
 export * from "./command-surface";
+export * from "./anchor-target";
+export * from "./overlay-positioning";
+export * from "./overlay-authority";
 export * from "./toolbar-layout";
 export * from "./side-panel-registry";
 export * from "./document-collection-registry";

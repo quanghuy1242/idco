@@ -13,11 +13,13 @@
  * - `use-command-surfaces.ts` — the §8 coordinator (`useCommandSurfaces`)
  * - `command-builtins.tsx`  — built-in tabs/slots/commands (`registerBuiltInCommands`)
  * - `use-store-version.ts`  — shared selection+commit subscription hook
+ * - `overlay-layer.tsx`     — the overlay authority render layer (`OverlayLayer`, docs/029 §4.7D)
  */
 export * from "./ribbon";
 export * from "./context-menu";
 export * from "./selection-flyout";
 export * from "./slash-menu";
+export * from "./overlay-layer";
 export * from "./use-command-surfaces";
 export * from "./command-builtins";
 export * from "./use-store-version";
