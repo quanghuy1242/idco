@@ -53,7 +53,11 @@ import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
 import { registerBuiltInMarks } from "./render";
 import { registerBuiltInBlockTypes } from "./spi";
-import { registerBuiltInCommands } from "./chrome";
+import {
+  registerBuiltInCommands,
+  registerBuiltInOverlays,
+  SelectionSurfaceHost,
+} from "./chrome";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_VIEWPORT_HEIGHT,
@@ -91,6 +95,10 @@ registerBuiltInBlockTypes();
 // resolvers see the built-in commands regardless of import order. Idempotent with the
 // builtins module's own self-call.
 registerBuiltInCommands();
+// And the built-in overlay contributors (docs/029 R1-D): the one selection surface that
+// replaces the desktop flyout + the touch range toolbar. Same explicit-call rationale as
+// the commands above; idempotent by id.
+registerBuiltInOverlays();
 
 // The diagnostics + imperative-handle types live in the diagnostics controller;
 // re-export them here so the public view surface keeps the same names.
@@ -429,6 +437,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
             />
           )}
           <SelectionAnnouncer scheduler={scheduler} store={store} />
+          <SelectionSurfaceHost
+            focusEditor={syncFocusToSelection}
+            store={store}
+          />
         </DocumentIndexProvider>
       </div>
     );
@@ -496,6 +508,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
             />
           )}
           <SelectionAnnouncer scheduler={scheduler} store={store} />
+          <SelectionSurfaceHost
+            focusEditor={syncFocusToSelection}
+            store={store}
+          />
         </DocumentIndexProvider>
       </div>
     </div>

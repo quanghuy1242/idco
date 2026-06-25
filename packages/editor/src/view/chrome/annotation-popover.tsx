@@ -88,6 +88,7 @@ export function AnnotationPopover(props: {
   return (
     <AnchoredPopover
       ariaLabel="Glossary term"
+      isNonModal
       isOpen={target !== null}
       onOpenChange={(open) => {
         if (!open) close();

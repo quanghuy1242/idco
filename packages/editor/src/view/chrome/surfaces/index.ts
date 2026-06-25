@@ -20,6 +20,8 @@ export * from "./context-menu";
 export * from "./selection-flyout";
 export * from "./slash-menu";
 export * from "./overlay-layer";
+export * from "./overlay-content";
+export * from "./overlay-builtins";
 export * from "./use-command-surfaces";
 export * from "./command-builtins";
 export * from "./use-store-version";

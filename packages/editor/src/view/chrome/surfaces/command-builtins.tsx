@@ -341,7 +341,10 @@ export function registerBuiltInCommands(): void {
         .catch(() => {});
       ctx.store.command({ type: "delete-selection" });
     },
-    surfaces: { contextMenu: "primary" },
+    // Projected onto the selection surface too (docs/029 §8.3 R1-D): clipboard co-slots
+    // with format + annotate so the one selection bar carries copy/cut/paste — the merge
+    // that replaces the touch-only clipboard toolbar with a device-adaptive bar.
+    surfaces: { contextMenu: "primary", flyout: "primary" },
   });
   registerCommand({
     group: "edit",
@@ -355,7 +358,7 @@ export function registerBuiltInCommands(): void {
         ?.writeText(collectSelectionText(ctx.store, ctx.store.selection))
         .catch(() => {});
     },
-    surfaces: { contextMenu: "primary" },
+    surfaces: { contextMenu: "primary", flyout: "primary" },
   });
   registerCommand({
     group: "edit",
@@ -371,7 +374,7 @@ export function registerBuiltInCommands(): void {
         /* clipboard read denied — no-op */
       }
     },
-    surfaces: { contextMenu: "primary" },
+    surfaces: { contextMenu: "primary", flyout: "primary" },
   });
   registerCommand({
     group: "edit",

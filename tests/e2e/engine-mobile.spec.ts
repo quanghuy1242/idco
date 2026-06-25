@@ -319,11 +319,11 @@ test("AC8 the selection toolbar cuts the selected word", async ({
   const before = (await diag(page)).blockTexts[id]!;
   await longPressWord(page, box.x + 24, box.y + 8);
 
-  // Fire the button's action directly: the floating bar repaints on the
-  // selection frame lane (like the caret overlay), so Playwright's tap-stability
-  // wait never settles; `dispatchEvent` exercises the same onClick wiring.
+  // Fire the button's action directly via the merged selection bar (docs/029 R1-D: the
+  // touch range toolbar is now the one device-adaptive `[data-engine-flyout]` surface). The
+  // bar can re-position on measure, so `dispatchEvent` exercises the same onClick wiring.
   await page
-    .locator("[data-engine-sel-toolbar]")
+    .locator("[data-engine-flyout]")
     .getByRole("button", { name: "Cut" })
     .dispatchEvent("click");
 
@@ -348,10 +348,62 @@ test("AC8 the selection toolbar bolds the selected word", async ({
   await longPressWord(page, box.x + 24, box.y + 8);
 
   await page
-    .locator("[data-engine-sel-toolbar]")
+    .locator("[data-engine-flyout]")
     .getByRole("button", { name: "Bold" })
     .dispatchEvent("click");
 
   // A bolded leaf re-renders with a semantic <strong> over the marked run.
   await expect(block.locator("strong")).toHaveCount(1);
+});
+
+test("R1-D one device-adaptive selection surface on touch (the double-bar is gone)", async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "WebKit cannot construct synthetic Touch events; AC8 runs on mobile-chromium.",
+  );
+  await open(page);
+  const block = page.locator("[data-engine-text-id]").nth(1);
+  const box = (await block.boundingBox())!;
+  await longPressWord(page, box.x + 24, box.y + 8);
+
+  // docs/029 R1-D / §3.5: a touch range selection raises exactly ONE selection surface (the
+  // merged authority bar), not the old pair (the touch range toolbar + the desktop flyout).
+  await page
+    .locator("[data-engine-flyout]")
+    .waitFor({ state: "visible", timeout: 5000 });
+  await expect(page.locator("[data-engine-flyout]")).toHaveCount(1);
+  // The old touch range toolbar is removed entirely (its DOM marker is gone).
+  await expect(page.locator("[data-engine-sel-toolbar]")).toHaveCount(0);
+});
+
+test("R1-D a drill-in form on touch focuses its field (keyboard stays)", async ({
+  browserName,
+  page,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "WebKit cannot construct synthetic Touch events; AC8 runs on mobile-chromium.",
+  );
+  await open(page);
+  const block = page.locator("[data-engine-text-id]").nth(1);
+  const box = (await block.boundingBox())!;
+  await longPressWord(page, box.x + 24, box.y + 8);
+  await page
+    .locator("[data-engine-flyout]")
+    .waitFor({ state: "visible", timeout: 5000 });
+
+  // Drilling into a form from the bar (docs/029 §4.5) takes focus to the form's field, so
+  // the on-screen keyboard stays up for the field instead of collapsing (§6.1 P2 gate).
+  await page
+    .locator("[data-engine-flyout]")
+    .getByRole("button", { name: "Add to glossary" })
+    .dispatchEvent("click");
+  const input = page
+    .locator("[data-engine-glossary-add]")
+    .getByRole("textbox")
+    .first();
+  await expect(input).toBeFocused();
 });

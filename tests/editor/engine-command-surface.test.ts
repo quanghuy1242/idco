@@ -159,13 +159,17 @@ describe("resolveCommandList — context menu (docs/024 §5.5/§7.1)", () => {
 });
 
 describe("resolveCommandList — surface participation (docs/024 §6.3)", () => {
-  it("the flyout shows inlineFormat + annotate, never edit/blockStyle/insert", () => {
+  it("the flyout shows edit (clipboard) + inlineFormat + annotate, never blockStyle/insert", () => {
+    // docs/029 R1-D: clipboard (copy/cut/paste, the `edit` group) now projects onto the
+    // selection surface too, so the one merged bar carries clipboard + format + annotate
+    // (the merge that replaces the touch-only clipboard toolbar). blockStyle/insert stay off
+    // the selection bar (they are slash/turn-into affordances).
     const { store, id } = paragraphStore("hello world");
     selectRange(store, id, 0, 5);
     const groups = groupsOf("flyout", store);
+    expect(groups).toContain("edit");
     expect(groups).toContain("inlineFormat");
     expect(groups).toContain("annotate");
-    expect(groups).not.toContain("edit");
     expect(groups).not.toContain("blockStyle");
     expect(groups).not.toContain("insert");
   });

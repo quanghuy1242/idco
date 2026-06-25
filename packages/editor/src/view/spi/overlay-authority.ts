@@ -681,6 +681,44 @@ export function useOverlayAuthority(
     [store],
   );
 
+  // Inverted dismissal (docs/029 §7.1/§7.2): the authority owns close, React Aria does not.
+  // A press outside a focus-*taking* surface (a drilled-in form / a read card) dismisses it,
+  // and Escape dismisses the top-most surface. Transparent ambient surfaces (the selection
+  // bar) are not dismissed here — their close is driven by the model (selection collapse →
+  // reconcile drops them), so a press that lands in the editor and moves the caret closes
+  // them through that path, not this listener. Containment is by ownership, not a
+  // `closest("[data-engine-*]")` selector.
+  const envelopesRef = useRef(envelopes);
+  envelopesRef.current = envelopes;
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      const signatures = computeSignatures(store);
+      for (const env of envelopesRef.current) {
+        if (env.focusMode !== "taking") continue;
+        if (ownership.isWithinSurface(env.id, target)) continue;
+        setState((prev) =>
+          dismissSurface(prev, env.target, signatures[env.target] ?? null),
+        );
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const top = envelopesRef.current.at(-1);
+      if (!top) return;
+      const signatures = computeSignatures(store);
+      setState((prev) =>
+        dismissSurface(prev, top.target, signatures[top.target] ?? null),
+      );
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [ownership, store]);
+
   const surfaceContext = useCallback(
     (target: AnchorTargetKind): OverlaySurfaceContext => ({
       ...buildCommandContext(store, capabilities, panelHost),

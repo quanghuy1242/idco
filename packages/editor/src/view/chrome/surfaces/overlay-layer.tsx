@@ -32,12 +32,13 @@ import type { OffsetModel } from "../../../core/offset-model";
 import { resolveAnchorRect, type ScrollerGeometry } from "../../overlays";
 import {
   solveOverlayPlacements,
+  useOverlayAuthority,
   type EnvelopePlacement,
   type OverlayAuthority,
-  type OverlaySurfaceContext,
   type ResolvedEnvelope,
-  type ResolvedSlot,
+  type ToolbarCapabilities,
 } from "../../spi";
+import { OverlayContent } from "./overlay-content";
 
 /** Warn in dev if the portal layer carries a transform — it breaks `fixed` positioning. */
 function assertTransformFree(el: HTMLElement): void {
@@ -68,16 +69,13 @@ function usePortalContainer(): HTMLElement | null {
     if (typeof document === "undefined") return undefined;
     const div = document.createElement("div");
     div.setAttribute("data-engine-overlay-layer", "");
-    // Fixed, zero-size, no transform: a stable viewport-relative origin for the solved
-    // coordinates. Children opt back into pointer events; the layer itself is inert.
-    Object.assign(div.style, {
-      height: "0",
-      left: "0",
-      pointerEvents: "none",
-      position: "fixed",
-      top: "0",
-      width: "0",
-    });
+    // `display: contents` (docs/029 §7.4): the layer generates no box of its own, so it
+    // establishes no containing block and no stacking context — each `position: fixed`
+    // envelope box inside resolves directly against the viewport (a `position: fixed`
+    // *wrapper* would otherwise become the boxes' containing block in some engines and
+    // mis-place / mis-hit-test them). It is a pure grouping node (for the dev-assert + a
+    // stable mount point); z-order is each box's own `z-index`, not the layer's.
+    div.style.display = "contents";
     document.body.appendChild(div);
     assertTransformFree(div);
     setContainer(div);
@@ -86,24 +84,6 @@ function usePortalContainer(): HTMLElement | null {
     };
   }, []);
   return container;
-}
-
-/** Render the co-slotted root slots of an envelope (docs/029 §4.7D). */
-function SlotsView(props: {
-  readonly slots: readonly ResolvedSlot[];
-  readonly ctx: OverlaySurfaceContext;
-}): ReactNode {
-  return (
-    <>
-      {props.slots.map((slot) => (
-        <div data-engine-overlay-slot={slot.id} key={slot.id}>
-          {/* Projected slots (`projects`, no `render`) are rendered by the Phase 2 surface
-              migration's projection renderer; a `render`-bearing contributor renders now. */}
-          {slot.contributor.render?.(props.ctx) ?? null}
-        </div>
-      ))}
-    </>
-  );
 }
 
 /** One positioned envelope box: ownership registration + focus policy + content. */
@@ -150,8 +130,12 @@ function EnvelopeBox(props: {
   }, [envelope.id, envelope.focusMode, envelope.contentKind]);
 
   const ctx = authority.surfaceContext(envelope.target);
+  // The box chrome (DaisyUI 5 popover surface) is owned by the layer; the content fills it.
+  // A form/card gets roomier padding than the dense actions bar.
+  const pad = envelope.contentKind === "actions" ? "p-1" : "p-3";
   return (
     <div
+      className={`rounded-box border border-base-300 bg-base-100 shadow-lg ${pad}`}
       data-engine-overlay={envelope.target}
       ref={ref}
       style={{
@@ -162,11 +146,7 @@ function EnvelopeBox(props: {
         zIndex: envelope.z,
       }}
     >
-      {envelope.panel ? (
-        envelope.panel.render(ctx)
-      ) : (
-        <SlotsView ctx={ctx} slots={envelope.slots} />
-      )}
+      <OverlayContent authority={authority} ctx={ctx} envelope={envelope} />
     </div>
   );
 }
@@ -252,5 +232,43 @@ export function OverlayLayer(props: {
       />
     )),
     container,
+  );
+}
+
+// The selection surface's command context does not gate on per-deployment capabilities (its
+// marks/clipboard/annotate commands ignore them), so the host mounts the authority with a
+// neutral set; the ribbon/coordinator carry the real capabilities for tab gating (docs/023).
+const SELECTION_SURFACE_CAPS: ToolbarCapabilities = {
+  ai: false,
+  insertTable: true,
+  media: false,
+  review: false,
+};
+
+/**
+ * Leaf host that owns the overlay authority + layer (docs/029 R1-D). It is a *separate*
+ * component on purpose: `useOverlayAuthority` re-renders on every selection/commit, and
+ * keeping that state in a leaf (a sibling of the block list, like `SelectionAnnouncer`)
+ * means a selection change never re-renders the virtualized blocks — the perf invariant the
+ * editing view depends on (a parent re-render would re-render every mounted block). Mounted
+ * once inside the editing view so the selection surface serves both the bare view and the
+ * full editor, the home the touch toolbar used to have.
+ */
+export function SelectionSurfaceHost(props: {
+  readonly store: EditorStore;
+  readonly focusEditor: () => void;
+  readonly offsetModel?: OffsetModel | null;
+  readonly scroller?: ScrollerGeometry | null;
+}): ReactNode {
+  const authority = useOverlayAuthority(props.store, SELECTION_SURFACE_CAPS, {
+    focusEditor: props.focusEditor,
+  });
+  return (
+    <OverlayLayer
+      authority={authority}
+      offsetModel={props.offsetModel}
+      scroller={props.scroller}
+      store={props.store}
+    />
   );
 }

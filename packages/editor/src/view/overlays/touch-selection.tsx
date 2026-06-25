@@ -17,7 +17,6 @@
  */
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type RefObject,
@@ -141,21 +140,17 @@ export function TouchSelectionLayer(props: {
     top: last.top + last.height,
   };
 
-  const minLeft = Math.min(...ranges.map((r) => r.left));
-  const maxRight = Math.max(...ranges.map((r) => r.left + r.width));
-  const center = (minLeft + maxRight) / 2;
-  const anchorTop = first.top;
-
   return (
     <div
       data-engine-touch-selection=""
       style={{ inset: 0, pointerEvents: "none", position: "absolute" }}
     >
+      {/* Grips only. The range selection toolbar merged into the overlay authority's one
+          device-adaptive selection bar (docs/029 R1-D §8.3), so this layer is now pure
+          geometry (the draggable range handles) plus the collapsed-caret paste affordance
+          below — the touch half of the split. */}
       <Handle end="start" point={startPoint} />
       <Handle end="end" point={endPoint} />
-      {!interacting && (
-        <SelectionToolbar actions={actions} center={center} top={anchorTop} />
-      )}
     </div>
   );
 }
@@ -196,54 +191,6 @@ function Handle(props: {
         }}
       />
     </div>
-  );
-}
-
-function SelectionToolbar(props: {
-  readonly actions: TouchSelectionActions;
-  readonly center: number;
-  readonly top: number;
-}) {
-  const { actions, center, top } = props;
-  const selectionKey = useMemo(
-    () => `${Math.round(center)}:${Math.round(top)}`,
-    [center, top],
-  );
-  const [dismissed, setDismissed] = useState(false);
-  useEffect(() => setDismissed(false), [selectionKey]);
-
-  return (
-    <PopoverAnchor left={center} top={top} variant="selection">
-      {(anchorRef) => (
-        <AnchoredPopover
-          ariaLabel="Selected text actions"
-          isNonModal
-          isOpen={!dismissed}
-          onOpenChange={(open) => {
-            if (!open) setDismissed(true);
-          }}
-          placement="top"
-          shouldCloseOnInteractOutside={() => true}
-          triggerRef={anchorRef}
-        >
-          <ActionRow dataAttr="data-engine-sel-toolbar">
-            <ActionButton label="Copy" onPress={actions.copy} />
-            <ActionButton label="Cut" onPress={actions.cut} />
-            <ActionButton label="Paste" onPress={actions.paste} />
-            <ActionButton
-              label="B"
-              onPress={() => actions.toggleMark("bold")}
-              title="Bold"
-            />
-            <ActionButton
-              label="I"
-              onPress={() => actions.toggleMark("italic")}
-              title="Italic"
-            />
-          </ActionRow>
-        </AnchoredPopover>
-      )}
-    </PopoverAnchor>
   );
 }
 

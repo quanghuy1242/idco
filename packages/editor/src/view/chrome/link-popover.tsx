@@ -123,6 +123,7 @@ export function LinkPopover(props: {
   return (
     <AnchoredPopover
       ariaLabel="Edit link"
+      isNonModal
       isOpen={target !== null}
       onOpenChange={(open) => {
         if (!open) close();

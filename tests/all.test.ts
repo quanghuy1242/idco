@@ -92,6 +92,7 @@ await import("./editor/engine-overlay-authority.test");
 await import("./editor/engine-overlay-positioning.test");
 await import("./editor/engine-overlay-anchor.test");
 await import("./editor/engine-overlay-layer.test");
+await import("./editor/engine-overlay-selection.test");
 await import("./editor/engine-focus-reclaim.test");
 await import("./editor/engine-alignment.test");
 await import("./editor/engine-schema-profile.test");

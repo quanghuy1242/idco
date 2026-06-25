@@ -28,7 +28,6 @@ import type { NodeId, OwnedEditorHandle } from "../core";
 import {
   EditorToolbar,
   EngineContextMenu,
-  SelectionFlyout,
   SidePanelDock,
   SlashMenu,
   useCommandSurfaces,
@@ -430,13 +429,11 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
               }
               store={store}
             />
-            <SelectionFlyout
-              close={closeSurfaces}
-              ctx={surfaces.ctx}
-              focusEditor={focusEditor}
-              open={surfaces.surface?.kind === "flyout"}
-              store={store}
-            />
+            {/* The selection surface (merged flyout + touch range bar) is owned by the
+                overlay authority, mounted inside the editing view (`react-view`) so it is
+                available in both the bare view and the full editor, exactly where the touch
+                toolbar used to live (docs/029 R1-D). It portals to a transform-free body
+                layer, so nothing renders here. */}
             <SlashMenu
               close={closeSurfaces}
               ctx={surfaces.ctx}
