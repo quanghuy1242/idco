@@ -55,9 +55,10 @@
   - [4.4 Compose Vs Arbitrate: The Two-Level Co-Slot Rule](#44-compose-vs-arbitrate-the-two-level-co-slot-rule)
   - [4.5 Drill-In Is A Bounded Mode Stack](#45-drill-in-is-a-bounded-mode-stack)
   - [4.6 The Contract Shapes](#46-the-contract-shapes)
+  - [4.7 Usage Shapes](#47-usage-shapes)
 - [5. Architecture Decisions](#5-architecture-decisions)
   - [5.1 Recommended: One Manager, Anchor-Target Spine, Orthogonal Axes](#51-recommended-one-manager-anchor-target-spine-orthogonal-axes)
-  - [5.2 The Mobile Merge: Decision C (Device-Adaptive Selection Surface)](#52-the-mobile-merge-decision-c-device-adaptive-selection-surface)
+  - [5.2 Composing A Surface From Multiple Contributors (Co-Slot)](#52-composing-a-surface-from-multiple-contributors-co-slot)
   - [5.3 Scope: Replace Every Floating Surface, With One Clean Cut](#53-scope-replace-every-floating-surface-with-one-clean-cut)
   - [5.4 Rejected And Deferred Options](#54-rejected-and-deferred-options)
 - [6. Implementation Strategy](#6-implementation-strategy)
@@ -333,10 +334,123 @@ export interface OverlayAuthority {
   // co-slotted, mode-stacked, z-ordered, and positioned (collision-resolved).
   readonly envelopes: readonly ResolvedEnvelope[];
   requestContextMenu(x: number, y: number): boolean;
-  openMark(anchor: AnchorRef, contributorId: string): void; // link/glossary click
+  open(anchor: AnchorRef, contributorId: string): boolean; // explicit open; false = nothing resolved
+  openMark(anchor: AnchorRef): boolean;                    // matches a registered mark contributor by kind
   dismissAll(): void;
 }
 ```
+
+### 4.7 Usage Shapes
+
+A call site declares **intent**; it never touches React Aria mechanics. There are four usage modes — **(A)** module-level registration (ambient or explicit surfaces), **(B)** explicit opens from a press/click, **(C)** drill-in from a command or node-view, and **(D)** one generic render at the editor root. These shapes are illustrative (final names settle in implementation) but fix the contract so the build does not re-derive it.
+
+**A. Registration — the selection bar (co-slot, the composition path, §5.2).** Three contributors share `target` + `contentKind` + `focusMode`, so they co-slot into one bar, each as its own slot in registration order. `projects` names the docs/024 projector list that fills the slot. Nothing here is device-specific — the touch skin is a render-time detail of the `actions` renderer:
+
+```ts
+registerOverlay({ id: "selection.clipboard", target: "selection",
+  contentKind: "actions", focusMode: "transparent", projects: "clipboard" });
+
+registerOverlay({ id: "selection.format", target: "selection",
+  contentKind: "actions", focusMode: "transparent", projects: "flyout" });
+
+registerOverlay({ id: "selection.annotate", target: "selection",
+  contentKind: "actions", focusMode: "transparent", projects: "annotate" });
+```
+
+**A′. Registration — ambient surfaces on a caret (arbitration, not merge).** Same `caret` target, but `menu` and `actions` are incompatible content-kinds, so the authority arbitrates by `priority`/`when` (rule 3, §7.3) instead of co-slotting. `when` is the ambient raise predicate:
+
+```ts
+registerOverlay({ id: "caret.slash", target: "caret",
+  contentKind: "menu", focusMode: "transparent", projects: "slash",
+  when: (ctx) => detectSlashTrigger(ctx.store) !== null });
+
+registerOverlay({ id: "caret.clipboard", target: "caret",
+  contentKind: "actions", focusMode: "transparent", projects: "clipboard",
+  when: (ctx) => ctx.isTouch && ctx.caretHeld, priority: 1 });
+```
+
+**B. Explicit open — context menu, cell `…`, mark click.** A press/click calls `authority.open(...)`; it returns `false` when nothing resolves (so the native context menu still shows, docs/024 §9). No overlay wiring at the call site:
+
+```ts
+onContextMenu={(e) => {
+  if (authority.open({ kind: "point", x: e.clientX, y: e.clientY }, "point.contextMenu"))
+    e.preventDefault();
+}}
+
+// Hovered cell "…" button. The swatch-press focus bounce is EXPECTED under
+// `transparent`, so there is no pressInsideRef / keepCellPopoverOpen.
+<ChromeButton icon="Ellipsis" label="Cell actions"
+  onPress={() => authority.open({ kind: "cell", cellId }, "cell.actions")} />
+
+// Click on a mark → the authority matches the registered mark contributor by kind,
+// replacing useLinkInteraction/useAnnotationInteraction.
+function onClickMark(el: HTMLElement) {
+  const hit = resolveMarkHit(el);                 // { nodeId, markId, kind }
+  if (hit) authority.openMark({ kind: "mark", nodeId: hit.nodeId, markId: hit.markId });
+}
+```
+
+Mark contributors are registered once and matched by kind:
+
+```ts
+registerOverlay({ id: "mark.link", target: "mark", contentKind: "form",
+  focusMode: "taking", match: (m) => m.kind === "link",
+  render: (s) => <LinkForm ctx={s} onDone={s.dismiss} /> });
+
+registerOverlay({ id: "mark.glossary", target: "mark", contentKind: "card",
+  focusMode: "taking", match: (m) => m.kind === "glossary",
+  render: (s) => <GlossaryReadCard ctx={s} /> });
+```
+
+**C. Drill-in from a command — link/glossary/comment add (the mode stack, §4.5).** A command pushes a `form` panel onto the surface it was invoked from instead of opening a nested popover; focus-mode flips `transparent → taking` (the §7.1 seam suspends reclaim), and `pop` returns to the action row. The same command works from the flyout or the context menu, and this `push` is what replaces the context-menu "close-and-reopen-standalone" workaround:
+
+```ts
+{
+  id: "annotate.link", group: "annotate",
+  surfaces: { flyout: { icon: "Link" }, contextMenu: { label: "Add link" } },
+  run: (ctx) => ctx.push({
+    id: "link.form", contentKind: "form", focusMode: "taking",
+    render: (s) => <LinkForm ctx={s} onDone={s.pop} />,
+  }),
+}
+```
+
+**C′. Drill-in declared by a node-view — object config (block target).** Object config rides the existing node SPI, so a block contributes its own overlay; `when` makes it ambient on the active object:
+
+```ts
+defineNodeView("media", {
+  render: renderMedia,
+  overlay: {
+    target: "block", contentKind: "form", focusMode: "taking",
+    when: (ctx, blockId) => ctx.store.activeObjectId === blockId,
+    render: (s) => <MediaConfig ctx={s} />,
+  },
+});
+```
+
+**D. The one generic render — editor root (no per-surface branch).** The authority emits already-arbitrated, co-slotted, mode-stacked, positioned envelopes; the root renders them generically through the single transform-free portal layer:
+
+```tsx
+function OwnedModelEditor() {
+  const authority = useOverlayAuthority(store, capabilities, panelHost);
+  return (
+    <EditorOverlayProvider value={authority}>      {/* ownership registry context */}
+      <ReactView store={store} authority={authority} />
+      <OverlayLayer authority={authority} />        {/* single transform-free portal layer */}
+    </EditorOverlayProvider>
+  );
+}
+
+function OverlayLayer({ authority }: { authority: OverlayAuthority }) {
+  return authority.envelopes.map((env) => (
+    <Envelope key={env.id} placement={env.placement} z={env.z} surfaceRef={env.ref}>
+      {env.slots.map((slot) => <SlotView key={slot.id} slot={slot} ctx={env.ctx} />)}
+    </Envelope>
+  ));
+}
+```
+
+`SlotView` is the only place content-kind maps to a React Aria primitive — `actions → RA Toolbar`, `menu → RA Menu/ListBox`, `form`/`card` `→ RA Dialog` region — pulling content from `slot.projects` (the projector) or `slot.render`. React Aria does all behavior *inside* the slot; the envelope owns focus/dismiss/position/coexistence *around* it. The throughline: a call site says "open a `form` at this `mark`," or "this command pushes a form," or registers "`actions`, `transparent`, projects `clipboard`, target `selection`" — and never sees `isNonModal`, `shouldCloseOnInteractOutside`, a portal, an autofocus RAF, or a `data-engine-*` selector again.
 
 ## 5. Architecture Decisions
 
@@ -351,15 +465,18 @@ Why this is the right tradeoff:
 - **It keeps React Aria.** The authority composes `@idco/ui`'s RA primitives; RA still does focus mechanics, keyboard, ARIA, and positioning. The editor adds only the focus-ownership *policy* RA cannot know. This holds the non-negotiable UI philosophy.
 - **Generic drill-in is justified by recurrence.** The pattern appears in the flyout, the context menu, and (latently) the cell/object surfaces — three+ sites. Bounding it to a mode stack prevents framework creep while covering all of them.
 
-### 5.2 The Mobile Merge: Decision C (Device-Adaptive Selection Surface)
+### 5.2 Composing A Surface From Multiple Contributors (Co-Slot)
 
-Three options were considered for the mobile double-bar:
+Co-slot is a **standard SPI capability, not a mobile feature**: a surface (an anchor-target's envelope) is *composed from N contributors*, and the two-level rule (§4.4/§7.3) co-slots the compatible ones into one envelope. The mobile double-bar (§3.5) is the *motivating example* that exposed the gap, not the scope of the decision.
 
-- **(a) Suppress the flyout on touch, keep the native-style touch toolbar.** Arbitration only; loses the projected format/annotate commands on mobile.
-- **(b) Suppress the touch toolbar, use the flyout everywhere.** Loses the native copy/cut/paste affordance and the touch ergonomics.
-- **(c) Merge into one device-adaptive selection surface (CHOSEN).** The `selection` target has one envelope; copy/cut/paste and format/annotate are *both* contributors co-slotted into it; the envelope renders a touch skin (larger hit targets, native-feel ordering, keyboard-avoidance) on touch and the dense flyout skin on desktop.
+The `selection` target carries three contributors — `clipboard` (copy/cut/paste), `format` (the inline marks), and `annotate` (link/glossary/comment) — all `actions` + `transparent`, so they co-slot into one bar, each as its own slot in registration order (§4.7 mode A). This is equally true on **desktop**; it was simply invisible there because no second contributor ever competed for the `selection` target. The bug only surfaced on mobile because touch *added* the clipboard contributor (the native-style Copy/Cut/Paste bar) next to the existing format flyout, and nobody composed them.
 
-Decision C is chosen because it kills the entire coexistence class for this target instead of arbitrating it forever: one selection surface, two skins, fed by the same projector. The trade is real work — copy/cut/paste must become **projected commands** (see §5.4 — explicitly accepted, "no half-baked"), and the anchor resolver must be device-aware (desktop anchors at selection start to not cover the run; touch anchors above the selection centered, avoiding the OS keyboard and the grips). On mobile the surface must stay focus-mode `transparent` until a drill-in form commits, or the virtual keyboard collapses (the known mobile keyboard-flicker class).
+The decision — call it **Decision C** against the §3.5 options — is that the `selection` target has **one** envelope, composed by co-slot, fed by the same projector. The rejected options were **(a)** suppress the flyout on touch (loses projected format/annotate there) and **(b)** suppress the touch bar (loses the clipboard affordance and the touch ergonomics). Decision C kills the coexistence class for the target instead of arbitrating it forever, and it generalizes: any future contributor to `selection` (or any other target) co-slots by the same rule.
+
+It has two consequences, and only one of them is device-related:
+
+- **Composition consequence (general, the real work).** Copy/cut/paste must become **projected commands** like format/annotate (§5.4 — explicitly accepted, "no half-baked"), so all three contributors share one content pipeline instead of the current imperative `TouchSelectionActions` props. This is not mobile-specific; it is what makes the `selection` target composable at all.
+- **Rendering consequence (a content-kind skin, not part of the merge).** The `actions` content-kind chooses a skin at render time via `ctx.isTouch` — touch uses larger hit targets, native-feel ordering, and keyboard-avoidant placement; desktop uses the dense flyout. This is a property of the `actions` renderer available to *every* surface, not a special path for the selection bar. The surface stays focus-mode `transparent` until a drill-in form commits (or the virtual keyboard collapses — the known keyboard-flicker class), which is again a general `transparent`-mode guarantee, not a selection-specific rule.
 
 ### 5.3 Scope: Replace Every Floating Surface, With One Clean Cut
 
