@@ -1,4 +1,26 @@
 /**
+ * ⚠️ TEMPORARY ONE-TIME IMPORTER — NOT the official save/load/serialization path. ⚠️
+ *
+ * This file imports/exports the legacy **PayloadCMS-compatible Lexical JSON** shape
+ * (`{ root: { children } }`). It exists ONLY to migrate the existing Payload corpus
+ * (`payloadcms.db` at repo root) into the owned model, and to round-trip with the old
+ * Lexical editor/reader during that transition. It is slated for **deletion** once the
+ * corpus is migrated and the `EditorDocumentSnapshot` flip is done (see
+ * `editor-spi-gap-epic` memory / docs/026 sunset). The whole engine — model, store,
+ * commands, reader (docs/028) — is deliberately built so this file can be removed
+ * without touching them.
+ *
+ * DO NOT build new features on it and DO NOT treat it as the canonical serializer.
+ * The OFFICIAL native serialization path does not go through this file at all:
+ *   - SAVE → `store.toSnapshot()` → `EditorDocumentSnapshot`
+ *            (via `handle.getEditorSnapshot()`, persisted by `useAutosave`'s `onSave`)
+ *   - LOAD → `createEditorStore({ snapshot })` — the constructor reads
+ *            `snapshot.body.blocks`/`order` DIRECTLY (no compat walk)
+ *   - READER consumes the same native `EditorDocumentSnapshot` (docs/028)
+ *   - New node construction (paste, etc.) builds NATIVE `EditorNode[]` and inserts via
+ *     `compileInsertBlocks` — never through this compat AST.
+ * `compatFromSnapshot`/`editorSnapshotFromCompat` are legacy-interop only.
+ *
  * Compatibility adapter for the old rich-text wire format.
  *
  * Why this file exists
