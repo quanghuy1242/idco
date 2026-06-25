@@ -23,3 +23,21 @@ export function listToggleCommand(
     type: "set-block-type",
   };
 }
+
+/**
+ * The `set-block-type` command toggling a *checklist* item on or off (docs/030
+ * §4.3c). An active checklist item flips back to a paragraph (clearing the
+ * `checked` flag); anything else becomes a bullet list item carrying
+ * `checked: false`. Shared by the toolbar checklist button and the markdown
+ * `[ ] ` prefix path's sibling controls, like `listToggleCommand`.
+ */
+export function checklistToggleCommand(active: boolean): EditorCommand {
+  return active
+    ? { blockType: "paragraph", type: "set-block-type" }
+    : {
+        blockType: "listitem",
+        checked: false,
+        listType: "bullet",
+        type: "set-block-type",
+      };
+}

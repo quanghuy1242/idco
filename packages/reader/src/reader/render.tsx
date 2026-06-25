@@ -27,6 +27,8 @@ import {
 import {
   RichTextBlockquote,
   RichTextCallout,
+  RichTextCheckList,
+  RichTextCheckListItem,
   RichTextCodeBlock,
   RichTextEmbed,
   RichTextEmphasis,
@@ -249,8 +251,18 @@ function renderTextLeaf(
       return (
         <RichTextBlockquote indent={indent}>{children}</RichTextBlockquote>
       );
-    case "listitem":
-      return <RichTextListItem indent={indent}>{children}</RichTextListItem>;
+    case "listitem": {
+      // A `checked` boolean renders the checkbox item (read-only static checkbox;
+      // the checklist island makes it togglable); otherwise a plain `<li>`.
+      const checked = node.attrs?.checked;
+      return typeof checked === "boolean" ? (
+        <RichTextCheckListItem checked={checked}>
+          {children}
+        </RichTextCheckListItem>
+      ) : (
+        <RichTextListItem indent={indent}>{children}</RichTextListItem>
+      );
+    }
     default:
       return (
         <RichTextParagraph align={align} indent={indent}>
@@ -503,9 +515,17 @@ export function renderTableOfContents(
 
 // --- structural containers ---------------------------------------------------
 
-/** The flat-list flavour of a node, or null when it is not a list-item leaf. */
-function listFlavour(node: ReaderBlockNode): "bullet" | "number" | null {
+/**
+ * The flat-list flavour of a node, or null when it is not a list-item leaf. A
+ * `checked` boolean makes it a checklist item, a distinct flavour so a checklist
+ * run groups into a `<ul data-rt-checklist>` rather than a bullet `<ul>`
+ * (docs/030 §4.3c) — the same flat-run grouping the editor's live marker uses.
+ */
+function listFlavour(
+  node: ReaderBlockNode,
+): "bullet" | "number" | "checklist" | null {
   if (node.kind !== "text" || node.type !== "listitem") return null;
+  if (typeof node.attrs?.checked === "boolean") return "checklist";
   return node.attrs?.listType === "number" ? "number" : "bullet";
 }
 
@@ -518,7 +538,7 @@ function listFlavour(node: ReaderBlockNode): "bullet" | "number" | null {
 export type ReaderRenderUnit =
   | {
       readonly kind: "list";
-      readonly flavour: "bullet" | "number";
+      readonly flavour: "bullet" | "number" | "checklist";
       readonly items: readonly ReaderBlockNode[];
     }
   | { readonly kind: "single"; readonly node: ReaderBlockNode };
@@ -528,7 +548,7 @@ export function groupListRuns(
 ): readonly ReaderRenderUnit[] {
   const units: ReaderRenderUnit[] = [];
   let run: ReaderBlockNode[] = [];
-  let runFlavour: "bullet" | "number" | null = null;
+  let runFlavour: "bullet" | "number" | "checklist" | null = null;
   const flush = () => {
     if (run.length === 0 || !runFlavour) return;
     units.push({ flavour: runFlavour, items: run, kind: "list" });
@@ -569,13 +589,19 @@ export function renderUnit(
   key: string,
 ): ReactNode {
   if (unit.kind === "list") {
-    return (
+    const items = unit.items.map((item) => (
+      <Fragment key={item.id}>
+        {renderTextLeaf(item as ReaderTextNode, snapshot)}
+      </Fragment>
+    ));
+    // A checklist run wraps in `<ul data-rt-checklist>` (the checklist island
+    // hydrates over it); bullet/number runs in a real `<ul>`/`<ol>`. The items
+    // themselves render as the matching `<li>` in `renderTextLeaf` (docs/030 §4.3c).
+    return unit.flavour === "checklist" ? (
+      <RichTextCheckList key={key}>{items}</RichTextCheckList>
+    ) : (
       <RichTextList key={key} kind={unit.flavour}>
-        {unit.items.map((item) => (
-          <Fragment key={item.id}>
-            {renderTextLeaf(item as ReaderTextNode, snapshot)}
-          </Fragment>
-        ))}
+        {items}
       </RichTextList>
     );
   }

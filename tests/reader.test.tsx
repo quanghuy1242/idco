@@ -315,6 +315,38 @@ describe("Reader — L1 render + .rt-* contract", () => {
   });
 });
 
+describe("Reader — checklist render (docs/030 §4.3c)", () => {
+  it("renders flat `checked` listitems as a `<ul data-rt-checklist>` with checkboxes", () => {
+    const { container } = render(
+      <Reader
+        value={snap(
+          text("listitem", "done", { checked: true, listType: "bullet" }),
+          text("listitem", "todo", { checked: false, listType: "bullet" }),
+        )}
+      />,
+    );
+    const list = container.querySelector("[data-rt-checklist]");
+    expect(list).not.toBeNull();
+    const boxes = container.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    expect(boxes.length).toBe(2);
+    expect(boxes[0]?.checked).toBe(true);
+    expect(boxes[1]?.checked).toBe(false);
+  });
+
+  it("keeps a plain bullet list (no `checked`) as a normal `<ul>`", () => {
+    const { container } = render(
+      <Reader
+        value={snap(text("listitem", "plain", { listType: "bullet" }))}
+      />,
+    );
+    expect(container.querySelector("[data-rt-checklist]")).toBeNull();
+    expect(container.querySelector("ul")).not.toBeNull();
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+  });
+});
+
 describe("Reader — islands are opt-in", () => {
   it("emits NO island markup when renderIsland is omitted (static by default)", () => {
     const { container } = render(<Reader value={basicDoc} />);

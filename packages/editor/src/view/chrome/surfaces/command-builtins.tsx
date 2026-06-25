@@ -53,7 +53,7 @@ import {
   OutlinePane,
   StatisticsPane,
 } from "../panes";
-import { listToggleCommand } from "../chrome-commands";
+import { checklistToggleCommand, listToggleCommand } from "../chrome-commands";
 
 /** The link editor body (docs/023 §7.3) — the migrated `set-link`/`clear-link` form. */
 function LinkEditorBody({ ctx }: { readonly ctx: CommandRenderContext }) {
@@ -460,6 +460,22 @@ export function registerBuiltInCommands(): void {
       const active =
         ctx.store.query({ type: "current-list-type" }) === "number";
       ctx.store.command(listToggleCommand(active, "number"));
+    },
+    slot: "home.lists",
+    surfaces: { contextMenu: "primary", ribbon: "primary" },
+  });
+  registerCommand({
+    group: "list",
+    icon: "ListChecks",
+    id: "list-checklist",
+    isActive: (ctx) =>
+      ctx.store.query({ type: "current-list-checked" }) !== null,
+    kind: "toggle",
+    label: "Checklist",
+    responsivePriority: 3,
+    run: (ctx) => {
+      const active = ctx.store.query({ type: "current-list-checked" }) !== null;
+      ctx.store.command(checklistToggleCommand(active));
     },
     slot: "home.lists",
     surfaces: { contextMenu: "primary", ribbon: "primary" },

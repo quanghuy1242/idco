@@ -40,6 +40,7 @@ import {
   canOutdent,
   currentAlign,
   currentBlockType,
+  currentListChecked,
   currentListType,
   isMarkActive,
 } from "./shared";
@@ -80,6 +81,12 @@ export type EditorCommand =
       readonly tag?: string;
       /** Optional list flavour (`bullet`/`number`) carried as a `listType` attr. */
       readonly listType?: string;
+      /**
+       * Optional task-list flag carried as a `checked` attr (docs/030 §4.3c).
+       * Present (even `false`) makes a list item a checklist item; omitted clears
+       * the flag so a checklist→bullet/paragraph conversion drops the checkbox.
+       */
+      readonly checked?: boolean;
     }
   | {
       readonly type: "set-block-attr";
@@ -153,6 +160,7 @@ export type EditorQuery =
   | { readonly type: "can-outdent" }
   | { readonly type: "current-block-type" }
   | { readonly type: "current-list-type" }
+  | { readonly type: "current-list-checked" }
   | { readonly type: "current-align" }
   | { readonly type: "active-link-href" };
 
@@ -225,6 +233,7 @@ const compilers: { [K in EditorCommandType]: CommandCompiler } = {
           command.blockType,
           command.tag,
           command.listType,
+          command.checked,
         )
       : null,
   "set-collection": (store, command) =>
@@ -268,6 +277,8 @@ export function runQuery(
       return currentBlockType(store);
     case "current-list-type":
       return currentListType(store);
+    case "current-list-checked":
+      return currentListChecked(store);
     case "current-align":
       return currentAlign(store);
     case "active-link-href":

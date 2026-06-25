@@ -306,9 +306,13 @@ export {
 } from "./core";
 export {
   detectMarkdownShortcut,
-  type MarkdownShortcut,
+  type AutolinkShortcut,
+  type BlockObjectShortcut,
   type BlockShortcut,
   type InlineCodeShortcut,
+  type InlineLinkShortcut,
+  type MarkPairShortcut,
+  type MarkdownShortcut,
   type SubstituteShortcut,
   type WrapPairShortcut,
 } from "./core";

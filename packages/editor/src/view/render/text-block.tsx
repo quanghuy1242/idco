@@ -381,6 +381,36 @@ export function EngineTextBlock(props: {
       // collapsing it (the native-editor behavior); the caret-collapsing
       // mousedown would otherwise wipe the selection before `contextmenu` fires.
       if (event.button !== 0) return;
+      // Checklist toggle: a click in the marker gutter of a checklist item flips
+      // its `checked` flag instead of placing a caret (docs/030 §4.3c). The marker
+      // is a CSS `::before` glyph (not its own element), so the hit test is the
+      // reserved left padding — a click left of the text column. Done here, the
+      // pointer entry point, so no interactive element is injected into the
+      // EditContext host.
+      const checklistNode = store.getNode(node.id);
+      if (
+        checklistNode?.kind === "text" &&
+        checklistNode.type === "listitem" &&
+        typeof checklistNode.attrs?.checked === "boolean"
+      ) {
+        const box = hostRef.current;
+        if (box) {
+          const rect = box.getBoundingClientRect();
+          const gutter = Number.parseFloat(
+            getComputedStyle(box).paddingLeft || "0",
+          );
+          if (event.clientX - rect.left < gutter) {
+            event.preventDefault();
+            store.command({
+              key: "checked",
+              node: node.id,
+              type: "set-block-attr",
+              value: !checklistNode.attrs.checked,
+            });
+            return;
+          }
+        }
+      }
       // A pointer click sets a fresh caret X; drop any remembered goal column.
       goalColumnRef.current = null;
       // Map the click to a model offset (docs/011 \u00a78.3 click-to-position), not
@@ -690,6 +720,14 @@ export function EngineTextBlock(props: {
       }
       data-engine-list-type={
         node.type === "listitem" ? (listMeta?.listType ?? "bullet") : undefined
+      }
+      // A `checked` boolean makes a list item a checklist item: the marker becomes
+      // a ☐/☑ checkbox (CSS) and a click in the marker gutter toggles it
+      // (`focusAtClick`). Absent → a plain bullet (docs/030 §4.3c).
+      data-engine-list-checked={
+        node.type === "listitem" && typeof node.attrs?.checked === "boolean"
+          ? String(node.attrs.checked)
+          : undefined
       }
       data-engine-text-id={node.id}
       // The engine resolves blocks by `data-engine-block-id`/`blockRefs` (above),

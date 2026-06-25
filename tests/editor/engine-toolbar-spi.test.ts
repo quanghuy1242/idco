@@ -231,6 +231,7 @@ describe("ribbon layout — Home + Insert resolve (docs/023 §5.5/§7)", () => {
     expect(slotItemIds(layout, "home", "home.lists")).toEqual([
       "list-bulleted",
       "list-numbered",
+      "list-checklist",
       "outdent",
       "indent",
     ]);

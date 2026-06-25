@@ -169,6 +169,13 @@ export const ENGINE_TYPOGRAPHY_CSS =
   // multi-digit numbers stay clear of the text.
   '[data-engine-view-root] [data-engine-block-type="listitem"]:not([data-engine-list-type="number"])::before{content:"•";position:absolute;left:0.55em;top:2px;line-height:inherit;opacity:0.6;}' +
   '[data-engine-view-root] [data-engine-block-type="listitem"][data-engine-list-type="number"]::before{content:attr(data-engine-list-ordinal) ".";position:absolute;left:0;top:2px;width:1.3em;text-align:right;line-height:inherit;opacity:0.6;font-variant-numeric:tabular-nums;}' +
+  // A checklist item (`data-engine-list-checked` present) shows a ☐/☑ checkbox in
+  // place of the bullet (docs/030 §4.3c). These follow the bullet rule so, at equal
+  // specificity, they win for a checklist item (which is also `list-type="bullet"`);
+  // the `="true"` rule is more specific and wins for the checked state. The glyph is
+  // `cursor:pointer` to hint the gutter click `focusAtClick` handles.
+  '[data-engine-view-root] [data-engine-block-type="listitem"][data-engine-list-checked]::before{content:"\\2610";position:absolute;left:0.2em;top:1px;line-height:inherit;opacity:0.75;cursor:pointer;}' +
+  '[data-engine-view-root] [data-engine-block-type="listitem"][data-engine-list-checked="true"]::before{content:"\\2611";opacity:0.85;}' +
   // Inline marks. Semantic elements (strong/em/u/s/sub/sup) already render via UA
   // defaults; these style the ones the UA does not (link without href, code,
   // highlight, comment, glossary) and theme the link with the DaisyUI token.

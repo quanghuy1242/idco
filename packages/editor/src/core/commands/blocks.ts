@@ -1,7 +1,9 @@
 /** Block command compilers: block type/attr, markdown shortcuts, indent/outdent (docs/020 §7.5). */
 import {
   boundaryAtOffset,
+  makeObjectNode,
   makeStructuralNode,
+  makeTextNode,
   pointAtOffset,
   replaceTextContent,
   type EditorNode,
@@ -11,12 +13,18 @@ import {
   type TextLeafType,
 } from "../model";
 import type {
+  AutolinkShortcut,
+  BlockObjectShortcut,
   BlockShortcut,
   InlineCodeShortcut,
+  InlineLinkShortcut,
+  MarkPairShortcut,
   MarkdownShortcut,
   SubstituteShortcut,
   WrapPairShortcut,
 } from "../markdown-shortcuts";
+import { bakeObjectData } from "../bake";
+import { safeHref } from "../url-safety";
 import type { EditorStore, TransactionBuilder } from "../store";
 import {
   coveredTextLeaves,
@@ -71,6 +79,7 @@ export function compileSetBlockType(
   blockType: TextLeafType,
   tag?: string,
   listType?: string,
+  checked?: boolean,
 ): TransactionBuilder | null {
   const range = textRange(store);
   if (!range) return null;
@@ -120,6 +129,22 @@ export function compileSetBlockType(
       });
       changed = true;
     }
+    // The task-list flag rides on `checked` (docs/030 §4.3c). It is reconciled to
+    // the requested value (a checklist toggle passes `false`/`true`); any other
+    // block-type change passes `undefined`, which clears a stale flag so a
+    // checklist→bullet/paragraph conversion never leaves a phantom checkbox.
+    const currentChecked = node.attrs?.checked;
+    const nextChecked = blockType === "listitem" ? checked : undefined;
+    if (currentChecked !== nextChecked) {
+      tr.push({
+        from: currentChecked,
+        key: "checked",
+        node: node.id,
+        to: nextChecked,
+        type: "set-node-attr",
+      });
+      changed = true;
+    }
   }
   if (!changed) return null;
   return tr.setSelection(store.selection as EditorSelection);
@@ -138,8 +163,16 @@ export function compileApplyMarkdown(
   switch (shortcut.kind) {
     case "block":
       return compileBlockShortcut(store, shortcut);
+    case "block-object":
+      return compileBlockObjectShortcut(store, shortcut);
     case "inline-code":
       return compileInlineCodeShortcut(store, shortcut);
+    case "mark-pair":
+      return compileMarkPairShortcut(store, shortcut);
+    case "inline-link":
+      return compileInlineLinkShortcut(store, shortcut);
+    case "autolink":
+      return compileAutolinkShortcut(store, shortcut);
     case "substitute":
       return compileSubstituteShortcut(store, shortcut);
     case "wrap-pair":
@@ -222,6 +255,20 @@ export function compileBlockShortcut(
       type: "set-node-attr",
     });
   }
+  // A `[ ] `/`[x] ` prefix marks the new item as a checklist item (the flag is
+  // present even when `false`); every other prefix carries `undefined` so a stray
+  // `checked` is cleared (docs/030 §4.3c).
+  const nextChecked =
+    shortcut.blockType === "listitem" ? shortcut.checked : undefined;
+  if (node.attrs?.checked !== nextChecked) {
+    tr.push({
+      from: node.attrs?.checked,
+      key: "checked",
+      node: node.id,
+      to: nextChecked,
+      type: "set-node-attr",
+    });
+  }
   const finalContent = replaceTextContent(
     node.content,
     0,
@@ -233,39 +280,218 @@ export function compileBlockShortcut(
 }
 
 /**
- * Wrap `` `x` `` in a `code` mark and remove both backticks (docs/018 §2.1). The
- * close backtick is removed first (higher offset) so the open offset stays live,
- * then the surviving run gets a code mark and the caret lands at its end.
+ * Wrap `` `x` `` in a `code` mark and remove both backticks (docs/018 §2.1).
+ * Inline-code keeps its own shortcut shape for API stability, but the mechanics
+ * are the general paired-marker case (length-1 marker, `code` kind), so this just
+ * delegates to `compileMarkPairShortcut` rather than duplicating the removal +
+ * mark dance (docs/030 §4.1).
  */
 export function compileInlineCodeShortcut(
   store: EditorStore,
   shortcut: InlineCodeShortcut,
+): TransactionBuilder | null {
+  return compileMarkPairShortcut(store, {
+    closeFrom: shortcut.closeBacktick,
+    kind: "mark-pair",
+    markKind: "code",
+    markerLength: 1,
+    openFrom: shortcut.openBacktick,
+  });
+}
+
+/**
+ * Wrap a paired-marker run (`**bold**`, `*italic*`, `` `code` ``, …) in its mark
+ * and remove both markers (docs/030 §4.1). The close marker is removed first
+ * (higher offset) so the open offset stays live, then the surviving run gets the
+ * mark and the caret lands at its end. Generalizes inline-code to any marker
+ * length and mark kind.
+ */
+export function compileMarkPairShortcut(
+  store: EditorStore,
+  shortcut: MarkPairShortcut,
 ): TransactionBuilder | null {
   const sel = store.selection;
   if (sel?.type !== "text") return null;
   const node = store.getNode(sel.focus.node);
   if (!node || node.kind !== "text") return null;
   const text = node.content.text;
-  const { openBacktick: open, closeBacktick: close } = shortcut;
-  if (text[open] !== "`" || text[close] !== "`" || close - open < 2)
+  const { openFrom, closeFrom, markerLength: length, markKind } = shortcut;
+  // Re-validate against the live text: both markers must still be the same run of
+  // `length` marker chars and enclose at least one content char.
+  const openMarker = text.slice(openFrom, openFrom + length);
+  const closeMarker = text.slice(closeFrom, closeFrom + length);
+  if (
+    openMarker.length !== length ||
+    openMarker !== closeMarker ||
+    closeFrom - (openFrom + length) < 1
+  ) {
     return null;
+  }
   const tr = store.transaction();
-  // Remove the close backtick first so `open` stays a valid offset.
-  tr.replaceText({ at: close, inserted: "", node: node.id, removed: "`" });
-  tr.replaceText({ at: open, inserted: "", node: node.id, removed: "`" });
-  const afterClose = replaceTextContent(node.content, close, 1, EMPTY_SLICE);
-  const finalContent = replaceTextContent(afterClose, open, 1, EMPTY_SLICE);
-  // The inner run [open+1, close) becomes [open, close-1) once both ticks go.
-  const markFrom = open;
-  const markTo = close - 1;
+  // Remove the close marker first so `openFrom` stays a valid offset.
+  tr.replaceText({
+    at: closeFrom,
+    inserted: "",
+    node: node.id,
+    removed: closeMarker,
+  });
+  tr.replaceText({
+    at: openFrom,
+    inserted: "",
+    node: node.id,
+    removed: openMarker,
+  });
+  const afterClose = replaceTextContent(
+    node.content,
+    closeFrom,
+    length,
+    EMPTY_SLICE,
+  );
+  const finalContent = replaceTextContent(
+    afterClose,
+    openFrom,
+    length,
+    EMPTY_SLICE,
+  );
+  // The inner run [openFrom+length, closeFrom) becomes [openFrom, closeFrom-length)
+  // once both markers go.
+  const markFrom = openFrom;
+  const markTo = closeFrom - length;
   tr.addMark(node.id, {
     from: boundaryAtOffset(finalContent, markFrom, "before"),
     id: store.nextMarkId(),
-    kind: "code",
+    kind: markKind,
     to: boundaryAtOffset(finalContent, markTo, "after"),
   });
   const focus = pointAtOffset(node.id, finalContent, markTo);
   return tr.setSelection({ anchor: focus, focus, type: "text" });
+}
+
+/**
+ * Inline link `[text](url)` → `text` carrying a `link` mark (docs/030 §4.1). The
+ * whole `[text](url)` run is replaced by `text`; the href is sanitized at the
+ * model boundary (a `javascript:` URL clears to empty and the run stays plain
+ * text), mirroring `compileLink` (docs/010 §10.5).
+ */
+export function compileInlineLinkShortcut(
+  store: EditorStore,
+  shortcut: InlineLinkShortcut,
+): TransactionBuilder | null {
+  const sel = store.selection;
+  if (sel?.type !== "text") return null;
+  const node = store.getNode(sel.focus.node);
+  if (!node || node.kind !== "text") return null;
+  const { from, to, text: linkText, url } = shortcut;
+  const expected = `[${linkText}](${url})`;
+  if (node.content.text.slice(from, to) !== expected) return null;
+  const href = safeHref(url);
+  const tr = store.transaction();
+  tr.replaceText({
+    at: from,
+    inserted: linkText,
+    node: node.id,
+    removed: expected,
+  });
+  const finalContent = replaceTextContent(
+    node.content,
+    from,
+    to - from,
+    store.allocator.createTextSlice(linkText),
+  );
+  const markTo = from + linkText.length;
+  if (href.length > 0) {
+    tr.addMark(node.id, {
+      attrs: { href },
+      from: boundaryAtOffset(finalContent, from, "before"),
+      id: store.nextMarkId(),
+      kind: "link",
+      to: boundaryAtOffset(finalContent, markTo, "after"),
+    });
+  }
+  const focus = pointAtOffset(node.id, finalContent, markTo);
+  return tr.setSelection({ anchor: focus, focus, type: "text" });
+}
+
+/**
+ * Autolink: give a bare URL a `link` mark in place without changing the text
+ * (docs/030 §4.1). The just-typed space stays; only the URL run gains the mark.
+ * An unsafe URL is left untouched.
+ */
+export function compileAutolinkShortcut(
+  store: EditorStore,
+  shortcut: AutolinkShortcut,
+): TransactionBuilder | null {
+  const sel = store.selection;
+  if (sel?.type !== "text") return null;
+  const node = store.getNode(sel.focus.node);
+  if (!node || node.kind !== "text") return null;
+  const { from, to, url } = shortcut;
+  if (node.content.text.slice(from, to) !== url) return null;
+  const href = safeHref(url);
+  if (href.length === 0) return null;
+  const tr = store.transaction();
+  tr.addMark(node.id, {
+    attrs: { href },
+    from: boundaryAtOffset(node.content, from, "before"),
+    id: store.nextMarkId(),
+    kind: "link",
+    to: boundaryAtOffset(node.content, to, "after"),
+  });
+  // The caret is already past the typed space; leave the selection where it is.
+  return tr.setSelection(store.selection as EditorSelection);
+}
+
+/**
+ * Line→object markdown (docs/030 §4.1): replace the current marker-only paragraph
+ * with an object node — `---`/`***`/`___` → `divider`, ` ``` ` → `code-block`.
+ * The object is normalized + baked through the registry so it is publish-ready
+ * immediately, exactly like an insert or a compat import. A `divider` is an atom,
+ * so a fresh empty paragraph is appended to land the caret; a `code-block` is
+ * editable, so the caret selects the new object (the same node-selection an
+ * insert leaves — input redirection into the code surface is its own follow-up).
+ */
+export function compileBlockObjectShortcut(
+  store: EditorStore,
+  shortcut: BlockObjectShortcut,
+): TransactionBuilder | null {
+  const sel = store.selection;
+  if (sel?.type !== "text") return null;
+  const node = store.getNode(sel.focus.node);
+  if (!node || node.kind !== "text") return null;
+  const entry = store.parentEntry(node.id);
+  if (!entry) return null;
+  const definition = store.registry.get(shortcut.objectType);
+  if (!definition) return null;
+  const normalized = definition.normalizeData({});
+  const baked = bakeObjectData(
+    store.registry,
+    shortcut.objectType,
+    normalized.data,
+  );
+  const objectId = store.allocator.createNodeId();
+  const objectNode = makeObjectNode({
+    baked: baked.baked ?? undefined,
+    data: normalized.data,
+    id: objectId,
+    status: baked.status,
+    type: shortcut.objectType,
+  });
+  const tr = store.transaction();
+  // Replace the marker leaf in place (remove + insert at the same index), the
+  // same swap `placeSubtree`'s replace branch uses.
+  tr.removeNode(entry.parent, entry.index, node);
+  tr.insertNode(entry.parent, entry.index, objectNode);
+  if (shortcut.objectType === "divider") {
+    const paragraph = makeTextNode({
+      content: store.allocator.createTextSlice(""),
+      id: store.allocator.createNodeId(),
+      type: "paragraph",
+    });
+    tr.insertNode(entry.parent, entry.index + 1, paragraph);
+    const focus = pointAtOffset(paragraph.id, paragraph.content, 0);
+    return tr.setSelection({ anchor: focus, focus, type: "text" });
+  }
+  return tr.setSelection({ node: objectId, type: "node" });
 }
 
 /**

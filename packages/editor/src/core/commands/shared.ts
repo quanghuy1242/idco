@@ -504,6 +504,20 @@ export function currentListType(store: EditorStore): string | null {
 }
 
 /**
+ * The task-list state of the current block (docs/030 §4.3c): `true`/`false` when
+ * the current list item is a checklist item (carries a `checked` flag), or `null`
+ * when it is not a checklist item (a plain bullet, or not a list item at all). The
+ * checklist toggle reads this so it knows whether to add or remove the flag.
+ */
+export function currentListChecked(store: EditorStore): boolean | null {
+  const range = textRange(store);
+  if (!range) return null;
+  const node = store.getNode(range.start.node);
+  if (!node || node.kind !== "text" || node.type !== "listitem") return null;
+  return typeof node.attrs?.checked === "boolean" ? node.attrs.checked : null;
+}
+
+/**
  * The element alignment of the current block (note.md item 1). Alignment is stored
  * on the existing `attrs.format` field — the same field the compat layer already
  * round-trips to the legacy element `format` the reader maps to align
