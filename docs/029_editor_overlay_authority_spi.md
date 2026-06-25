@@ -62,6 +62,7 @@
   - [5.3 Scope: Replace Every Floating Surface, With One Clean Cut](#53-scope-replace-every-floating-surface-with-one-clean-cut)
   - [5.4 Rejected And Deferred Options](#54-rejected-and-deferred-options)
 - [6. Implementation Strategy](#6-implementation-strategy)
+  - [6.1 Phase Map](#61-phase-map)
 - [7. The Five Load-Bearing Mechanics](#7-the-five-load-bearing-mechanics)
   - [7.1 The Focus-Reclaim Seam (View → Core)](#71-the-focus-reclaim-seam-view--core)
   - [7.2 Reconciling Persistent Envelope State With Volatile Projected Content](#72-reconciling-persistent-envelope-state-with-volatile-projected-content)
@@ -507,6 +508,20 @@ Sequence so every step is independently reviewable, testable against the existin
 
 Each step is shippable; the editor never regresses to two pipelines.
 
+### 6.1 Phase Map
+
+The seven backlog items (§11) group into **three phases** by dependency. The cut is foundations → one proof surface → parallel fan-out:
+
+| Phase | Tickets | Why grouped | Gate / what it proves |
+| --- | --- | --- | --- |
+| **P1 — Foundations** | R1-A (authority core), R1-B (focus-reclaim seam), R1-C (anchor resolver + portal + positioning) | The three infra pieces; no surface migrated yet. A is the spine, B is the core seam, C is the positioning/portal layer — they interlock but ship behind the scenes. | Unit tests for arbitration / co-slot / mode-stack / reconciliation / positioning pass; nothing user-visible changes. |
+| **P2 — Selection surface proof** | R1-D (flyout + touch merge) | Deliberately alone. The flyout is already ~80% the target model, so it is the cheapest end-to-end validation of all three authorities at once (dismissal inversion, transparent actions, the drill-in mode stack, the co-slot merge). | Existing flyout e2e specs pass unchanged; **one** selection bar on touch; keyboard does not collapse during a drill-in. This is the go/no-go for the model. |
+| **P3 — Fan-out migration** | R1-E (cell + table containment), R1-F (menus + transparent-keyboard routing), R1-G (forms/cards + ribbon-hack retire + foreign-modal) | Independent of each other (different surfaces); all depend only on P1 plus the patterns proven in P2. Parallelizable. | Per-surface specs pass; the hand-rolled paths (slash raw portal, context-menu reopen-standalone, `pressInsideRef`, ribbon capture-gate, `useAutoFocusWithin`) are deleted; consumer boundary audit clean. |
+
+Dependency spine: **R1-A → (R1-B, R1-C) → R1-D → {R1-E, R1-F, R1-G}**. P1's three tickets may overlap during development but land/review as one foundation; P3's three can run truly in parallel once P2 proves the model. This is the §6 eight-step strategy collapsed onto the backlog: step 1 = P1, steps 2–3 = P2 (both inside R1-D), steps 4–8 = P3.
+
+Judgment call: do **not** start any P3 ticket before P2 is green. P2 is the proof that the seam (§7.1), reconciliation (§7.2), and co-slot rule (§7.3) hold on a real surface; if it surfaces a contract flaw, fix it once in P1/P2 before three migrations bake in the wrong assumption.
+
 ## 7. The Five Load-Bearing Mechanics
 
 These are the parts that decide whether the design *ends* the bug class or merely *relocates* it. They are specified concretely because the design is sound only if they are.
@@ -693,7 +708,7 @@ Tests: `tests/ui/` popover tests; cross-repo `pnpm check` against linked idco be
 
 ## 11. Implementation Backlog
 
-### R1-A. Authority Core + Anchor Targets
+### R1-A. Authority Core + Anchor Targets — Phase 1
 
 Scope:
 
@@ -715,7 +730,7 @@ Tests:
 
 - New unit suites under `tests/editor/` for authority logic.
 
-### R1-B. Focus-Reclaim Seam
+### R1-B. Focus-Reclaim Seam — Phase 1
 
 Scope:
 
@@ -736,7 +751,7 @@ Tests:
 
 - `tests/e2e/engine-flyout-bold.spec.ts`, `tests/e2e/engine-flyout-popover.spec.ts` pass with `shouldKeepFlyoutOpen`/`useAutoFocusWithin` deleted.
 
-### R1-C. Anchor Resolver + Portal Layer + Central Positioning
+### R1-C. Anchor Resolver + Portal Layer + Central Positioning — Phase 1
 
 Scope:
 
@@ -757,7 +772,7 @@ Tests:
 
 - Positioning unit tests + a virtualized re-anchor test.
 
-### R1-D. Selection Surface Merge
+### R1-D. Selection Surface Merge — Phase 2
 
 Scope:
 
@@ -779,7 +794,7 @@ Tests:
 
 - Existing flyout specs pass; new mobile single-bar + keyboard-stability spec.
 
-### R1-E. Cell Popover + Table Containment
+### R1-E. Cell Popover + Table Containment — Phase 3
 
 Scope:
 
@@ -798,7 +813,7 @@ Tests:
 
 - `tests/e2e/engine-table-cell-popover.spec.ts` passes; new phantom-drag spec.
 
-### R1-F. Menus
+### R1-F. Menus — Phase 3
 
 Scope:
 
@@ -818,7 +833,7 @@ Tests:
 
 - Slash nav/insert specs; context-menu cell-ops specs.
 
-### R1-G. Forms/Cards + Ribbon Hack Retirement + Foreign-Modal
+### R1-G. Forms/Cards + Ribbon Hack Retirement + Foreign-Modal — Phase 3
 
 Scope:
 
