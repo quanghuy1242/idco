@@ -8,7 +8,6 @@
  *
  * - `ribbon.tsx`            — the persistent toolbar (`EditorToolbar`)
  * - `context-menu.tsx`      — right-click menu (`EngineContextMenu`)
- * - `selection-flyout.tsx`  — floating bar over a selection (`SelectionFlyout`)
  * - `slash-menu.tsx`        — caret-anchored insert/turn-into list (`SlashMenu`)
  * - `use-command-surfaces.ts` — the §8 coordinator (`useCommandSurfaces`)
  * - `command-builtins.tsx`  — built-in tabs/slots/commands (`registerBuiltInCommands`)
@@ -17,7 +16,6 @@
  */
 export * from "./ribbon";
 export * from "./context-menu";
-export * from "./selection-flyout";
 export * from "./slash-menu";
 export * from "./overlay-layer";
 export * from "./overlay-content";

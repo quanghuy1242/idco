@@ -299,8 +299,11 @@ test("AC8 holding the collapsed caret opens the paste popover", async ({
   const popover = page.locator("[data-engine-caret-toolbar]");
   await expect(popover).toBeVisible();
   await expect(popover.getByRole("button", { name: "Paste" })).toBeVisible();
+  // The caret-paste affordance is now an overlay-authority surface (docs/029 R1-G
+  // `openCaretActions`), rendered in the transform-free overlay layer rather than a
+  // standalone React Aria Dialog — so assert it lives in that layer, not a `dialog` role.
   await expect(
-    page.getByRole("dialog", { name: "Caret actions" }),
+    page.locator("[data-engine-overlay-layer] [data-engine-caret-toolbar]"),
   ).toBeVisible();
 });
 

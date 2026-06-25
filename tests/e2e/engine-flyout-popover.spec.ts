@@ -18,9 +18,12 @@ async function open(page: Page): Promise<void> {
 
 /** Select a run of text in the subtitle paragraph so the selection flyout appears. */
 async function selectSomeText(page: Page): Promise<void> {
-  // The 2nd text block is the subtitle ("An owned-model editor with …").
+  // The 2nd text block is the subtitle ("An owned-model editor with …"). Click near its start
+  // (plain text), not its centre: the subtitle ends in a "real link", and a centre click can
+  // land on it, which now correctly opens the click-to-edit link form (AC9) and focuses its URL
+  // field — capturing the keyboard. We want a plain caret here to drive a keyboard selection.
   const block = page.locator("[data-engine-text-id]").nth(1);
-  await block.click();
+  await block.click({ position: { x: 6, y: 8 } });
   await page.keyboard.press("Home");
   for (let i = 0; i < 8; i += 1) await page.keyboard.press("Shift+ArrowRight");
   // The flyout raises on a *settled* selection (a short debounce), so wait for it.

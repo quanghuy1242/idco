@@ -18,7 +18,17 @@
  * old coordinator still drives the live surfaces); mounting it is the Phase 2 selection-
  * surface migration (docs/029 §6.1). So nothing user-visible changes — the P1 gate.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { EditorStore } from "../../core";
 import {
   canCoSlot,
@@ -52,6 +62,8 @@ export type OpenSurface = {
   readonly rootContributorIds: readonly string[];
   /** The drill-in mode stack; empty = the root view is showing. */
   readonly modeStack: readonly OverlayPanel[];
+  /** Opaque payload for an ephemeral surface (the `openForm` render fn), docs/029 R1-F/R1-G. */
+  readonly payload?: unknown;
 };
 
 /**
@@ -67,6 +79,7 @@ export type AuthorityState = {
     readonly target: AnchorTargetKind;
     readonly anchor: AnchorRef;
     readonly contributorId: string;
+    readonly payload?: unknown;
   }[];
   readonly suppressed: Readonly<Record<string, string | null>>;
 };
@@ -171,6 +184,16 @@ export function effectiveFocusMode(
   return root?.focusMode ?? "transparent";
 }
 
+/**
+ * Whether a focus mode *owns* DOM focus (docs/029 §4.2): both `taking` and `sticky` do, so
+ * both suspend the reclaim seam, autofocus their field, and survive a transient empty
+ * projection. Only the *outside-press dismissal* distinguishes them (sticky is exempt), which
+ * is keyed on `=== "taking"` directly at the listener, not here.
+ */
+export function focusModeOwnsFocus(mode: FocusMode): boolean {
+  return mode !== "transparent";
+}
+
 /** The effective content kind of an open surface (top mode-stack level, else its root). */
 export function effectiveContentKind(
   surface: OpenSurface,
@@ -265,6 +288,27 @@ export function reconcileAuthority(
     for (const t of textFlowWinners) if (t !== keep) winners.delete(t);
   }
 
+  // (3b) A focus-*taking* surface on an off-text-flow target (a link/object-config form, a
+  // read card) suppresses the ambient *transparent* selection bar — docs/029 §3.3 #7, "the
+  // ambient flyout tears its own child form out", generalized into the authority. Opening a
+  // link form selects the link's range so `set-link` has something to act on, which would
+  // otherwise raise the format flyout over that same range — two surfaces over one span. The
+  // form is the committed interaction, so the ambient bar yields. (Right-click already wins
+  // via text-flow exclusivity; this covers `mark`/`block`/`cell` taking forms, which coexist
+  // with a selection because they are not text-flow targets.) Only a *transparent* selection
+  // winner yields; a hypothetical taking selection surface would not.
+  const selectionWinner = winners.get("selection");
+  if (selectionWinner) {
+    const selRoot = byId.get(selectionWinner.rootIds[0] ?? "");
+    const selTransparent =
+      (selRoot?.focusMode ?? "transparent") === "transparent";
+    const hasOffFlowTaking = [...winners].some(([t, w]) => {
+      if (t === "selection") return false;
+      return byId.get(w.rootIds[0] ?? "")?.focusMode === "taking";
+    });
+    if (selTransparent && hasOffFlowTaking) winners.delete("selection");
+  }
+
   // (4) Build next open, carrying mode stacks forward when the root set is unchanged.
   const open: OpenSurface[] = [];
   const represented = new Set<AnchorTargetKind>();
@@ -272,22 +316,31 @@ export function reconcileAuthority(
     const prevOpen = prev.open.find((o) => o.target === target);
     const sameRoot =
       prevOpen && sameIds(prevOpen.rootContributorIds, winner.rootIds);
+    // Carry the ephemeral payload from the explicit request that opened this target (docs/029
+    // R1-F/R1-G), so the `ephemeral.form` contributor's render can read it off the context.
+    const explicitPayload = prev.explicit.find(
+      (e) => e.target === target && winner.rootIds.includes(e.contributorId),
+    )?.payload;
     open.push({
       anchor: winner.anchor,
       modeStack: sameRoot ? prevOpen.modeStack : [],
+      payload: explicitPayload,
       rootContributorIds: winner.rootIds,
       target,
     });
     represented.add(target);
   }
 
-  // (5) Reconciliation survive: a vanished surface lives on iff it is focus-taking.
+  // (5) Reconciliation survive: a vanished surface lives on iff it owns focus (taking/sticky)
+  // AND its root contributor is not `volatile`. A volatile contributor (object-config) opts
+  // out so it closes the instant its `when` goes false (the object deactivated), instead of
+  // lingering like a selection-anchored form across a transient model flicker (docs/029 §7.2).
   for (const prevOpen of prev.open) {
     if (represented.has(prevOpen.target)) continue;
-    if (effectiveFocusMode(prevOpen, lookup) === "taking") {
-      open.push(prevOpen);
-      represented.add(prevOpen.target);
-    }
+    if (!focusModeOwnsFocus(effectiveFocusMode(prevOpen, lookup))) continue;
+    if (lookup(prevOpen.rootContributorIds[0] ?? "")?.volatile) continue;
+    open.push(prevOpen);
+    represented.add(prevOpen.target);
   }
 
   // (6) Clear stale suppression; explicit opens clear their target's suppression.
@@ -309,10 +362,11 @@ export function openExplicit(
   anchor: AnchorRef,
   contributorId: string,
   target: AnchorTargetKind,
+  payload?: unknown,
 ): AuthorityState {
   const explicit = [
     ...state.explicit.filter((e) => e.target !== target),
-    { anchor, contributorId, target },
+    { anchor, contributorId, payload, target },
   ];
   // Clear suppression so the explicit open is honored even over a just-dismissed anchor.
   const suppressed = { ...state.suppressed, [target]: null };
@@ -544,6 +598,34 @@ export type OverlayAuthority = {
   open(anchor: AnchorRef, contributorId: string): boolean;
   /** Open the first `mark` contributor that matches the clicked mark; false if none. */
   openMark(probe: MarkProbe): boolean;
+  /**
+   * Open an arbitrary command body as an ephemeral form at a point (docs/029 R1-F/R1-G) — the
+   * shared primitive the context menu and the ribbon use instead of hand-rolling a popover.
+   * `render` receives the surface context (it can `dismiss`/`focusEditor`).
+   */
+  openForm(
+    x: number,
+    y: number,
+    render: (ctx: OverlaySurfaceContext) => ReactNode,
+  ): void;
+  /**
+   * Open a *sticky* form at a point (docs/029 R1-G): like {@link openForm} but the surface
+   * holds focus yet survives an outside press, closing only on Escape / `dismiss`. The find
+   * bar is the one user of this — its field stays focused while the author clicks matches in
+   * the document. Backed by the `ephemeral.sticky` contributor.
+   */
+  openStickyForm(
+    x: number,
+    y: number,
+    render: (ctx: OverlaySurfaceContext) => ReactNode,
+  ): void;
+  /**
+   * Open a transient actions surface at the caret (docs/029 R1-G) — the touch caret long-press
+   * "Paste" affordance. Content-kind `actions`, focus-mode `taking` (an outside touch
+   * dismisses it via the inverted listener; no field, so no focus is moved on a touch device).
+   * Backed by the `ephemeral.caretActions` contributor; `render` rides as the payload.
+   */
+  openCaretActions(render: (ctx: OverlaySurfaceContext) => ReactNode): void;
   /** Open the context menu at a point if any command resolves there; false → native menu. */
   requestContextMenu(x: number, y: number): boolean;
   /** Dismiss a target's surface (pops one drill-in level, or closes at the root). */
@@ -658,10 +740,10 @@ export function useOverlayAuthority(
     [state, lookup],
   );
 
-  // Drive the focus-reclaim seam (docs/029 §7.1): while any open surface is focus-taking,
-  // suspend the editor's automatic reclaim so the surface's field keeps focus; on the last
-  // taking surface closing, resume and restore editor focus once.
-  const anyTaking = envelopes.some((e) => e.focusMode === "taking");
+  // Drive the focus-reclaim seam (docs/029 §7.1): while any open surface owns focus
+  // (taking *or* sticky), suspend the editor's automatic reclaim so the surface's field keeps
+  // focus; on the last focus-owning surface closing, resume and restore editor focus once.
+  const anyTaking = envelopes.some((e) => focusModeOwnsFocus(e.focusMode));
   useEffect(() => {
     if (!anyTaking) return undefined;
     store.suspendReclaim();
@@ -683,11 +765,14 @@ export function useOverlayAuthority(
 
   // Inverted dismissal (docs/029 §7.1/§7.2): the authority owns close, React Aria does not.
   // A press outside a focus-*taking* surface (a drilled-in form / a read card) dismisses it,
-  // and Escape dismisses the top-most surface. Transparent ambient surfaces (the selection
-  // bar) are not dismissed here — their close is driven by the model (selection collapse →
-  // reconcile drops them), so a press that lands in the editor and moves the caret closes
-  // them through that path, not this listener. Containment is by ownership, not a
-  // `closest("[data-engine-*]")` selector.
+  // and Escape dismisses the top-most surface. Two modes are intentionally NOT dismissed by an
+  // outside press: `transparent` ambient surfaces (the selection bar) — their close is
+  // model-driven (selection collapse → reconcile drops them), so a press that lands in the
+  // editor and moves the caret closes them through that path; and `sticky` surfaces (the find
+  // bar) — they must survive a click into the document (reading a match) yet keep focus, so
+  // only Escape / explicit dismiss closes them (docs/029 §4.2 sticky). Hence the `=== "taking"`
+  // gate below excludes both. Containment is by ownership, not a `closest("[data-engine-*]")`
+  // selector.
   const envelopesRef = useRef(envelopes);
   envelopesRef.current = envelopes;
   useEffect(() => {
@@ -720,14 +805,19 @@ export function useOverlayAuthority(
   }, [ownership, store]);
 
   const surfaceContext = useCallback(
-    (target: AnchorTargetKind): OverlaySurfaceContext => ({
-      ...buildCommandContext(store, capabilities, panelHost),
-      dismiss: () => dismiss(target),
-      focusEditor: () => focusEditor?.(),
-      pop: () => setState((prev) => popPanel(prev, target)),
-      push: (panel) => setState((prev) => pushPanel(prev, target, panel)),
-    }),
-    [store, capabilities, panelHost, dismiss, focusEditor],
+    (target: AnchorTargetKind): OverlaySurfaceContext => {
+      const surface = state.open.find((s) => s.target === target);
+      return {
+        ...buildCommandContext(store, capabilities, panelHost),
+        anchor: surface?.anchor ?? null,
+        dismiss: () => dismiss(target),
+        focusEditor: () => focusEditor?.(),
+        payload: surface?.payload,
+        pop: () => setState((prev) => popPanel(prev, target)),
+        push: (panel) => setState((prev) => pushPanel(prev, target, panel)),
+      };
+    },
+    [store, capabilities, panelHost, dismiss, focusEditor, state],
   );
 
   const authority: OverlayAuthority = useMemo(
@@ -747,6 +837,55 @@ export function useOverlayAuthority(
           ),
         );
         return true;
+      },
+      openForm: (x, y, render) => {
+        // Ephemeral form at a point: a `point`-target form envelope whose render is carried
+        // as the payload (docs/029 R1-F/R1-G). The `ephemeral.form` contributor reads it back.
+        setState((prev) =>
+          reconcileAuthority(
+            openExplicit(
+              prev,
+              { kind: "point", x, y },
+              "ephemeral.form",
+              "point",
+              render,
+            ),
+            reconcileInput(),
+          ),
+        );
+      },
+      openStickyForm: (x, y, render) => {
+        // Sticky ephemeral form at a point (docs/029 R1-G): same payload channel as openForm
+        // but the `ephemeral.sticky` contributor declares focus-mode `sticky`, so an outside
+        // press does not dismiss it (find survives doc clicks). Closes on Escape / dismiss.
+        setState((prev) =>
+          reconcileAuthority(
+            openExplicit(
+              prev,
+              { kind: "point", x, y },
+              "ephemeral.sticky",
+              "point",
+              render,
+            ),
+            reconcileInput(),
+          ),
+        );
+      },
+      openCaretActions: (render) => {
+        // Transient caret actions (docs/029 R1-G touch paste): an explicit `caret` actions
+        // surface carrying the render as payload. `taking` so an outside touch dismisses it.
+        setState((prev) =>
+          reconcileAuthority(
+            openExplicit(
+              prev,
+              { kind: "caret" },
+              "ephemeral.caretActions",
+              "caret",
+              render,
+            ),
+            reconcileInput(),
+          ),
+        );
       },
       openMark: (probe) => {
         const contributor = listOverlayContributors().find(
@@ -803,4 +942,89 @@ export function useOverlayAuthority(
   );
 
   return authority;
+}
+
+// ---------------------------------------------------------------------------
+// Authority ref context — cross-component imperative access (docs/029 §7.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * A stable ref to the live authority, shared via context so components OUTSIDE the leaf
+ * `SelectionSurfaceHost` (a table's cell `…` button, a mark click, the right-click handler)
+ * can call `open`/`openMark`/`requestContextMenu` without subscribing to the authority's
+ * envelope state. The *ref* is stable (created once high in the view), so providing it
+ * re-renders nothing on a selection change; the leaf host writes the latest authority into
+ * it each of its own (isolated) re-renders, and consumers read `ref.current` imperatively
+ * inside event handlers. This is what keeps the perf invariant (no block-list re-render on
+ * selection) while still letting any surface open an overlay.
+ */
+export type OverlayAuthorityRef = RefObject<OverlayAuthority | null>;
+
+const OverlayAuthorityRefContext = createContext<OverlayAuthorityRef | null>(
+  null,
+);
+
+/** Provide the authority ref to the editing-view subtree. */
+export const OverlayAuthorityRefProvider = OverlayAuthorityRefContext.Provider;
+
+/** Read the authority ref (null outside an editor that mounts the authority). */
+export function useOverlayAuthorityRef(): OverlayAuthorityRef | null {
+  return useContext(OverlayAuthorityRefContext);
+}
+
+// ---------------------------------------------------------------------------
+// Focus-transparent keyboard routing (docs/029 §7.5)
+// ---------------------------------------------------------------------------
+
+/** What a focus-transparent menu surface declares to be keyboard-operable while focus
+ *  stays in the editor (docs/029 §7.5). */
+export type TransparentKeyboardHandlers = {
+  /** Move the highlighted item by `delta` (ArrowDown = +1, ArrowUp = -1). */
+  readonly onArrow: (delta: 1 | -1) => void;
+  /** Activate the highlighted item (Enter). */
+  readonly onEnter: () => void;
+  /** Dismiss the surface (Escape). */
+  readonly onEscape: () => void;
+};
+
+/**
+ * Focus-transparent keyboard routing (docs/029 §7.5) — the reusable capability that lets a
+ * `transparent` menu (the slash menu, and any future one) be driven by the keyboard while
+ * DOM focus stays in the editor. A `transparent` surface never holds focus, so React Aria's
+ * own keyboard handling never fires; instead a single document **capture**-phase handler
+ * reaches Arrow/Enter/Escape before the editing block sees them and routes them to the active
+ * surface. This is the one place that trick lives, instead of each transparent menu
+ * re-creating slash's bespoke handler. Reads the latest handlers through a ref so it
+ * subscribes once per open and never goes stale.
+ */
+export function useTransparentKeyboardRouting(
+  active: boolean,
+  handlers: TransparentKeyboardHandlers,
+): void {
+  const ref = useRef(handlers);
+  ref.current = handlers;
+  useEffect(() => {
+    if (!active) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        ref.current.onArrow(1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        ref.current.onArrow(-1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        ref.current.onEnter();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        ref.current.onEscape();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [active]);
 }

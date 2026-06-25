@@ -65,8 +65,22 @@ export function anchorTargetKind(anchor: AnchorRef): AnchorTargetKind {
 /** The layout + React Aria primitive a contributor's content renders as (docs/029 §4.2). */
 export type ContentKind = "actions" | "menu" | "form" | "card";
 
-/** Who owns DOM focus while the surface is open (docs/029 §4.2). */
-export type FocusMode = "transparent" | "taking";
+/**
+ * Who owns DOM focus while the surface is open, and how it dismisses (docs/029 §4.2).
+ *
+ * - `transparent` — the editor keeps focus (the user is still editing text): the flyout, the
+ *   slash menu, the cell `…`, the touch caret-paste bar. Dismissal is *model-driven* (the
+ *   selection collapses/changes → reconcile drops it), never an outside-press listener.
+ * - `taking` — the overlay holds focus (a form, a read card, the context menu) and an outside
+ *   press dismisses it (the authority's inverted dismissal). Survives a transient empty
+ *   projection (a form mid-edit, §7.2).
+ * - `sticky` — holds focus like `taking` (suspends the reclaim seam, autofocuses its first
+ *   field, survives an empty projection) but is **exempt from outside-press dismissal**: it
+ *   closes only on Escape or an explicit `dismiss`. The find bar needs exactly this — its
+ *   field must stay focused, yet clicking a match in the document must not tear it down
+ *   (docs/029 R1-G; the focus-mode gap that "survive doc clicks + keep focus" exposed).
+ */
+export type FocusMode = "transparent" | "taking" | "sticky";
 
 /**
  * One pushed level of a surface's drill-in **mode stack** (docs/029 §4.5). A surface opens
@@ -93,6 +107,16 @@ export type OverlayPanel = {
  * suspended, docs/029 §7.1).
  */
 export type OverlaySurfaceContext = CommandContext & {
+  /** The open surface's anchor, so a render knows which cell/block/mark it acts on. */
+  readonly anchor: AnchorRef | null;
+  /**
+   * The payload an *ephemeral* surface was opened with (docs/029 R1-F/R1-G). The built-in
+   * `ephemeral.form` contributor reads it as its render function, so the context menu's and
+   * the ribbon's form-commands open an arbitrary command body through
+   * `OverlayAuthority.openForm` instead of each hand-rolling a popover. Typed `unknown`; the
+   * ephemeral contributor narrows it.
+   */
+  readonly payload?: unknown;
   /** Pop one mode-stack level (return from a drill-in to the level beneath it). */
   readonly pop: () => void;
   /** Drill in: push a panel onto this surface's mode stack. */
@@ -140,6 +164,15 @@ export type OverlayContributor = {
    * the default is to co-slot compatible peers. An exclusive contributor never co-slots.
    */
   readonly exclusive?: boolean;
+  /**
+   * Opt out of the §7.2 reconciliation-survive (docs/029). A focus-owning surface normally
+   * *survives* a frame in which its projection transiently vanishes (a selection-anchored form
+   * outliving a momentary selection collapse). A `volatile` contributor does NOT: it closes
+   * the instant its `when` goes false. The object-config form sets this so deactivating its
+   * object closes the config immediately, rather than lingering over a now-inactive block.
+   * Only meaningful for an ambient (`when`-driven) focus-owning contributor.
+   */
+  readonly volatile?: boolean;
   /**
    * The command-surface list that fills this contributor's slot (docs/024
    * `resolveCommandList`), e.g. `"flyout"`/`"slash"`/`"contextMenu"`, or a host-defined

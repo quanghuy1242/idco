@@ -10,8 +10,8 @@
  *
  * The bar UI is `@idco/ui` (React Aria + DaisyUI) plus a DaisyUI-classed input.
  */
-import { useCallback, useMemo, useRef, useState } from "react";
-import { AnchoredPopover, Button, Input } from "@quanghuy1242/idco-ui";
+import { useCallback, useMemo, useState } from "react";
+import { Button, Input } from "@quanghuy1242/idco-ui";
 import { pointAtOffset, type EditorStore, type NodeId } from "../../core";
 
 /** One find match: a text-leaf range, or a whole object block. */
@@ -146,99 +146,90 @@ export function useFindController(
   };
 }
 
-export function FindBar(props: { readonly controller: FindController }) {
-  const { controller } = props;
-  // A zero-size anchor pinned to the editor's top-right; the real @idco/ui
-  // popover floats against it, so opening find never shifts the surface layout.
-  // The parent (`data-engine-surface`) is `position: relative`.
-  const anchorRef = useRef<HTMLSpanElement | null>(null);
+/**
+ * The find bar body, rendered *inside* the overlay authority's sticky-form envelope
+ * (docs/029 R1-G). It owns its own search state (so typing re-renders it without touching
+ * the authority host), and renders only the row — the {@link OverlayLayer} owns the box
+ * chrome, the central positioning, and the focus policy (it autofocuses this field after
+ * layout, replacing the old `autoFocus`). Dismissal is the authority's: Escape, the close
+ * button (`onClose`), or an explicit `dismiss`.
+ *
+ * The bar's defining requirement — keep the field focused *and* survive a click into the
+ * document while reading a match — is the `sticky` focus-mode (docs/029 §4.2). That replaces
+ * the hand-rolled `shouldCloseOnInteractOutside` predicate that used to fight React Aria's
+ * blur-within dismissal here; no surface-level dismissal guard remains.
+ */
+export function FindBar(props: {
+  readonly store: EditorStore;
+  readonly scrollTo: (id: NodeId) => void;
+  readonly onClose: () => void;
+}) {
+  const { store, scrollTo, onClose } = props;
+  const controller = useFindController(store, scrollTo);
   const total = controller.matches.length;
   return (
-    <>
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute right-2 top-2 size-0"
-        ref={anchorRef}
-      />
-      <AnchoredPopover
-        ariaLabel="Find in document"
-        isOpen={controller.isOpen}
-        onOpenChange={(open) => {
-          if (!open) controller.close();
-        }}
-        placement="bottom end"
-        // Find is non-modal: it must survive clicks into the document (reading
-        // matches), so only a true outside-the-editor interaction dismisses it.
-        shouldCloseOnInteractOutside={(element) =>
-          !element.closest("[data-engine-editor]")
+    <div
+      className="flex items-center gap-1"
+      data-engine-find=""
+      onKeyDown={(event) => {
+        // Keydown bubbles from the @idco/ui Input, which renders the field via React Aria and
+        // does not expose its own key handler. Escape is the authority's (it dismisses the
+        // top surface), so only Enter/Shift+Enter navigation is handled here.
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (event.shiftKey) controller.previous();
+          else controller.next();
         }
-        triggerRef={anchorRef}
+      }}
+      role="search"
+    >
+      <div className="w-52">
+        <Input
+          ariaLabel="Find"
+          onChange={(value) => controller.setQuery(value)}
+          placeholder="Find in document…"
+          size="sm"
+          value={controller.query}
+        />
+      </div>
+      <span
+        aria-live="polite"
+        className="text-sm opacity-70"
+        data-engine-find-count=""
       >
-        <div
-          className="flex items-center gap-1"
-          data-engine-find=""
-          onKeyDown={(event) => {
-            // Keydown bubbles from the @idco/ui Input, which renders the field
-            // via React Aria and does not expose its own key handler. Escape is
-            // handled by the popover itself.
-            if (event.key === "Enter") {
-              event.preventDefault();
-              if (event.shiftKey) controller.previous();
-              else controller.next();
-            }
-          }}
-          role="search"
-        >
-          <div className="w-52">
-            <Input
-              ariaLabel="Find"
-              autoFocus
-              onChange={(value) => controller.setQuery(value)}
-              placeholder="Find in document…"
-              size="sm"
-              value={controller.query}
-            />
-          </div>
-          <span
-            aria-live="polite"
-            className="text-sm opacity-70"
-            data-engine-find-count=""
-          >
-            {total === 0
-              ? controller.query
-                ? "No results"
-                : ""
-              : `${controller.current + 1} / ${total}`}
-          </span>
-          <Button
-            ariaLabel="Previous match"
-            iconName="ChevronLeft"
-            onClick={() => controller.previous()}
-            size="sm"
-            square
-            tooltip="Previous match"
-            variant="ghost"
-          />
-          <Button
-            ariaLabel="Next match"
-            iconName="ChevronRight"
-            onClick={() => controller.next()}
-            size="sm"
-            square
-            tooltip="Next match"
-            variant="ghost"
-          />
-          <Button
-            ariaLabel="Close find"
-            iconName="X"
-            onClick={() => controller.close()}
-            size="sm"
-            square
-            tooltip="Close"
-            variant="ghost"
-          />
-        </div>
-      </AnchoredPopover>
-    </>
+        {total === 0
+          ? controller.query
+            ? "No results"
+            : ""
+          : `${controller.current + 1} / ${total}`}
+      </span>
+      <Button
+        ariaLabel="Previous match"
+        iconName="ChevronLeft"
+        onClick={() => controller.previous()}
+        size="sm"
+        square
+        tooltip="Previous match"
+        variant="ghost"
+      />
+      <Button
+        ariaLabel="Next match"
+        iconName="ChevronRight"
+        onClick={() => controller.next()}
+        size="sm"
+        square
+        tooltip="Next match"
+        variant="ghost"
+      />
+      <Button
+        ariaLabel="Close find"
+        iconName="X"
+        onClick={onClose}
+        size="sm"
+        square
+        tooltip="Close"
+        variant="ghost"
+      />
+    </div>
   );
 }

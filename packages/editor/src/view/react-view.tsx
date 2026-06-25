@@ -45,7 +45,8 @@ import {
 import { SelectionAnnouncer, SelectionOverlay } from "./overlays";
 import { registerBuiltInNodeViews } from "./nodes";
 import { useEditorOrder } from "./store-hooks";
-import { TouchSelectionLayer } from "./overlays";
+import { TouchPasteAction, TouchSelectionLayer } from "./overlays";
+import { ObjectEditorRegistryProvider } from "./render/object-editor-registry";
 import { baseViewStyle, computeWindowListMeta } from "./styles";
 import { cancelFrame } from "./raf";
 import { EngineBlock } from "./render";
@@ -53,6 +54,7 @@ import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
 import { registerBuiltInMarks } from "./render";
 import { registerBuiltInBlockTypes } from "./spi";
+import type { OverlayAuthority, OverlayAuthorityRef, PanelHost } from "./spi";
 import {
   registerBuiltInCommands,
   registerBuiltInOverlays,
@@ -138,6 +140,20 @@ export type OwnedModelEditorViewProps = {
    * private store as before. The block tree itself never re-renders on a publish.
    */
   readonly documentIndexStore?: MutableDocumentIndexStore;
+  /**
+   * A stable overlay-authority ref created by the composing editor (docs/029 §7.4). The
+   * selection-surface host writes the live authority into it so the composing editor's
+   * surfaces (right-click menu, mark-click popovers, table cell `…`) can open overlays.
+   * Omitted in the bare view, where the host owns the authority privately.
+   */
+  readonly overlayAuthorityRef?: OverlayAuthorityRef;
+  /**
+   * The side-panel dock seam (docs/027 §8.2), threaded into the overlay authority so a
+   * surface rendered through it (the glossary read card's "Open in Glossary", a flyout
+   * command that opens a pane) can reach the dock. Omitted in the bare view, which has no
+   * dock.
+   */
+  readonly overlayPanelHost?: PanelHost;
 };
 
 export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
@@ -156,12 +172,20 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     overscan = DEFAULT_OVERSCAN,
     createBakeWorker = defaultCreateBakeWorker,
     documentIndexStore,
+    overlayAuthorityRef,
+    overlayPanelHost,
   } = props;
   const localSchedulerRef = useRef<EngineScheduler | null>(null);
   if (!providedScheduler && !localSchedulerRef.current) {
     localSchedulerRef.current = createEngineScheduler();
   }
   const scheduler = providedScheduler ?? localSchedulerRef.current!;
+  // The view reads the live authority (owned by the leaf SelectionSurfaceHost) through a ref.
+  // A composing editor passes its own stable ref so its chrome shares the handle; the bare
+  // view gets none, so a local fallback keeps the touch caret-paste affordance working there
+  // too. Only one authority exists; this is just the handle the view reads it through.
+  const localAuthorityRef = useRef<OverlayAuthority | null>(null);
+  const authorityRef = overlayAuthorityRef ?? localAuthorityRef;
   const refs = useViewRefs(documentIndexStore);
   const { registryRef, rootRef, contentRef, goalColumnRef } = refs;
   const order = useEditorOrder(store);
@@ -259,6 +283,42 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     store,
     syncFocusToSelection,
   });
+  // Mirror the touch controller's caret long-press flag into the overlay authority (docs/029
+  // R1-G): open the `caret` actions surface (Paste) when the long-press fires, dismiss when it
+  // clears. `caretPasteOpenRef` guards against re-opening on unrelated re-renders; the surface
+  // body ({@link TouchPasteAction}) calls back on unmount so an authority-side dismissal (an
+  // outside touch / Escape) syncs the flag back. This replaces the old in-layer AnchoredPopover
+  // with `shouldCloseOnInteractOutside={() => true}` — the authority owns dismissal now.
+  const caretPasteOpenRef = useRef(false);
+  useEffect(() => {
+    const authority = authorityRef.current;
+    if (!authority) return;
+    if (touchCaretActionsOpen && !touchInteracting) {
+      if (caretPasteOpenRef.current) return;
+      caretPasteOpenRef.current = true;
+      authority.openCaretActions(() => (
+        <TouchPasteAction
+          onClose={() => {
+            caretPasteOpenRef.current = false;
+            setTouchCaretActionsOpen(false);
+          }}
+          onPaste={() => {
+            touchActions.paste();
+            authority.dismiss("caret");
+          }}
+        />
+      ));
+    } else if (caretPasteOpenRef.current) {
+      caretPasteOpenRef.current = false;
+      authority.dismiss("caret");
+    }
+  }, [
+    authorityRef,
+    setTouchCaretActionsOpen,
+    touchActions,
+    touchCaretActionsOpen,
+    touchInteracting,
+  ]);
   useDocumentIndexController({ createBakeWorker, refs, scheduler, store });
   const { api } = useEditorDiagnostics({
     focusBlock,
@@ -426,21 +486,21 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           {renderEngineOverlays(store, rootRef)}
           {isTouchDevice && (
             <TouchSelectionLayer
-              actions={touchActions}
-              caretActionsOpen={touchCaretActionsOpen}
               containerRef={rootRef}
-              interacting={touchInteracting}
-              onCaretActionsOpenChange={setTouchCaretActionsOpen}
               registry={registryRef.current}
               scheduler={scheduler}
               store={store}
             />
           )}
           <SelectionAnnouncer scheduler={scheduler} store={store} />
-          <SelectionSurfaceHost
-            focusEditor={syncFocusToSelection}
-            store={store}
-          />
+          <ObjectEditorRegistryProvider value={registerObjectEditor}>
+            <SelectionSurfaceHost
+              authorityRef={authorityRef}
+              focusEditor={syncFocusToSelection}
+              panelHost={overlayPanelHost}
+              store={store}
+            />
+          </ObjectEditorRegistryProvider>
         </DocumentIndexProvider>
       </div>
     );
@@ -497,21 +557,21 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           {renderEngineOverlays(store, contentRef)}
           {isTouchDevice && (
             <TouchSelectionLayer
-              actions={touchActions}
-              caretActionsOpen={touchCaretActionsOpen}
               containerRef={contentRef}
-              interacting={touchInteracting}
-              onCaretActionsOpenChange={setTouchCaretActionsOpen}
               registry={registryRef.current}
               scheduler={scheduler}
               store={store}
             />
           )}
           <SelectionAnnouncer scheduler={scheduler} store={store} />
-          <SelectionSurfaceHost
-            focusEditor={syncFocusToSelection}
-            store={store}
-          />
+          <ObjectEditorRegistryProvider value={registerObjectEditor}>
+            <SelectionSurfaceHost
+              authorityRef={authorityRef}
+              focusEditor={syncFocusToSelection}
+              panelHost={overlayPanelHost}
+              store={store}
+            />
+          </ObjectEditorRegistryProvider>
         </DocumentIndexProvider>
       </div>
     </div>

@@ -20,6 +20,7 @@ import { embedView } from "./embed";
 import { postRefView } from "./post-ref";
 import { dividerView } from "./divider";
 import {
+  registerTableOverlays,
   tableCellStructuralView,
   tableRowStructuralView,
   tableStructuralView,
@@ -57,4 +58,7 @@ export function registerBuiltInNodeViews(): void {
   ]) {
     registerStructuralView(view);
   }
+  // The table's overlay contributors (docs/029 R1-E): the cell `…` popover, registered
+  // through the overlay authority instead of a bespoke per-site popover.
+  registerTableOverlays();
 }

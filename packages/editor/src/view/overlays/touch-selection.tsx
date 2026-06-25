@@ -1,28 +1,24 @@
 /**
- * Touch-selection chrome: the draggable range handles and the floating
- * selection toolbar (docs/010 Phase 7 AC8 mobile selection).
+ * Touch-selection chrome: the draggable range handles (docs/010 Phase 7 AC8 mobile
+ * selection) plus the body of the caret long-press "Paste" affordance.
  *
- * The engine owns selection as a model fact, so a touch device — which gets no
- * native selection loupe over a non-`contenteditable` surface — needs the engine
- * to paint its own grips and action bar. This layer is pure presentation: it
- * reads the model selection geometry through `selectionRects` (the same source
- * the caret/selection overlay paints from) and renders grips at the visual range
- * ends plus a Copy/Cut/Paste/format bar above it. All gesture handling lives in
- * `react-view.tsx`'s touch controller, which finds these elements by their
- * `data-engine-sel-handle` attributes; the grips are inert markers, not their
- * own listeners, so scroll-vs-select stays one decision. Action chrome is an
- * `@idco/ui` anchored popover (React Aria `Popover` + `Dialog`, DaisyUI tokens),
- * not an editor-local floating div: outside dismissal, focus, portal placement,
- * and viewport flipping all stay in the shared overlay primitive.
+ * The engine owns selection as a model fact, so a touch device — which gets no native
+ * selection loupe over a non-`contenteditable` surface — needs the engine to paint its own
+ * grips. This layer is pure presentation: it reads the model selection geometry through
+ * `selectionRects` (the same source the caret/selection overlay paints from) and renders
+ * grips at the visual range ends. All gesture handling lives in `react-view.tsx`'s touch
+ * controller, which finds these elements by their `data-engine-sel-handle` attributes; the
+ * grips are inert markers, not their own listeners, so scroll-vs-select stays one decision.
+ *
+ * The two action surfaces this layer used to host are gone (docs/029 R1-G): the *range*
+ * toolbar merged into the overlay authority's one device-adaptive selection bar (R1-D), and
+ * the *caret-paste* toolbar is now an overlay-authority `caret` actions surface opened by the
+ * controller through `authority.openCaretActions` — its body is {@link TouchPasteAction}. So
+ * this file no longer reaches for `AnchoredPopover`/`shouldCloseOnInteractOutside`: outside
+ * dismissal, focus, portal placement, and viewport flipping are the authority's.
  */
-import {
-  useEffect,
-  useRef,
-  useState,
-  type RefObject,
-  type ReactNode,
-} from "react";
-import { AnchoredPopover, Button } from "@quanghuy1242/idco-ui";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { Button } from "@quanghuy1242/idco-ui";
 import type { EditorStore, EngineScheduler, TextMarkKind } from "../../core";
 import { selectionRects } from "./selection-overlay";
 import { useSelectionFrameVersion } from "../store-hooks";
@@ -64,17 +60,10 @@ export function TouchSelectionLayer(props: {
   readonly scheduler: EngineScheduler;
   readonly containerRef: RefObject<HTMLElement | null>;
   readonly registry: RenderRegistry;
-  readonly actions: TouchSelectionActions;
-  /** True while a grip/long-press drag is live; hides the toolbar mid-drag. */
-  readonly interacting: boolean;
-  /** True after holding the collapsed caret; shows the paste affordance. */
-  readonly caretActionsOpen: boolean;
-  readonly onCaretActionsOpenChange: (isOpen: boolean) => void;
 }) {
-  const { store, scheduler, containerRef, registry, actions, interacting } =
-    props;
+  const { store, scheduler, containerRef, registry } = props;
   // Repaint on the selection frame lane, exactly like the selection overlay, so
-  // the grips and bar track the caret across edits and scroll.
+  // the grips track the caret across edits and scroll.
   const version = useSelectionFrameVersion(store, scheduler);
   void version;
 
@@ -83,48 +72,11 @@ export function TouchSelectionLayer(props: {
   const collapsed =
     selection.anchor.node === selection.focus.node &&
     selection.anchor.offset === selection.focus.offset;
+  // A collapsed caret paints no grips; its long-press paste affordance is an overlay-authority
+  // surface now (docs/029 R1-G), opened by the touch controller, not rendered here.
+  if (collapsed) return null;
 
   const rects = selectionRects(store, containerRef.current, registry.blockRefs);
-
-  if (collapsed) {
-    const caret = rects.find((rect) => rect.kind === "caret");
-    if (!caret) return null;
-    return (
-      <div
-        data-engine-touch-selection=""
-        style={{ inset: 0, pointerEvents: "none", position: "absolute" }}
-      >
-        <PopoverAnchor
-          left={caret.left + caret.width / 2}
-          top={caret.top + caret.height}
-          variant="caret"
-        >
-          {(anchorRef) => (
-            <AnchoredPopover
-              ariaLabel="Caret actions"
-              isNonModal
-              isOpen={props.caretActionsOpen && !interacting}
-              onOpenChange={props.onCaretActionsOpenChange}
-              placement="top"
-              shouldCloseOnInteractOutside={() => true}
-              triggerRef={anchorRef}
-            >
-              <ActionRow dataAttr="data-engine-caret-toolbar">
-                <ActionButton
-                  label="Paste"
-                  onPress={() => {
-                    actions.paste();
-                    props.onCaretActionsOpenChange(false);
-                  }}
-                />
-              </ActionRow>
-            </AnchoredPopover>
-          )}
-        </PopoverAnchor>
-      </div>
-    );
-  }
-
   const ranges = rects.filter((rect) => rect.kind === "range");
   if (ranges.length === 0) return null;
 
@@ -145,10 +97,6 @@ export function TouchSelectionLayer(props: {
       data-engine-touch-selection=""
       style={{ inset: 0, pointerEvents: "none", position: "absolute" }}
     >
-      {/* Grips only. The range selection toolbar merged into the overlay authority's one
-          device-adaptive selection bar (docs/029 R1-D §8.3), so this layer is now pure
-          geometry (the draggable range handles) plus the collapsed-caret paste affordance
-          below — the touch half of the split. */}
       <Handle end="start" point={startPoint} />
       <Handle end="end" point={endPoint} />
     </div>
@@ -194,69 +142,32 @@ function Handle(props: {
   );
 }
 
-function PopoverAnchor(props: {
-  readonly left: number;
-  readonly top: number;
-  readonly variant: "caret" | "selection";
-  readonly children: (ref: RefObject<HTMLElement | null>) => ReactNode;
+/**
+ * The body of the touch caret long-press "Paste" affordance (docs/029 R1-G), rendered inside
+ * the overlay authority's `ephemeral.caretActions` envelope (via `openCaretActions`). On
+ * unmount it calls `onClose` so the authority's dismissal (an outside touch, Escape) syncs
+ * back to the touch controller's long-press flag — the one bit of two-way state this surface
+ * needs, kept here rather than in a `shouldCloseOnInteractOutside` predicate at a call site.
+ */
+export function TouchPasteAction(props: {
+  readonly onPaste: () => void;
+  readonly onClose: () => void;
 }) {
-  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const onCloseRef = useRef(props.onClose);
+  onCloseRef.current = props.onClose;
+  useEffect(() => () => onCloseRef.current(), []);
   return (
-    <>
-      <span
-        ref={anchorRef}
-        aria-hidden="true"
-        data-engine-touch-popover-anchor={props.variant}
-        style={{
-          height: 1,
-          left: props.left,
-          pointerEvents: "none",
-          position: "absolute",
-          top: props.top,
-          transform: "translate(-50%, -50%)",
-          width: 1,
-        }}
-      />
-      {props.children(anchorRef)}
-    </>
-  );
-}
-
-function ActionRow(props: {
-  readonly children: ReactNode;
-  readonly dataAttr: "data-engine-caret-toolbar" | "data-engine-sel-toolbar";
-}) {
-  return (
-    <div
-      {...{ [props.dataAttr]: "" }}
-      className="flex items-center gap-1"
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      {props.children}
+    <div className="flex items-center gap-1" data-engine-caret-toolbar="">
+      <span data-engine-sel-action="Paste">
+        <Button
+          ariaLabel="Paste"
+          onClick={props.onPaste}
+          size="sm"
+          variant="ghost"
+        >
+          Paste
+        </Button>
+      </span>
     </div>
-  );
-}
-
-function ActionButton(props: {
-  readonly label: string;
-  readonly onPress: () => void;
-  readonly title?: string;
-}) {
-  const { label, onPress, title } = props;
-  return (
-    <span
-      data-engine-sel-action={title ?? label}
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      <Button
-        ariaLabel={title ?? label}
-        onClick={onPress}
-        size="sm"
-        tooltip={title}
-        variant="ghost"
-      >
-        {label}
-      </Button>
-    </span>
   );
 }

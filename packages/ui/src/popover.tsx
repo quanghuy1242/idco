@@ -24,27 +24,21 @@ const panelClass =
   "data-[entering]:animate-popover-in data-[exiting]:animate-popover-out";
 
 /**
- * A generic click-to-open popover: a trigger element plus dialog content, with
- * React Aria's focus management, outside-dismiss, and positioning. Unlike
- * `MenuTrigger` (a list of actions) this hosts arbitrary content such as a small
- * form (e.g. a link editor). `children` receives a `close` callback so the
- * content can dismiss the popover after committing.
+ * A generic click-to-open popover: a trigger element plus dialog content, with React Aria's
+ * focus management, outside-dismiss, and positioning. Unlike `MenuTrigger` (a list of actions)
+ * this hosts arbitrary content such as a small form. `children` receives a `close` callback so
+ * the content can dismiss the popover after committing.
  *
- * The popover is **non-modal** (`isNonModal`): it is an anchored action/form popover (a
- * link/align/glossary/comment editor opened from the selection flyout, the ribbon, or a
- * table cell toolbar), not a blocking dialog. A modal popover renders React Aria's modal
- * infrastructure (a body-portaled, pointer-events-capturing layer + `aria-hidden` on the
- * rest of the page); nested inside the non-modal selection flyout that overlay stacked over
- * the popover's own content and swallowed clicks, so its input could not be focused. Outside
- * press + Escape still dismiss a non-modal popover, so behavior is unchanged otherwise.
+ * Modality is the caller's choice via `isNonModal`. A modal popover (the default) renders React
+ * Aria's modal infrastructure — a body-portaled, pointer-events-capturing underlay plus
+ * `aria-hidden` on the rest of the page — which is wrong for an anchored action/form popover
+ * that must coexist with the surface beneath it; pass `isNonModal` for those. Outside press +
+ * Escape dismiss either way.
  *
- * A non-modal popover also runs `shouldCloseOnInteractOutside` on focus-out (React Aria's
- * `onBlurWithin`), not just on a pointer press outside. When the popover is opened over an
- * editing surface that pulls focus back to itself on a press (the table cell `…` popover —
- * pressing a swatch refocuses the EditContext block so the cell selection survives), that
- * focus bounce reads as an outside interaction and dismisses the popover on *pointerdown*,
- * before the click applies. Pass `shouldCloseOnInteractOutside` to keep the popover open
- * for those interior/blur targets (see `table-interactions.tsx`).
+ * `shouldCloseOnInteractOutside` lets a non-modal caller decide which outside targets dismiss:
+ * React Aria runs it on a pointer press outside *and* on focus leaving the popover
+ * (`onBlurWithin`), so a surface that re-acquires focus on a press would otherwise read as an
+ * outside interaction. Default behavior closes on any outside press.
  */
 export function PopoverTrigger(props: {
   readonly trigger: ReactNode;
@@ -82,10 +76,10 @@ export function PopoverTrigger(props: {
 }
 
 /**
- * A controlled popover anchored to an existing element (via `triggerRef`) rather
- * than a trigger child. Use when something other than a button press opens the
- * panel — e.g. an editor object that opens its config when it becomes the active
- * object. Same React Aria focus management, dismiss, and positioning.
+ * A controlled popover anchored to an existing element (via `triggerRef`) rather than a trigger
+ * child. Use when something other than a button press opens the panel — when open/closed is
+ * driven by host state rather than a click on a trigger. Same React Aria focus management,
+ * dismiss, and positioning.
  */
 export function AnchoredPopover(props: {
   readonly triggerRef: RefObject<HTMLElement | null>;
@@ -95,16 +89,14 @@ export function AnchoredPopover(props: {
   readonly placement?: Placement;
   readonly ariaLabel?: string;
   /**
-   * Keep the page/editor outside the popover interactive. Use sparingly for
-   * anchored controls like editor chrome where the anchor surface must keep
-   * handling pointer gestures while the popover is open.
+   * Keep content outside the popover interactive. Use sparingly for anchored controls whose
+   * anchor surface must keep handling pointer gestures while the popover is open.
    */
   readonly isNonModal?: PopoverProps["isNonModal"];
   /**
-   * Whether an outside interaction dismisses the popover. Default React Aria
-   * behavior closes on any outside press; pass a predicate (e.g. keep open while
-   * interacting within a host region) for non-modal surfaces like an in-editor
-   * find bar that must survive clicks into the document.
+   * Whether an outside interaction dismisses the popover. Default React Aria behavior closes on
+   * any outside press; pass a predicate to keep it open for chosen targets (e.g. while
+   * interacting within a host region), or `() => false` to never self-dismiss.
    */
   readonly shouldCloseOnInteractOutside?: PopoverProps["shouldCloseOnInteractOutside"];
 }) {

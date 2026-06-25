@@ -1,23 +1,12 @@
 /**
- * The command-surface coordinator (docs/024 §8) — the cross-cutting hook that keeps the
- * *flat* surfaces from fighting. After the docs/029 overlay-authority migration (R1-D, P2),
- * the **selection flyout moved to the overlay authority** (`useOverlayAuthority` +
- * `OverlayLayer`), so this coordinator now owns only the two surfaces still on the legacy
- * path: the right-click **context menu** and the **slash menu** (both migrate to the
- * authority in P3). They are mutually exclusive by trigger — slash needs a collapsed caret,
- * the context menu is an explicit right-click — and the selection bar (authority) needs a
- * *non-collapsed* selection, so the two systems never contend for the same model shape
- * (docs/029 §6.1 "each surface flips atomically").
- *
- * - **One of each kind.** At most one of {context, slash} is open (`SurfaceState` is a single
- *   value); opening one closes the other.
- * - **Precedence by intent.** Right-click (explicit) beats the slash trigger; encoded in the
- *   slash driver's functional update (a `context` state is never overwritten by slash).
- * - **Slash from the committed model text, not keystrokes** (docs/024 §9): `/` is detected on
- *   the committed leaf text in a commit/selection subscription, never a raw keydown that
- *   would fight IME + the markdown cascade.
+ * The command-surface coordinator (docs/024 §8) — the cross-cutting hook for the legacy flat
+ * surfaces. After the docs/029 overlay-authority migration the **selection flyout** (R1-D, P2)
+ * and the **slash menu** (R1-F, P3) moved to the overlay authority, so this coordinator now
+ * owns only the right-click **context menu**. `detectSlashTrigger`/`SlashTrigger` stay here —
+ * the committed-text trigger detection the slash *contributor* now reads — so the detection
+ * lives in one place (docs/024 §7.3/§9).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { EditorStore, NodeId } from "../../../core";
 import {
   buildCommandContext,
@@ -26,7 +15,6 @@ import {
   type PanelHost,
   type ToolbarCapabilities,
 } from "../../spi";
-import { useStoreVersion } from "./use-store-version";
 
 /** A live slash trigger detected on the committed leaf text (docs/024 §7.3). */
 export type SlashTrigger = {
@@ -40,17 +28,19 @@ export type SlashTrigger = {
   readonly query: string;
 };
 
-/** Which single flat surface is open (docs/024 §8 — one of each kind at a time). */
-export type SurfaceState =
-  | { readonly kind: "context"; readonly x: number; readonly y: number }
-  | ({ readonly kind: "slash" } & SlashTrigger)
-  | null;
+/** Which single flat surface is open (only the context menu remains here). */
+export type SurfaceState = {
+  readonly kind: "context";
+  readonly x: number;
+  readonly y: number;
+} | null;
 
 /**
  * Detect a slash trigger from the committed model text (docs/024 §7.3/§9). A trigger is a `/`
  * whose following run up to the caret is the query — no whitespace, no second `/` — and whose
  * position is valid: the start of the leaf, or immediately after whitespace. Pure: only the
- * collapsed caret's leaf text is read, so it is safe on the commit hot path.
+ * collapsed caret's leaf text is read, so it is safe on the commit hot path. Read by the slash
+ * overlay contributor's `when`/body (docs/029 R1-F).
  */
 export function detectSlashTrigger(store: EditorStore): SlashTrigger | null {
   const sel = store.selection;
@@ -80,14 +70,14 @@ export function detectSlashTrigger(store: EditorStore): SlashTrigger | null {
 export type CommandSurfacesController = {
   /** The live command context (selection facts + scope + capabilities). */
   readonly ctx: CommandContext;
-  /** Which flat surface is open, or null. */
+  /** Whether the context menu is open, or null. */
   readonly surface: SurfaceState;
   /**
    * Open the context menu at a client point if any command resolves there; returns `false`
    * when nothing resolves so the caller leaves the native menu (docs/024 §9).
    */
   requestContextMenu(x: number, y: number): boolean;
-  /** Close whichever flat surface is open. */
+  /** Close the context menu. */
   closeAll(): void;
 };
 
@@ -96,23 +86,8 @@ export function useCommandSurfaces(
   capabilities: ToolbarCapabilities,
   panelHost?: PanelHost,
 ): CommandSurfacesController {
-  // Re-render (and re-run the slash driver) on every selection/commit change.
-  const version = useStoreVersion(store);
   const [surface, setSurface] = useState<SurfaceState>(null);
   const ctx = buildCommandContext(store, capabilities, panelHost);
-
-  // Slash driver (docs/024 §8). Reads committed model text; a `context` state wins
-  // (right-click is explicit), so it is left alone.
-  useEffect(() => {
-    const trigger = detectSlashTrigger(store);
-    setSurface((prev) => {
-      if (trigger) {
-        if (prev?.kind === "context") return prev;
-        return { kind: "slash", ...trigger };
-      }
-      return prev?.kind === "slash" ? null : prev;
-    });
-  }, [store, version]);
 
   const requestContextMenu = useCallback(
     (x: number, y: number): boolean => {

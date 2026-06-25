@@ -14,3 +14,4 @@
  * structural views from this barrel.
  */
 export * from "./table";
+export { registerTableOverlays } from "./table-interactions";

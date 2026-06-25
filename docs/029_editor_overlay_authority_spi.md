@@ -802,8 +802,8 @@ Scope:
 
 Tasks:
 
-- [ ] Migrate cell `…` to a `cell` envelope; delete `keepCellPopoverOpen`/`pressInsideRef`.
-- [ ] Replace `data-engine-view-root` guards with ownership containment.
+- [x] Migrate cell `…` to a `cell` envelope; delete `keepCellPopoverOpen`/`pressInsideRef`.
+- [x] Replace `data-engine-view-root` guards with ownership containment.
 
 Acceptance criteria:
 
@@ -821,9 +821,9 @@ Scope:
 
 Tasks:
 
-- [ ] Transparent keyboard routing (§7.5); migrate slash; delete its raw portal + bespoke handler.
-- [ ] Migrate context menu; convert form-commands to drill-ins; delete reopen-standalone.
-- [ ] Migrate block chooser + overflow envelopes.
+- [x] Transparent keyboard routing (§7.5); migrate slash; delete its raw portal + bespoke handler.
+- [x] Migrate context menu form-commands to authority-opened forms (`openForm`); delete reopen-standalone. The menu *shell* stays a React Aria `MenuTrigger` (decision: a well-behaved RA menu is the package philosophy, carries none of the forbidden patterns, and force-wrapping it in an envelope adds risk without behavioral gain).
+- [~] Block chooser + overflow: kept as clean RA `MenuTrigger` menus for the same reason — no forbidden patterns, RA owns menu behavior. Not wrapped in `menu` envelopes.
 
 Acceptance criteria:
 
@@ -841,10 +841,16 @@ Scope:
 
 Tasks:
 
-- [ ] Migrate forms/cards; delete `useAutoFocusWithin`.
-- [ ] Delete the ribbon `onMouseDownCapture` gate and the close-bounce RAF.
-- [ ] Wire foreign-modal coordination via RA's `ariaHideOutside`/overlay stack.
-- [ ] Standardize editor on `AnchoredPopover`; trim editor narrative from `popover.tsx`.
+- [x] Migrate forms/cards (link → `mark`/form, glossary read → `mark`/card, object-config → ambient `block`/form, find → `point`/sticky form); delete `useAutoFocusWithin`.
+- [x] Delete the ribbon `onMouseDownCapture` gate and the close-bounce RAF (ribbon `popover`/`dropdown` actions now open through `openForm`).
+- [x] Wire foreign-modal coordination via `ariaHideOutside` (the overlay layer dismisses all envelopes when its portal becomes `aria-hidden`, §7.6).
+- [x] Standardize editor on `AnchoredPopover` (the editor now uses no `PopoverTrigger`); trim editor narrative from `popover.tsx` (local). **Cross-repo `@idco/ui` release deferred by request** — the publish (version bump + tag + dev:unlink) is the one remaining gated step; the local trim is a doc-comment + an already-supported prop, so consumers are unaffected until the release.
+
+New engine capabilities this phase added (not in the original §4 model, discovered during implementation):
+
+- **`sticky` focus-mode** (§4.2): owns focus like `taking` but is exempt from outside-press dismissal (find keeps its field focused yet survives a click into the document). Closes on Escape / explicit dismiss.
+- **`volatile` contributor flag**: opts an ambient focus-owning surface out of the §7.2 survive rule, so object-config closes the instant its object deactivates instead of lingering.
+- **§3b suppression**: a focus-`taking` surface on an off-text-flow target (a link/object form) suppresses the ambient transparent selection bar over the same span (the generalization of §3.3 #7), paired with a mark surface dismissing itself when the model selection leaves its mark.
 
 Acceptance criteria:
 

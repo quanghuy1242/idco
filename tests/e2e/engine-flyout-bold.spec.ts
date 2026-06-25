@@ -23,7 +23,11 @@ test("keyboard-select then click Bold keeps the flyout open", async ({
 }) => {
   await open(page);
   const block = page.locator("[data-engine-text-id]").nth(1);
-  await block.click();
+  // Click near the block's start (plain text), not its centre: the subtitle ends in a "real
+  // link", and a centre click can land on it, which correctly opens the click-to-edit link
+  // form (AC9) and focuses its URL field — capturing the keyboard from the document. We want a
+  // plain caret here to drive a keyboard selection.
+  await block.click({ position: { x: 6, y: 8 } });
   await page.keyboard.press("Home");
   for (let i = 0; i < 8; i += 1) await page.keyboard.press("Shift+ArrowRight");
   const flyout = page.locator("[data-engine-flyout]");

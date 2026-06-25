@@ -14,11 +14,13 @@ import {
   dismissSurface,
   effectiveFocusMode,
   EMPTY_AUTHORITY_STATE,
+  focusModeOwnsFocus,
   openExplicit,
   popPanel,
   pushPanel,
   reconcileAuthority,
   resolveEnvelopes,
+  type AuthorityState,
   type OverlayContributor,
   type OverlayPanel,
 } from "../../packages/editor/src/view/spi";
@@ -377,5 +379,121 @@ describe("ownership registry — containment by ownership (docs/029 §7.4)", () 
 
     reg.unregister("p");
     expect(reg.isWithin(insideParent)).toBe(false);
+  });
+});
+
+describe("overlay authority — sticky focus-mode (docs/029 §4.2/R1-G)", () => {
+  it("focusModeOwnsFocus is true for taking + sticky, false for transparent", () => {
+    expect(focusModeOwnsFocus("transparent")).toBe(false);
+    expect(focusModeOwnsFocus("taking")).toBe(true);
+    expect(focusModeOwnsFocus("sticky")).toBe(true);
+  });
+
+  it("a sticky surface survives a frame with no candidate (like taking, unlike transparent)", () => {
+    const sticky = contributor({
+      contentKind: "form",
+      focusMode: "sticky",
+      id: "find",
+      target: "point",
+    });
+    // Previously open (e.g. opened via openStickyForm), with no live candidate this frame and
+    // no explicit request: the survive step keeps it because it owns focus.
+    const prev: AuthorityState = {
+      explicit: [],
+      open: [
+        {
+          anchor: { kind: "point", x: 10, y: 10 },
+          modeStack: [],
+          rootContributorIds: ["find"],
+          target: "point",
+        },
+      ],
+      suppressed: {},
+    };
+    const next = reconcileAuthority(prev, {
+      contributors: [sticky],
+      ctx,
+      signatures: {},
+    });
+    expect(next.open.map((o) => o.target)).toEqual(["point"]);
+
+    // A transparent surface in the same position is dropped (its close is model-driven).
+    const transparentPrev: AuthorityState = {
+      ...prev,
+      open: [{ ...prev.open[0]!, rootContributorIds: ["bar"] }],
+    };
+    const bar = contributor({
+      contentKind: "actions",
+      focusMode: "transparent",
+      id: "bar",
+      target: "point",
+    });
+    const droppedNext = reconcileAuthority(transparentPrev, {
+      contributors: [bar],
+      ctx,
+      signatures: {},
+    });
+    expect(droppedNext.open).toHaveLength(0);
+  });
+});
+
+describe("overlay authority — taking off-flow suppresses the selection bar (docs/029 §3b)", () => {
+  const selectionBar = contributor({
+    contentKind: "actions",
+    focusMode: "transparent",
+    id: "selection.bar",
+    target: "selection",
+    when: () => true,
+  });
+
+  it("a taking mark form suppresses the transparent selection bar over the same span", () => {
+    // The link form is an explicit `mark` taking surface; the selection bar is ambient on the
+    // (link-range) selection. Both would otherwise be open — §3b drops the transparent bar.
+    const linkForm = contributor({
+      contentKind: "form",
+      focusMode: "taking",
+      id: "mark.link",
+      match: (p) => p.kind === "link",
+      target: "mark",
+    });
+    const opened = openExplicit(
+      EMPTY_AUTHORITY_STATE,
+      { kind: "mark", markId: "m1", nodeId: "n1" as NodeId },
+      "mark.link",
+      "mark",
+    );
+    const next = reconcileAuthority(opened, {
+      contributors: [selectionBar, linkForm],
+      ctx,
+      ready: { selection: true },
+      signatures: { selection: "n1:0-n1:4" },
+    });
+    expect(next.open.map((o) => o.target).sort()).toEqual(["mark"]);
+  });
+
+  it("a transparent off-flow surface does NOT suppress the selection bar", () => {
+    // The cell `…` is transparent, so a cell surface coexists with the format bar (no §3b).
+    const cell = contributor({
+      contentKind: "actions",
+      focusMode: "transparent",
+      id: "cell.actions",
+      target: "cell",
+    });
+    const opened = openExplicit(
+      EMPTY_AUTHORITY_STATE,
+      { kind: "cell", cellId: "c1" as NodeId },
+      "cell.actions",
+      "cell",
+    );
+    const next = reconcileAuthority(opened, {
+      contributors: [selectionBar, cell],
+      ctx,
+      ready: { selection: true },
+      signatures: { selection: "n1:0-n1:4" },
+    });
+    expect(next.open.map((o) => o.target).sort()).toEqual([
+      "cell",
+      "selection",
+    ]);
   });
 });

@@ -8,18 +8,21 @@
  */
 import {
   useCallback,
+  useEffect,
   useRef,
   useSyncExternalStore,
   type ReactNode,
   type RefObject,
 } from "react";
-import {
-  AnchoredPopover,
-  BlockChrome,
-  ChromeButton,
-} from "@quanghuy1242/idco-ui";
+import { BlockChrome, ChromeButton } from "@quanghuy1242/idco-ui";
 import { type EditorStore, type NodeId, type ObjectNode } from "../../core";
-import { getNodeView, type NodeViewResourceConfigField } from "../spi";
+import {
+  getNodeView,
+  registerOverlay,
+  type NodeViewResourceConfigField,
+  type OverlaySurfaceContext,
+} from "../spi";
+import { useObjectEditorRegistry } from "./object-editor-registry";
 import {
   referenceFieldOf,
   useResolveReference,
@@ -103,35 +106,19 @@ export function EngineObjectBlock(props: {
     store.command({ node: node.id, type: "remove-block" });
   }, [node.id, store]);
   const view = getNodeView(node.type);
-  // "in-place" live surfaces (code) replace the baked view at the captured
-  // height; everything else keeps the baked view and edits in an anchored React
-  // Aria popover, so the chrome is a real popover (docs/010 §7.1), not a
-  // hand-positioned div.
+  // "in-place" live surfaces (code) replace the baked view at the captured height; everything
+  // else keeps the baked view and edits in the object-config form. That form is now an overlay
+  // authority `block` surface (docs/029 R1-G `object.config`), ambient on the active object —
+  // not an in-file `AnchoredPopover`. This dispatcher only owns the in-place path + activation;
+  // the config surface is rendered by the overlay layer, anchored to the block, focus-taking
+  // with the authority's first-field focus + central dismissal (so no popover wiring here).
   const inPlaceLive =
     live && view?.renderLive !== undefined && view.liveMode === "in-place";
-  const popoverLive = live && !inPlaceLive;
-  // An object that does not edit in place uses the anchored popover. The popover
-  // is rendered whenever the object *can* use one and toggled via `isOpen` (not
-  // conditionally unmounted), so React Aria can play the exit animation on close
-  // and then unmount it — a `{popoverLive ? … : null}` would yank it out before
-  // the `data-[exiting]` animation runs (the missing transition-out). When closed
-  // React Aria renders nothing, so the live content mounts only while open.
+  // An object that does not edit in place is configured through the authority surface, so a
+  // body click must not also activate it (its rendered <img>/<iframe> owns its box); only an
+  // in-place object activates on a body mousedown.
   const usesPopover = !(
     view?.renderLive !== undefined && view.liveMode === "in-place"
-  );
-  const popoverContent = view?.renderLive ? (
-    view.renderLive({
-      initialHeight: restHeightRef.current,
-      node,
-      registerObjectEditor,
-      store,
-    })
-  ) : (
-    <ObjectConfigPanel
-      node={node}
-      registerObjectEditor={registerObjectEditor}
-      store={store}
-    />
   );
   return (
     <div
@@ -215,21 +202,85 @@ export function EngineObjectBlock(props: {
           store={store}
         />
       ) : null}
-      {usesPopover ? (
-        <AnchoredPopover
-          ariaLabel={`Edit ${node.type}`}
-          isOpen={popoverLive}
-          onOpenChange={(open) => {
-            if (!open) store.deactivateObject(node.id);
-          }}
-          placement="bottom end"
-          triggerRef={gearRef}
-        >
-          {popoverContent}
-        </AnchoredPopover>
-      ) : null}
     </div>
   );
+}
+
+/**
+ * The object-config surface body — the `object.config` overlay contributor's render (docs/029
+ * R1-G). Ambient on the active object: the authority raises it (focus-`taking`, `block`-
+ * anchored) whenever a non-in-place object is active, and the form's first field autofocuses
+ * via the layer's focus policy (replacing the old `AnchoredPopover` + `autoFocus`). It reads
+ * the active node off `ctx.anchor` and renders the node's own `renderLive`, falling back to the
+ * generic {@link ObjectConfigPanel}. Its `registerObjectEditor` comes across the portal via
+ * {@link useObjectEditorRegistry} (AC2 one-live-at-a-time).
+ *
+ * Two-way sync without a call-site dismissal guard: on unmount it deactivates the object, so an
+ * authority-side close (outside press / Escape) clears `activeObjectId` and the ambient `when`
+ * goes false (the contributor is `volatile`, so it also closes the instant the object
+ * deactivates from any other path — it never lingers over an inactive block).
+ */
+function ObjectConfigSurface(props: { readonly ctx: OverlaySurfaceContext }) {
+  const { ctx } = props;
+  const store = ctx.store;
+  const registerObjectEditor = useObjectEditorRegistry();
+  const blockId = ctx.anchor?.kind === "block" ? ctx.anchor.blockId : null;
+  // Deactivate the object when this surface unmounts, so an authority-driven dismissal syncs
+  // back to the model's active-object state (docs/029 R1-G). Captured per surface identity.
+  const deactivateRef = useRef<() => void>(() => {});
+  deactivateRef.current = () => {
+    if (blockId && store.activeObjectId === blockId)
+      store.deactivateObject(blockId);
+  };
+  useEffect(() => () => deactivateRef.current(), []);
+  if (!blockId) return null;
+  const node = store.getNode(blockId);
+  if (!node || node.kind !== "object") return null;
+  const view = getNodeView(node.type);
+  return view?.renderLive ? (
+    view.renderLive({
+      initialHeight: 0,
+      node,
+      registerObjectEditor,
+      store,
+    })
+  ) : (
+    <ObjectConfigPanel
+      node={node}
+      registerObjectEditor={registerObjectEditor}
+      store={store}
+    />
+  );
+}
+
+/**
+ * Register the object-config overlay (docs/029 R1-G): an ambient `block`/`form`/`taking`
+ * contributor raised on a non-in-place active object, anchored to that block. `volatile` so it
+ * closes the moment the object deactivates (it must not survive a vanished projection the way a
+ * selection-anchored form does, §7.2). Idempotent by id.
+ */
+export function registerObjectConfigOverlay(): void {
+  registerOverlay({
+    ambientAnchor: (ctx) => {
+      const id = ctx.store.activeObjectId;
+      return id ? { blockId: id, kind: "block" } : null;
+    },
+    contentKind: "form",
+    focusMode: "taking",
+    id: "object.config",
+    render: (ctx) => <ObjectConfigSurface ctx={ctx} />,
+    target: "block",
+    volatile: true,
+    when: (ctx) => {
+      const id = ctx.store.activeObjectId;
+      if (!id) return false;
+      const node = ctx.store.getNode(id);
+      if (!node || node.kind !== "object") return false;
+      const view = getNodeView(node.type);
+      // In-place objects (code) edit inline, not through the config surface.
+      return !(view?.renderLive !== undefined && view.liveMode === "in-place");
+    },
+  });
 }
 
 /**

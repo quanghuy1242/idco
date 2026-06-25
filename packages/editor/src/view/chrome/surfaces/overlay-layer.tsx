@@ -35,6 +35,8 @@ import {
   useOverlayAuthority,
   type EnvelopePlacement,
   type OverlayAuthority,
+  type OverlayAuthorityRef,
+  type PanelHost,
   type ResolvedEnvelope,
   type ToolbarCapabilities,
 } from "../../spi";
@@ -114,11 +116,15 @@ function EnvelopeBox(props: {
     onMeasure(envelope.id, { height: rect.height, width: rect.width });
   }, [envelope, onMeasure]);
 
-  // Focus policy (docs/029 §7.1, replaces useAutoFocusWithin): a `form` takes focus and
-  // autofocuses its first field deterministically *after* layout; a `transparent`/`card`
-  // surface never grabs focus here (the editor keeps it). Runs once per surface identity.
+  // Focus policy (docs/029 §7.1, replaces useAutoFocusWithin): a focus-owning `form`
+  // (`taking` or `sticky`) autofocuses its first field deterministically *after* layout; a
+  // `transparent`/`card` surface never grabs focus here (the editor keeps it). Runs once per
+  // surface identity.
   useEffect(() => {
-    if (envelope.focusMode !== "taking" || envelope.contentKind !== "form") {
+    if (
+      (envelope.focusMode !== "taking" && envelope.focusMode !== "sticky") ||
+      envelope.contentKind !== "form"
+    ) {
       return undefined;
     }
     const id = requestAnimationFrame(() => {
@@ -131,8 +137,11 @@ function EnvelopeBox(props: {
 
   const ctx = authority.surfaceContext(envelope.target);
   // The box chrome (DaisyUI 5 popover surface) is owned by the layer; the content fills it.
-  // A form/card gets roomier padding than the dense actions bar.
-  const pad = envelope.contentKind === "actions" ? "p-1" : "p-3";
+  // Dense padding for the actions bar + menus (button/list rows); roomier for form/card.
+  const pad =
+    envelope.contentKind === "actions" || envelope.contentKind === "menu"
+      ? "p-1"
+      : "p-3";
   return (
     <div
       className={`rounded-box border border-base-300 bg-base-100 shadow-lg ${pad}`}
@@ -168,6 +177,28 @@ export function OverlayLayer(props: {
   const [sizes, setSizes] = useState<
     Record<string, { width: number; height: number }>
   >({});
+
+  // Foreign-modal coordination (docs/029 §7.6). A foreign app modal — the theme/confirm
+  // dialog, command palette, drawer — opens with React Aria's `ariaHideOutside`, which sets
+  // `aria-hidden` on every `document.body` child that is not the modal subtree, including this
+  // overlay layer. The authority does not arbitrate foreign modals (they own the page), so when
+  // the layer is hidden it dismisses all its envelopes rather than leaving a flyout floating
+  // under an inert page; on modal close the attribute clears and ambient surfaces re-raise per
+  // their own triggers (§10). One MutationObserver on the layer's own `aria-hidden` is the whole
+  // mechanism — no coupling into RA's private overlay stack. `dismissAllRef` keeps the observer
+  // subscribed once per container instead of re-subscribing on every authority re-render.
+  const dismissAllRef = useRef(authority.dismissAll);
+  dismissAllRef.current = authority.dismissAll;
+  useEffect(() => {
+    if (!container || typeof MutationObserver === "undefined") return undefined;
+    const observer = new MutationObserver(() => {
+      if (container.getAttribute("aria-hidden") === "true") {
+        dismissAllRef.current();
+      }
+    });
+    observer.observe(container, { attributeFilter: ["aria-hidden"] });
+    return () => observer.disconnect();
+  }, [container]);
 
   const onMeasure = useRef(
     (id: string, size: { width: number; height: number }) => {
@@ -257,12 +288,29 @@ const SELECTION_SURFACE_CAPS: ToolbarCapabilities = {
 export function SelectionSurfaceHost(props: {
   readonly store: EditorStore;
   readonly focusEditor: () => void;
+  /**
+   * A stable ref (created higher in the view tree) the host writes the live authority into,
+   * so components outside this leaf — the table cell `…`, the right-click handler, a mark
+   * click — can call `open`/`openMark` without subscribing to the envelope state (docs/029
+   * §7.4). Omitted in the bare view, where the host owns the authority privately.
+   */
+  readonly authorityRef?: OverlayAuthorityRef;
+  /**
+   * The dock seam (docs/027 §8.2), threaded into the authority so a surface it renders (the
+   * glossary read card's "Open in Glossary", a flyout command opening a pane) can reach the
+   * dock. Omitted in the bare view (no dock).
+   */
+  readonly panelHost?: PanelHost;
   readonly offsetModel?: OffsetModel | null;
   readonly scroller?: ScrollerGeometry | null;
 }): ReactNode {
   const authority = useOverlayAuthority(props.store, SELECTION_SURFACE_CAPS, {
     focusEditor: props.focusEditor,
+    panelHost: props.panelHost,
   });
+  // Publish the live authority into the shared ref each (isolated) re-render; consumers read
+  // it imperatively in event handlers, so this never re-renders them.
+  if (props.authorityRef) props.authorityRef.current = authority;
   return (
     <OverlayLayer
       authority={authority}

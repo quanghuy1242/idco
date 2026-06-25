@@ -1,68 +1,81 @@
 /**
- * Click-to-read glossary popover (docs/027 §16 P6).
+ * Click-to-read glossary popover (docs/027 §16 P6), migrated onto the overlay authority as a
+ * `mark`-target *card* (docs/029 R1-G).
  *
- * Glossary marks are *word-sized*, so click-to-read is natural — a dictionary tooltip
- * over the word — and it does not fight ordinary caret placement. Comment marks are
- * *large ranges* (a sentence, a paragraph), so making the range a click target would
- * hijack normal editing; comments therefore use a caret-in-range affordance
- * (`comment-affordance.tsx`) that routes to the dock instead. This module handles only
- * the glossary (word) case, mirroring the link-click pattern
- * (`useLinkInteraction`/`LinkPopover`): a click on the `<abbr>` opens a read popover
- * with the single-source definition and an "Open in Glossary" route to the dock,
- * focused on that term.
+ * Glossary marks are *word-sized*, so click-to-read is natural — a dictionary card over the
+ * word — and it does not fight ordinary caret placement. Comment marks are *large ranges*, so
+ * they use a caret-in-range affordance (`comment-affordance.tsx`) instead; this module handles
+ * only the glossary (word) case. A click on the `<abbr>` is probed ({@link
+ * probeAnnotationMark}) into the mark's `{ nodeId, markId }` and the authority opens the
+ * registered `mark.glossary` contributor over it (`openMark`). The card is focus-`taking`
+ * (a11y: focus moves to the readable popover) but content-kind `card`, so the overlay layer
+ * does *not* autofocus a field (there is none) — exactly the §8.5 distinction. The authority
+ * owns positioning (the mark's rect), focus, and dismissal, so the old `AnchoredPopover` with
+ * `isNonModal` and the `useAnnotationInteraction` hook are gone.
  */
-import { useCallback, useRef, useState, type RefObject } from "react";
-import { AnchoredPopover, Button } from "@quanghuy1242/idco-ui";
-import type { EditorStore } from "../../core";
-import type { PanelHost } from "../spi";
+import { Button } from "@quanghuy1242/idco-ui";
+import { resolveLeafMarks, type EditorStore, type NodeId } from "../../core";
+import {
+  registerOverlay,
+  type MarkProbe,
+  type OverlaySurfaceContext,
+} from "../spi";
 import { asGlossaryTerm, GLOSSARY_COLLECTION } from "./panes";
+import { useDismissWhenSelectionLeaves } from "./use-mark-surface-dismiss";
 
-/** The glossary term id the clicked `<abbr>` references. */
-export type AnnotationTarget = {
-  readonly refId: string;
-};
-
-export type AnnotationInteraction = {
-  readonly target: AnnotationTarget | null;
-  readonly anchorRef: RefObject<HTMLElement | null>;
-  /** Open the glossary term under `element`; returns true when one was found+claimed. */
-  openAt(element: HTMLElement): boolean;
-  close(): void;
-};
-
-/** Track which glossary mark (if any) the user clicked and the element to anchor against. */
-export function useAnnotationInteraction(): AnnotationInteraction {
-  const anchorRef = useRef<HTMLElement | null>(null);
-  const [target, setTarget] = useState<AnnotationTarget | null>(null);
-
-  const openAt = useCallback((element: HTMLElement): boolean => {
-    const glossaryEl = element.closest<HTMLElement>(
-      "[data-engine-mark='glossary']",
-    );
-    const term = glossaryEl?.getAttribute("data-engine-glossary-term");
-    if (glossaryEl && term) {
-      anchorRef.current = glossaryEl;
-      setTarget({ refId: term });
-      return true;
-    }
-    return false;
-  }, []);
-
-  const close = useCallback(() => setTarget(null), []);
-  return { anchorRef, close, openAt, target };
+/**
+ * Resolve a clicked element to the glossary mark under it (docs/027 §16 P6), returning the
+ * {@link MarkProbe} to open or null when the click was not on a glossary word. Pure DOM: the
+ * `<abbr>` carries `data-engine-mark-id` (anchor rect) + `data-engine-glossary-term` and sits
+ * under a `data-engine-text-id` leaf. Comment marks are intentionally not claimed here (they
+ * route through the caret affordance), so a click on a comment-only span returns null.
+ */
+export function probeAnnotationMark(element: HTMLElement): MarkProbe | null {
+  const glossaryEl = element.closest<HTMLElement>(
+    "[data-engine-mark='glossary']",
+  );
+  if (!glossaryEl) return null;
+  const markId = glossaryEl.getAttribute("data-engine-mark-id");
+  const leafEl = glossaryEl.closest<HTMLElement>("[data-engine-text-id]");
+  const nodeId = leafEl?.getAttribute("data-engine-text-id") as NodeId | null;
+  if (!markId || !nodeId) return null;
+  return { kind: "glossary", markId, nodeId };
 }
 
-/** The glossary read body: the term + its single-source definition. */
-function GlossaryReadBody(props: {
-  readonly store: EditorStore;
-  readonly refId: string;
-  readonly onManage: () => void;
+/** The term id a glossary mark references (its `attrs.term`), or null when the mark is gone. */
+function termIdOfMark(
+  store: EditorStore,
+  nodeId: NodeId,
+  markId: string,
+): string | null {
+  const node = store.getNode(nodeId);
+  if (!node || node.kind !== "text") return null;
+  const mark = resolveLeafMarks(node).find(
+    (candidate) => candidate.id === markId && candidate.kind === "glossary",
+  );
+  return typeof mark?.attrs?.term === "string" ? mark.attrs.term : null;
+}
+
+/** The glossary read card body — the `mark.glossary` contributor's render (docs/029 R1-G). */
+export function GlossaryReadCard(props: {
+  readonly ctx: OverlaySurfaceContext;
 }) {
-  const { store, refId, onManage } = props;
-  const term = store
-    .getCollection(GLOSSARY_COLLECTION)
-    .map(asGlossaryTerm)
-    .find((candidate) => candidate.id === refId);
+  const { ctx } = props;
+  const { store } = ctx;
+  const anchor = ctx.anchor;
+  // Close when the user starts selecting/editing elsewhere (the read card is stale then),
+  // letting the ambient flyout take over (docs/029 R1-G).
+  useDismissWhenSelectionLeaves(store, ctx.dismiss);
+  const refId =
+    anchor?.kind === "mark"
+      ? termIdOfMark(store, anchor.nodeId, anchor.markId)
+      : null;
+  const term = refId
+    ? store
+        .getCollection(GLOSSARY_COLLECTION)
+        .map(asGlossaryTerm)
+        .find((candidate) => candidate.id === refId)
+    : undefined;
   return (
     <div className="grid w-72 gap-1" data-engine-annotation-popover="glossary">
       <span className="text-sm font-semibold">{term?.term ?? "Term"}</span>
@@ -70,7 +83,15 @@ function GlossaryReadBody(props: {
         {term?.definition || "No definition yet."}
       </p>
       <div className="flex justify-end">
-        <Button iconName="BookA" onClick={onManage} size="sm" variant="ghost">
+        <Button
+          iconName="BookA"
+          onClick={() => {
+            if (refId) ctx.panelHost?.open("glossary", refId);
+            ctx.dismiss();
+          }}
+          size="sm"
+          variant="ghost"
+        >
           Open in Glossary
         </Button>
       </div>
@@ -78,34 +99,14 @@ function GlossaryReadBody(props: {
   );
 }
 
-export function AnnotationPopover(props: {
-  readonly store: EditorStore;
-  readonly interaction: AnnotationInteraction;
-  readonly panelHost: PanelHost;
-}) {
-  const { store, interaction, panelHost } = props;
-  const { target, anchorRef, close } = interaction;
-  return (
-    <AnchoredPopover
-      ariaLabel="Glossary term"
-      isNonModal
-      isOpen={target !== null}
-      onOpenChange={(open) => {
-        if (!open) close();
-      }}
-      placement="bottom"
-      triggerRef={anchorRef}
-    >
-      {target ? (
-        <GlossaryReadBody
-          onManage={() => {
-            panelHost.open("glossary", target.refId);
-            close();
-          }}
-          refId={target.refId}
-          store={store}
-        />
-      ) : null}
-    </AnchoredPopover>
-  );
+/** Register the click-to-read glossary overlay (idempotent by id). */
+export function registerAnnotationOverlay(): void {
+  registerOverlay({
+    contentKind: "card",
+    focusMode: "taking",
+    id: "mark.glossary",
+    match: (probe) => probe.kind === "glossary",
+    render: (ctx) => <GlossaryReadCard ctx={ctx} />,
+    target: "mark",
+  });
 }

@@ -44,7 +44,7 @@
  * `Command`/tab/slot (docs/023 §5.8) and it appears; this file never grows a
  * branch for it.
  */
-import { Fragment, useCallback, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useRef, useState, type ReactNode } from "react";
 import {
   Button as AriaButton,
   Toolbar as AriaToolbar,
@@ -55,7 +55,6 @@ import {
   MenuItem,
   MenuTrigger,
   NavIcon,
-  PopoverTrigger,
   Tabs,
   useResponsiveCollapse,
   type CollapseItem,
@@ -68,7 +67,10 @@ import {
   computeToolbarLayout,
   DEFAULT_TOOLBAR_LAYOUT,
   listBlockTypes,
+  useOverlayAuthorityRef,
   type CommandContext,
+  type CommandRenderContext,
+  type OverlayAuthorityRef,
   type PanelHost,
   type ResolvedToolbarItem,
   type ResolvedToolbarSlot,
@@ -76,6 +78,54 @@ import {
   type ToolbarCapabilities,
   type ToolbarLayoutConfig,
 } from "../../spi";
+
+/**
+ * A toolbar `popover`/`dropdown` action (link / align / glossary / comment): the trigger
+ * Button opens the action's body as an ephemeral form through the overlay authority
+ * (`openForm`, docs/029 R1-G) anchored under the button, instead of an in-ribbon
+ * `PopoverTrigger`. That is what lets the ribbon's `onMouseDownCapture` containment gate and
+ * the close-bounce RAF be deleted: the form lives in the authority's portal (not the ribbon
+ * React tree), takes focus via the reclaim seam, and dismisses centrally.
+ */
+function RibbonFormAction(props: {
+  readonly id: string;
+  readonly icon: string;
+  readonly label: string;
+  readonly shortcut?: string;
+  readonly tooltip?: string;
+  readonly active: boolean;
+  readonly disabled: boolean;
+  readonly labelled: boolean;
+  readonly render: (ctx: CommandRenderContext) => ReactNode;
+  readonly ctx: CommandContext;
+  readonly authorityRef: OverlayAuthorityRef | null;
+}): ReactNode {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  return (
+    <span data-engine-toolbar-action={props.id} ref={ref}>
+      <Button
+        ariaKeyShortcuts={props.shortcut}
+        ariaLabel={props.label}
+        disabled={props.disabled}
+        iconName={props.icon}
+        onClick={() => {
+          const rect = ref.current?.getBoundingClientRect();
+          props.authorityRef?.current?.openForm(
+            rect?.left ?? 0,
+            rect?.bottom ?? 0,
+            (surface) => props.render({ ...surface, close: surface.dismiss }),
+          );
+        }}
+        size="sm"
+        square={!props.labelled}
+        tooltip={props.tooltip}
+        variant={props.active ? "primary" : "ghost"}
+      >
+        {props.labelled ? props.label : undefined}
+      </Button>
+    </span>
+  );
+}
 
 // The format marks, block-type chooser, and insert affordances project from the
 // W4/W5/SPI registries; every other control is a registered `Command`
@@ -228,6 +278,7 @@ export function EditorToolbar(props: {
   const { store, focusEditor, onFind } = props;
   // Re-read query state whenever selection or content changes.
   useStoreVersion(store);
+  const authorityRef = useOverlayAuthorityRef();
 
   const run = useCallback(
     (action: () => void) => {
@@ -477,38 +528,30 @@ export function EditorToolbar(props: {
         );
       case "action": {
         const { action } = item;
-        if (action.kind === "popover" || action.kind === "dropdown") {
+        if (
+          (action.kind === "popover" || action.kind === "dropdown") &&
+          action.render
+        ) {
+          const render = action.render;
           return (
-            <span data-engine-toolbar-action={action.id} key={item.id}>
-              <PopoverTrigger
-                ariaLabel={action.label}
-                onOpenChange={(open) => {
-                  // React Aria restores focus to the trigger on close; bounce it
-                  // back to the editing surface instead (docs/017 §3.5).
-                  if (!open) requestAnimationFrame(() => focusEditor());
-                }}
-                trigger={
-                  <Button
-                    ariaKeyShortcuts={action.shortcut}
-                    ariaLabel={action.label}
-                    disabled={item.disabled}
-                    iconName={action.icon}
-                    size="sm"
-                    square={!labelled}
-                    tooltip={
-                      labelled
-                        ? action.shortcut
-                        : withShortcut(action.label, action.shortcut)
-                    }
-                    variant={item.active ? "primary" : "ghost"}
-                  >
-                    {labelled ? action.label : undefined}
-                  </Button>
-                }
-              >
-                {(close) => action.render?.({ ...ctx, close }) ?? null}
-              </PopoverTrigger>
-            </span>
+            <RibbonFormAction
+              active={item.active}
+              authorityRef={authorityRef}
+              ctx={ctx}
+              disabled={item.disabled}
+              icon={action.icon}
+              id={action.id}
+              key={item.id}
+              label={action.label}
+              labelled={labelled}
+              render={render}
+              shortcut={action.shortcut}
+              tooltip={
+                labelled
+                  ? action.shortcut
+                  : withShortcut(action.label, action.shortcut)
+              }
+            />
           );
         }
         return (
@@ -573,21 +616,15 @@ export function EditorToolbar(props: {
       aria-label="Editor toolbar"
       className={`border-b border-base-300 bg-base-100 ${props.className ?? ""}`}
       data-engine-toolbar=""
-      // Pressing a toolbar *control* must not blur the editing host; model selection
-      // survives focus loss, and we restore focus after the command. But only suppress
-      // the default for presses on the bar's own DOM controls: a `popover` action
-      // (link / align / glossary / comment editor) portals its content to `document.body`,
-      // yet React routes that overlay's synthetic events through the React *tree* — so a
-      // mousedown inside the popover's text field still reaches this capture handler. A
-      // blanket preventDefault there cancels the field's caret placement, so the field
-      // could not be mouse-selected (keyboard-only — Shift+Arrow still worked). Gate on
-      // DOM containment: `event.target` inside the bar → a real control press (suppress);
-      // inside a portaled overlay → leave the field's own mouse behaviour intact.
-      onMouseDownCapture={(event) => {
-        if (event.currentTarget.contains(event.target as Node)) {
-          event.preventDefault();
-        }
-      }}
+      // Pressing a toolbar control must not blur the editing host; the model selection
+      // survives focus loss and the command restores focus. The old DOM-containment GATE
+      // (docs/029 R1-G) is gone: it existed only because in-ribbon `popover` actions portaled
+      // a field whose synthetic events bubbled the React tree into this handler, and a blanket
+      // preventDefault cancelled the field's caret placement. Those actions now open through
+      // the overlay authority (`RibbonFormAction`/`openForm`), outside the ribbon React tree,
+      // so a plain capture-phase preventDefault is correct again — nothing portaled reaches
+      // here, and the authority's `taking` form keeps its own focus via the reclaim seam.
+      onMouseDown={(event) => event.preventDefault()}
       role="group"
     >
       {/* Tab strip + the persistent quick-access zones: undo/redo (start) sit left of

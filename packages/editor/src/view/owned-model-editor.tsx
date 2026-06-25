@@ -29,7 +29,6 @@ import {
   EditorToolbar,
   EngineContextMenu,
   SidePanelDock,
-  SlashMenu,
   useCommandSurfaces,
 } from "./chrome";
 import type {
@@ -37,14 +36,19 @@ import type {
   ToolbarCapabilities,
   ToolbarLayoutConfig,
 } from "./spi";
-import { getDataSource, registerDataSource } from "./spi";
+import {
+  getDataSource,
+  OverlayAuthorityRefProvider,
+  registerDataSource,
+  type OverlayAuthority,
+} from "./spi";
 import {
   createDocumentIndexStore,
   type MutableDocumentIndexStore,
 } from "./controllers/document-index-store";
-import { FindBar, useFindController, type FindController } from "./chrome";
-import { LinkPopover, useLinkInteraction } from "./chrome";
-import { AnnotationPopover, useAnnotationInteraction } from "./chrome";
+import { FindBar } from "./chrome";
+import { probeLinkMark } from "./chrome";
+import { probeAnnotationMark } from "./chrome";
 import { CommentAffordance } from "./chrome";
 import {
   OwnedModelEditorView,
@@ -105,6 +109,11 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     ...viewProps
   } = props;
   const viewRef = useRef<OwnedModelEditorViewHandle | null>(null);
+  // The shared overlay-authority ref (docs/029 §7.4): created here (stable), populated by the
+  // editing view's `SelectionSurfaceHost`, and provided to the whole editor subtree so the
+  // right-click menu, mark-click popovers, and the table cell `…` can open overlays without
+  // subscribing to the authority's envelope state.
+  const overlayAuthorityRef = useRef<OverlayAuthority | null>(null);
   const [handle, setHandle] = useState<OwnedEditorHandle | null>(null);
 
   // The public handle is created by the view after mount; capture it once so
@@ -197,14 +206,28 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     [store, uploadImage],
   );
 
-  const find: FindController = useFindController(store, (id) =>
-    viewRef.current?.scrollToBlock(id),
+  // Find is opened through the overlay authority as a *sticky* form (docs/029 R1-G): the bar
+  // owns its own search state, the authority owns its lifecycle. `openFind` anchors it near
+  // the surface's top-right corner (a `point`) and the `sticky` focus-mode keeps its field
+  // focused while the author clicks matches in the document — what the old in-`data-engine-
+  // surface` absolute popover did via a `shouldCloseOnInteractOutside` hack.
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const scrollToBlock = useCallback(
+    (id: NodeId) => viewRef.current?.scrollToBlock(id),
+    [],
   );
-
-  const linkInteraction = useLinkInteraction(store);
-  // Click-to-read for glossary/comment marks (docs/027 §16 P6); tried before the link
-  // interaction so the innermost annotation claims the click.
-  const annotationInteraction = useAnnotationInteraction();
+  const openFind = useCallback(() => {
+    const authority = overlayAuthorityRef.current;
+    if (!authority) return;
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    // Anchor a bar-width in from the right edge so the box lands at the top-right; the central
+    // positioning solve clamps/flips it into the viewport regardless.
+    const x = rect ? Math.max(0, rect.right - 380) : 8;
+    const y = rect ? rect.top + 8 : 8;
+    authority.openStickyForm(x, y, (ctx) => (
+      <FindBar onClose={ctx.dismiss} scrollTo={scrollToBlock} store={store} />
+    ));
+  }, [scrollToBlock, store]);
 
   // The flat command surfaces (context menu, selection flyout, slash menu) share one
   // capability set + one coordinator (docs/024 §8). Defaults mirror the ribbon's so a
@@ -272,17 +295,26 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   const surfaces = useCommandSurfaces(store, capabilities, panelHost);
   const { requestContextMenu, closeAll: closeSurfaces } = surfaces;
 
-  // A click on an annotation/link mark opens a popover over it. Annotations
-  // (glossary/comment) are tried first so the innermost mark claims the click
-  // (docs/027 §16 P6); a plain link falls through to the link editor (legacy
-  // floating-link-editor parity). Other clicks pass through to the editing surface.
+  // A click on an annotation/link mark opens its surface over it through the overlay
+  // authority (docs/029 R1-G): the mark is *probed* into a `{ nodeId, markId }` and
+  // `openMark` opens the first matching `mark` contributor (glossary read card / link form).
+  // Annotations are tried first so the innermost mark claims the click (docs/027 §16 P6); a
+  // plain link falls through. Other clicks pass to the editing surface. The authority owns the
+  // popover's focus/positioning/dismissal — no per-interaction hook or anchored popover here.
   const onClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      const authority = overlayAuthorityRef.current;
+      if (!authority) return;
       const element = event.target as HTMLElement;
-      if (annotationInteraction.openAt(element)) return;
-      linkInteraction.openAt(element);
+      const annotation = probeAnnotationMark(element);
+      if (annotation) {
+        authority.openMark(annotation);
+        return;
+      }
+      const link = probeLinkMark(store, element);
+      if (link) authority.openMark(link);
     },
-    [annotationInteraction, linkInteraction],
+    [store],
   );
 
   // Right-click: open the one scope-merged context menu when commands resolve,
@@ -302,10 +334,10 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
-        find.open();
+        openFind();
       }
     },
-    [find],
+    [openFind],
   );
 
   useImperativeHandle(
@@ -321,7 +353,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
         return viewRef.current!.getEditorHandle;
       },
       closePanel: () => panelHost.close(),
-      openFind: () => find.open(),
+      openFind: () => openFind(),
       openPanel: (paneId, focusId) => panelHost.open(paneId, focusId),
       get placeCaretAt() {
         return viewRef.current!.placeCaretAt;
@@ -336,14 +368,13 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
         return viewRef.current!.serializeSelection;
       },
     }),
-    [find, panelHost],
+    [openFind, panelHost],
   );
 
   // Autosave is always called (hooks rule); it no-ops until a handle exists and
   // an `autosave` config is supplied.
   useAutosave(handle, autosave ?? { enabled: false, onSave: async () => {} });
 
-  const openFind = find.open;
   const toolbar = useMemo(
     () =>
       hideToolbar ? null : (
@@ -368,95 +399,80 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   );
 
   return (
-    <UploadProvider value={uploadImage ?? null}>
-      <div
-        className="flex flex-col"
-        data-engine-editor=""
-        onDragOver={uploadImage ? (event) => event.preventDefault() : undefined}
-        onDrop={onDrop}
-        onKeyDown={onKeyDown}
-      >
-        {toolbar}
-        {/* Surface + dock are a flex row so the dock is a *sibling* of the scroller,
+    <OverlayAuthorityRefProvider value={overlayAuthorityRef}>
+      <UploadProvider value={uploadImage ?? null}>
+        <div
+          className="flex flex-col"
+          data-engine-editor=""
+          onDragOver={
+            uploadImage ? (event) => event.preventDefault() : undefined
+          }
+          onDrop={onDrop}
+          onKeyDown={onKeyDown}
+        >
+          {toolbar}
+          {/* Surface + dock are a flex row so the dock is a *sibling* of the scroller,
             never inside it (docs/027 §8.3/§8.4): opening it only narrows the surface's
             width, which the virtual window already treats as a resize, so it cannot
             corrupt offset measurement (docs/025). The dock renders nothing when closed,
             so the surface reclaims the full width. */}
-        {/* `gap-1 p-1` puts one even 4px frame around the row and a single 4px gap
+          {/* `gap-1 p-1` puts one even 4px frame around the row and a single 4px gap
             between the editor and the dock — the margin lives on the row, not on both
             children, so the gap between them is not doubled. */}
-        <div
-          className="flex items-stretch gap-1 p-1"
-          data-engine-editor-body=""
-        >
-          {/* `relative` so the find card floats over the surface's top-right corner
+          <div
+            className="flex items-stretch gap-1 p-1"
+            data-engine-editor-body=""
+          >
+            {/* `relative` so the find card floats over the surface's top-right corner
               instead of pushing it down when it opens (no layout shift). `min-w-0` lets
               the surface shrink when the dock takes its column. */}
-          <div
-            className="relative min-w-0 flex-1"
-            data-engine-surface=""
-            onClick={onClick}
-            onContextMenu={onContextMenu}
-          >
-            <FindBar controller={find} />
-            <div className={proseClassName} data-engine-prose="">
-              <OwnedModelEditorView
-                ref={viewRef}
+            <div
+              className="relative min-w-0 flex-1"
+              data-engine-surface=""
+              onClick={onClick}
+              onContextMenu={onContextMenu}
+              ref={surfaceRef}
+            >
+              <div className={proseClassName} data-engine-prose="">
+                <OwnedModelEditorView
+                  ref={viewRef}
+                  store={store}
+                  {...viewProps}
+                  documentIndexStore={indexStoreRef.current}
+                  overlayAuthorityRef={overlayAuthorityRef}
+                  overlayPanelHost={panelHost}
+                />
+              </div>
+              <CommentAffordance panelHost={panelHost} store={store} />
+              {/* The right-click context menu — the last surface still on the legacy
+                coordinator (its overlay-authority migration is the remaining P3 step). The
+                selection bar (R1-D) and the slash menu (R1-F) are now overlay-authority
+                contributors rendered by the editing view's `SelectionSurfaceHost` / its
+                `OverlayLayer`, portaled to a transform-free body layer. */}
+              <EngineContextMenu
+                close={closeSurfaces}
+                ctx={surfaces.ctx}
+                focusEditor={focusEditor}
+                pos={
+                  surfaces.surface?.kind === "context" ? surfaces.surface : null
+                }
                 store={store}
-                {...viewProps}
-                documentIndexStore={indexStoreRef.current}
               />
             </div>
-            <LinkPopover
-              focusEditor={focusEditor}
-              interaction={linkInteraction}
-              store={store}
-            />
-            <AnnotationPopover
-              interaction={annotationInteraction}
+            <SidePanelDock
+              activeId={activePanelId}
+              capabilities={capabilities}
+              focusId={activePanelFocusId}
+              indexStore={indexStoreRef.current}
+              onClose={() => setPanelOpen(false)}
+              open={panelOpen}
               panelHost={panelHost}
-              store={store}
-            />
-            <CommentAffordance panelHost={panelHost} store={store} />
-            {/* The three flat command surfaces, all driven by the one coordinator so
-                only one is open at a time (docs/024 §8). */}
-            <EngineContextMenu
-              close={closeSurfaces}
-              ctx={surfaces.ctx}
-              focusEditor={focusEditor}
-              pos={
-                surfaces.surface?.kind === "context" ? surfaces.surface : null
-              }
-              store={store}
-            />
-            {/* The selection surface (merged flyout + touch range bar) is owned by the
-                overlay authority, mounted inside the editing view (`react-view`) so it is
-                available in both the bare view and the full editor, exactly where the touch
-                toolbar used to live (docs/029 R1-D). It portals to a transform-free body
-                layer, so nothing renders here. */}
-            <SlashMenu
-              close={closeSurfaces}
-              ctx={surfaces.ctx}
-              focusEditor={focusEditor}
-              slash={
-                surfaces.surface?.kind === "slash" ? surfaces.surface : null
-              }
+              reveal={revealNode}
               store={store}
             />
           </div>
-          <SidePanelDock
-            activeId={activePanelId}
-            capabilities={capabilities}
-            focusId={activePanelFocusId}
-            indexStore={indexStoreRef.current}
-            onClose={() => setPanelOpen(false)}
-            open={panelOpen}
-            panelHost={panelHost}
-            reveal={revealNode}
-            store={store}
-          />
         </div>
-      </div>
-    </UploadProvider>
+      </UploadProvider>
+    </OverlayAuthorityRefProvider>
   );
 });

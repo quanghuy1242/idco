@@ -1,24 +1,26 @@
 /**
- * Table cell-range selection + the cell-action button (docs/022 §7).
+ * Table cell-range selection + the cell-action button (docs/022 §7, docs/029 R1-E).
  *
- * Dragging across cells paints a rectangular range overlay (a *view-layer*
- * selection — it never enters the core `EditorSelection` union). A single `…`
- * button floats at the *hovered* cell's top-right (not the focused cell), pinned
- * to that cell while its popover is open; the popover holds merge / unmerge /
- * fill color / vertical align. Targets are resolved *live at action time* — a
- * genuine ≥2-cell range the anchor is inside, else the anchor (hovered) cell — so
- * the button always acts on the cell it visually belongs to, and a stale range is
- * dropped as soon as the caret moves. The same cell ops are ALSO contributed to the
- * right-click context menu (docs/024 §7.4, `table-commands`); both this hover popover
- * and the context menu dispatch the same `core/table/operations`, so there is no drift
- * — the user gets a discoverable-on-hover affordance plus a right-click path (the user
- * asked to keep both). The drag range is published to the per-store `cell-range` channel
- * so the context menu's "Merge cells" can target it. Pointer/layout-driven, so it is
- * typecheck/build-verified and exercised manually.
+ * Dragging across cells paints a rectangular range overlay (a *view-layer* selection — it
+ * never enters the core `EditorSelection`). A single `…` button floats at the *hovered*
+ * cell's top-right; pressing it opens the cell `…` popover (merge / unmerge / fill / vertical
+ * align) through the **overlay authority** (docs/029 R1-E) — a `cell`-target envelope whose
+ * dismissal (outside press, Escape) and containment are owned centrally, so the old
+ * per-site `keepCellPopoverOpen` + `pressInsideRef` focus-bounce guards are gone: under the
+ * authority's `taking` focus-mode a swatch press is an interior press (not an outside
+ * dismiss), and the editor's focus reclaim is suspended while the panel is open.
+ *
+ * Targets are resolved *live at action time* by the panel from the per-store `cell-range`
+ * channel + the anchored cell, so the panel always acts on the cell it visually belongs to.
+ * The same cell ops are ALSO contributed to the right-click context menu (`table-commands`);
+ * both dispatch the same `core/table/operations`, so there is no drift. The drag range is
+ * published to the `cell-range` channel for both the panel and the context menu. Phantom-drag
+ * prevention (a press inside a body-portaled overlay must not start a cell drag) is now an
+ * **ownership** check against the authority, not a `data-engine-view-root` selector.
  */
 import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
-import { ChromeButton, NavIcon, PopoverTrigger } from "@quanghuy1242/idco-ui";
+import { ChromeButton, NavIcon } from "@quanghuy1242/idco-ui";
 import { Button as AriaButton } from "react-aria-components";
 import type { EditorStore, NodeId } from "../../../core";
 import {
@@ -30,7 +32,23 @@ import {
   tableGrid,
   unmergeCell,
 } from "../../../core/table/operations";
-import { setCellRange } from "./cell-range";
+import {
+  registerOverlay,
+  useOverlayAuthorityRef,
+  type OverlaySurfaceContext,
+} from "../../spi";
+import { getCellRange, setCellRange } from "./cell-range";
+
+/** Register the table's overlay contributors (docs/029 R1-E): the cell `…` popover. */
+export function registerTableOverlays(): void {
+  registerOverlay({
+    contentKind: "card",
+    focusMode: "taking",
+    id: "cell.actions",
+    render: (ctx) => <CellActionsPanel ctx={ctx} />,
+    target: "cell",
+  });
+}
 
 type Coords = { readonly row: number; readonly col: number };
 
@@ -62,33 +80,6 @@ const FILL_COLORS: readonly string[] = [
   "#3f3f46",
 ];
 
-/**
- * Whether an outside interaction/blur target should NOT dismiss the cell `…` popover.
- *
- * The popover is non-modal (`@idco/ui` `PopoverTrigger`), so React Aria's `useOverlay`
- * runs `shouldCloseOnInteractOutside` for a press *inside* the popover too. This keeps it
- * open for its own content (`[data-engine-cell-toolbar]` / `[data-engine-surface-child]`)
- * so React Aria never reads a swatch/align press as an outside dismiss. A press truly
- * outside the popover (anywhere in the editor or page chrome) is in neither region, so it
- * dismisses — that is how click-outside-to-close keeps working.
- *
- * That alone is not enough: pressing a swatch bounces focus back to the editor's
- * EditContext block (so the cell selection survives), and React Aria's non-modal
- * `useOverlay` runs `shouldCloseOnInteractOutside` on that `onBlurWithin` with the editor
- * block as `relatedTarget` — indistinguishable, by target, from a genuine click on the
- * editor. So the panel below also flags `pressInsideRef` on its own `pointerdown`; while
- * that flag is set (the focus bounce belongs to a press that started inside the popover)
- * the dismiss is suppressed, but a fresh press that starts outside leaves it clear and
- * still dismisses. Without this the fill/align never applied — the menu vanished on
- * pointerdown, before the button's `onClick`/`onPress` ran.
- */
-function keepCellPopoverOpen(element: Element): boolean {
-  return (
-    element.closest("[data-engine-cell-toolbar]") !== null ||
-    element.closest("[data-engine-surface-child]") !== null
-  );
-}
-
 /** Resolve a client point to the table cell under it, with its grid coordinates. */
 function cellHitAt(store: EditorStore, x: number, y: number): CellHit | null {
   if (typeof document.elementFromPoint !== "function") return null;
@@ -111,6 +102,15 @@ function cellRectOf(cellId: NodeId): DOMRect | null {
   return el ? el.getBoundingClientRect() : null;
 }
 
+/** The table id enclosing a cell, from the mounted DOM (the panel renders over a live cell). */
+function tableIdForCell(cellId: NodeId): NodeId | null {
+  const el = document.querySelector<HTMLElement>(
+    `[data-engine-block-id="${cellId}"]`,
+  );
+  const table = el?.closest<HTMLElement>(TABLE_SELECTOR);
+  return (table?.getAttribute("data-engine-block-id") as NodeId | null) ?? null;
+}
+
 /** Whether a cell carries a span — drives the "Unmerge cell" affordance. */
 function cellMerged(store: EditorStore, cellId: NodeId): boolean {
   const cell = store.getNode(cellId);
@@ -122,74 +122,150 @@ function cellMerged(store: EditorStore, cellId: NodeId): boolean {
   );
 }
 
+/**
+ * The cell `…` popover body (docs/029 R1-E) — rendered by the overlay authority as the
+ * `cell`-target envelope's content. It is decoupled from `TableInteractions`' refs: the
+ * acted-on cells are recomputed at render from the `cell-range` channel + the anchored cell
+ * (`ctx.anchor`), so it can live as a registered contributor. Applying any action dismisses
+ * the popover (`ctx.dismiss`); the authority handles outside-press + Escape dismissal.
+ */
+export function CellActionsPanel(props: {
+  readonly ctx: OverlaySurfaceContext;
+}) {
+  const { ctx } = props;
+  const { store, anchor, dismiss } = ctx;
+  if (anchor?.kind !== "cell") return null;
+  const cellId = anchor.cellId;
+  const range = getCellRange(store);
+
+  /** The cells an action targets: a genuine ≥2-cell range the anchor is inside, else it. */
+  const targets = (): readonly NodeId[] => {
+    if (range) {
+      const cells = selectedCellRange(
+        tableGrid(store, range.tableId),
+        range.anchor,
+        range.focus,
+      ).cellIds;
+      if (cells.length >= 2 && cells.includes(cellId)) return cells;
+    }
+    return [cellId];
+  };
+  const rangeCount = range
+    ? selectedCellRange(
+        tableGrid(store, range.tableId),
+        range.anchor,
+        range.focus,
+      ).cellIds.length
+    : 0;
+  const canMerge = rangeCount >= 2;
+  const canUnmerge = cellMerged(store, cellId);
+
+  return (
+    <div className="flex w-56 flex-col gap-2" data-engine-cell-toolbar="">
+      {canMerge ? (
+        <AriaButton
+          className="flex cursor-pointer items-center gap-2 rounded-field px-3 py-1.5 text-sm outline-none hover:bg-base-200"
+          onPress={() => {
+            if (range)
+              mergeCells(store, range.tableId, range.anchor, range.focus);
+            setCellRange(store, null);
+            dismiss();
+          }}
+        >
+          <NavIcon name="Combine" />
+          Merge cells
+        </AriaButton>
+      ) : null}
+      {canUnmerge ? (
+        <AriaButton
+          className="flex cursor-pointer items-center gap-2 rounded-field px-3 py-1.5 text-sm outline-none hover:bg-base-200"
+          onPress={() => {
+            const tableId = tableIdForCell(cellId);
+            if (tableId) unmergeCell(store, tableId, cellId);
+            dismiss();
+          }}
+        >
+          <NavIcon name="Ungroup" />
+          Unmerge cell
+        </AriaButton>
+      ) : null}
+      <div className="px-1 text-xs font-medium text-base-content/60">
+        Fill color
+      </div>
+      <div className="flex flex-wrap gap-2 px-1">
+        {FILL_COLORS.map((color) => (
+          <button
+            aria-label={`Fill ${color}`}
+            className="size-6 rounded-full border border-base-300 transition hover:scale-110"
+            key={color}
+            onClick={() => {
+              setCellBackground(store, targets(), color);
+              dismiss();
+            }}
+            style={{ background: color }}
+            type="button"
+          />
+        ))}
+        <button
+          aria-label="Clear fill"
+          className="grid size-6 place-items-center rounded-full border border-base-300 text-base-content/60 transition hover:scale-110"
+          onClick={() => {
+            setCellBackground(store, targets(), undefined);
+            dismiss();
+          }}
+          type="button"
+        >
+          <NavIcon name="X" />
+        </button>
+      </div>
+      <div className="px-1 text-xs font-medium text-base-content/60">
+        Vertical align
+      </div>
+      <div className="flex gap-1 px-1">
+        {(["top", "middle", "bottom"] as const).map((align) => (
+          <AriaButton
+            className="flex-1 cursor-pointer rounded-field px-2 py-1 text-sm capitalize outline-none hover:bg-base-200"
+            key={align}
+            onPress={() => {
+              setCellVerticalAlign(store, targets(), align);
+              dismiss();
+            }}
+          >
+            {align}
+          </AriaButton>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function TableInteractions(props: { readonly store: EditorStore }) {
   const { store } = props;
+  const authorityRef = useOverlayAuthorityRef();
   const [range, setRange] = useState<RangeState | null>(null);
   // The cell under the pointer drives the floating … button (hover, not focus).
   const [hovered, setHovered] = useState<CellHit | null>(null);
-  // The popover is controlled so its cell can be *pinned* while it is open — the
-  // pointer is then free to roam onto the popover or off the table without
-  // moving or dismissing the menu.
-  const [open, setOpen] = useState(false);
   const [, bump] = useState(0);
   const rangeRef = useRef<RangeState | null>(null);
   const dragRef = useRef<(CellHit & { moved: boolean }) | null>(null);
   const hoveredRef = useRef<CellHit | null>(null);
-  const pinnedRef = useRef<CellHit | null>(null);
-  const anchorRef = useRef<CellHit | null>(null);
-  // Set the frame a `…`-popover press starts inside the popover, so the focus bounce it
-  // causes (focus returns to the editor block) is not read as a dismiss; cleared next
-  // frame so a later press that starts outside still closes the popover (see
-  // `keepCellPopoverOpen`).
-  const pressInsideRef = useRef(false);
   rangeRef.current = range;
 
-  // Mirror the drag range into the per-store channel so the right-click context menu's
-  // "Merge cells" contribution can target it at menu-open time (docs/024 §7.4). The
-  // hover popover below uses its own `rangeRef`; this only feeds the context menu.
+  // Mirror the drag range into the per-store channel so both the cell `…` panel and the
+  // right-click context menu's "Merge cells" contribution read it (docs/024 §7.4).
   useEffect(() => {
     setCellRange(store, range);
   }, [store, range]);
 
-  // The cell the button is attached to: the pinned cell while the menu is open,
-  // else the hovered cell. Actions hit this cell (the one the button visually
-  // belongs to), so the button and its effect never disagree.
-  const anchorCell: CellHit | null =
-    (open ? pinnedRef.current : null) ?? hovered;
-  anchorRef.current = anchorCell;
+  // The cell the button is attached to: the hovered cell.
+  const anchorCell: CellHit | null = hovered;
 
-  /** The cells an action targets, resolved live at click time: a genuine ≥2-cell
-   *  range the anchor is inside, else the anchor cell. */
-  const liveTargets = (): readonly NodeId[] => {
-    const cell = anchorRef.current;
-    if (!cell) return [];
-    const r = rangeRef.current;
-    if (r) {
-      const cells = selectedCellRange(
-        tableGrid(store, r.tableId),
-        r.anchor,
-        r.focus,
-      ).cellIds;
-      if (cells.length >= 2 && cells.includes(cell.cellId)) {
-        return cells;
-      }
-    }
-    return [cell.cellId];
-  };
-
-  // Re-render on commit and on selection move so the button + targets track the
-  // caret; also drop a stale range the moment the caret leaves it.
+  // Re-render on commit and on selection move so the button tracks the caret; also drop a
+  // stale range the moment the caret leaves it.
   useEffect(() => store.subscribeCommit(() => bump((n) => n + 1)), [store]);
   useEffect(
     () =>
       store.subscribeSelection(() => {
-        // A caret move ends the transient cell range. The drag paints the range
-        // through pointermove without dispatching a store selection, so a
-        // `subscribeSelection` fire means the editor caret genuinely moved — the
-        // user has left the drag, so the range collapses, exactly as selecting a
-        // new caret clears a block selection. This is the wrong-cell-fill fix: a
-        // stale range can no longer outlive the caret and hijack a single-cell
-        // action. The drag guard keeps an in-progress paint from self-clearing.
         if (rangeRef.current && !dragRef.current?.moved) setRange(null);
         bump((n) => n + 1);
       }),
@@ -197,31 +273,29 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
   );
 
   useEffect(() => {
+    // The `…` button + the authority's cell panel both carry `data-engine-cell-toolbar`;
+    // moving onto either keeps the hovered cell so the button does not vanish before a click.
     function inChrome(target: EventTarget | null): boolean {
       return (
         target instanceof Element &&
         target.closest("[data-engine-cell-toolbar]") !== null
       );
     }
-    // Whether the pointer landed on the editor surface itself (not a portaled overlay
-    // floating above it — the selection flyout, a glossary/comment add popover, a dialog).
-    // The cell hit test is *geometric* (`cellHitAt` by client coordinates), so without this
-    // a press inside a popover that happens to sit over the table would register a phantom
-    // cell hit: it would start a cell drag (hijacking the popover's own input — the input
-    // becomes unclickable) and paint the body-portaled range/hover overlays over the popover.
-    // The surface root carries `data-engine-view-root`; a portaled overlay is outside it.
-    function onSurface(target: EventTarget | null): boolean {
+    // Whether the press/move landed inside a body-portaled overlay (docs/029 §7.4 ownership
+    // containment, replacing the old `data-engine-view-root` selector): the cell hit test is
+    // geometric, so a press inside an overlay floating over the table must not start a cell
+    // drag or paint hover/range overlays over it. Ownership covers *every* overlay, not just
+    // those outside the view root.
+    function onOverlay(target: EventTarget | null): boolean {
       return (
-        target instanceof Element &&
-        target.closest("[data-engine-view-root]") !== null
+        target instanceof Node &&
+        (authorityRef?.current?.ownership.isWithin(target) ?? false)
       );
     }
     function onPointerDown(event: PointerEvent) {
       if (event.button !== 0 || inChrome(event.target)) return;
-      // A press anywhere clears a painted range, but only a press that lands on the surface
-      // (not a popover above it) may begin a new cell drag.
       if (rangeRef.current) setRange(null);
-      if (!onSurface(event.target)) {
+      if (onOverlay(event.target)) {
         dragRef.current = null;
         return;
       }
@@ -245,14 +319,11 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
         });
         return;
       }
-      // Not dragging: hover-anchor the … button to the cell under the pointer.
-      // Over the toolbar/popover we keep the last hovered cell (inChrome), so
-      // moving onto the button does not dismiss it.
+      // Not dragging: hover-anchor the … button to the cell under the pointer. Over the
+      // toolbar/panel keep the last hovered cell (inChrome); over any other overlay clear
+      // the hover so the cell … button never renders on top of it.
       if (inChrome(event.target)) return;
-      // Over a portaled overlay (a popover/dialog floating above the table), clear the
-      // hover so the cell … toolbar never renders on top of that overlay (it would steal
-      // the overlay's pointer events / cover its input).
-      if (!onSurface(event.target)) {
+      if (onOverlay(event.target)) {
         if (hoveredRef.current) {
           hoveredRef.current = null;
           setHovered(null);
@@ -281,7 +352,7 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
       document.removeEventListener("pointerup", onPointerUp, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [store]);
+  }, [store, authorityRef]);
 
   const rangeRects = range
     ? selectedCellRange(
@@ -296,37 +367,21 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
       })
     : [];
 
-  // The button anchors to the hovered (or pinned-while-open) cell.
+  // The button anchors to the hovered cell.
   const anchorRect = anchorCell ? cellRectOf(anchorCell.cellId) : null;
-  const rangeCellCount = range
-    ? selectedCellRange(
-        tableGrid(store, range.tableId),
-        range.anchor,
-        range.focus,
-      ).cellIds.length
-    : 0;
-  const canMerge = rangeCellCount >= 2;
-  const canUnmerge = !!anchorCell && cellMerged(store, anchorCell.cellId);
-
-  function applyFill(color: string | undefined) {
-    setCellBackground(store, liveTargets(), color);
-  }
-  function applyAlign(align: "top" | "middle" | "bottom") {
-    setCellVerticalAlign(store, liveTargets(), align);
-  }
 
   return (
     <>
       {rangeRects.length > 0
         ? createPortal(
             <div
-              data-engine-table-selection=""
               className="pointer-events-none fixed inset-0 z-30"
+              data-engine-table-selection=""
             >
               {rangeRects.map((rect, index) => (
                 <div
-                  key={index}
                   className="absolute border border-primary bg-primary/20"
+                  key={index}
                   style={{
                     height: rect.height,
                     left: rect.left,
@@ -340,123 +395,26 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
           )
         : null}
 
-      {anchorRect
+      {anchorRect && anchorCell
         ? createPortal(
             <div
-              data-engine-cell-toolbar=""
               className="pointer-events-auto fixed z-40"
+              data-engine-cell-toolbar=""
               style={{
                 left: Math.max(4, anchorRect.right - 34),
                 top: anchorRect.top + 6,
               }}
             >
-              <PopoverTrigger
-                ariaLabel="Cell actions"
-                placement="bottom end"
-                isOpen={open}
-                shouldCloseOnInteractOutside={(el) =>
-                  !keepCellPopoverOpen(el) && !pressInsideRef.current
+              <ChromeButton
+                icon="Ellipsis"
+                label="Cell actions"
+                onPress={() =>
+                  authorityRef?.current?.open(
+                    { cellId: anchorCell.cellId, kind: "cell" },
+                    "cell.actions",
+                  )
                 }
-                onOpenChange={(next) => {
-                  // Pin the cell the menu was opened on, so it stays put while
-                  // the pointer roams onto the popover or off the table.
-                  pinnedRef.current = next ? anchorRef.current : null;
-                  setOpen(next);
-                }}
-                trigger={<ChromeButton icon="Ellipsis" label="Cell actions" />}
-              >
-                {(close) => (
-                  <div
-                    data-engine-cell-toolbar=""
-                    className="flex w-56 flex-col gap-2"
-                    // Flag that this gesture started inside the popover, so the focus
-                    // bounce it triggers is not mistaken for an outside dismiss (see
-                    // `keepCellPopoverOpen`). Capture-phase + cleared next frame, after
-                    // React Aria's synchronous blur check has read it.
-                    onPointerDownCapture={() => {
-                      pressInsideRef.current = true;
-                      requestAnimationFrame(() => {
-                        pressInsideRef.current = false;
-                      });
-                    }}
-                  >
-                    {canMerge ? (
-                      <AriaButton
-                        className="flex cursor-pointer items-center gap-2 rounded-field px-3 py-1.5 text-sm outline-none hover:bg-base-200"
-                        onPress={() => {
-                          const r = rangeRef.current;
-                          if (r)
-                            mergeCells(store, r.tableId, r.anchor, r.focus);
-                          setRange(null);
-                          close();
-                        }}
-                      >
-                        <NavIcon name="Combine" />
-                        Merge cells
-                      </AriaButton>
-                    ) : null}
-                    {canUnmerge ? (
-                      <AriaButton
-                        className="flex cursor-pointer items-center gap-2 rounded-field px-3 py-1.5 text-sm outline-none hover:bg-base-200"
-                        onPress={() => {
-                          const c = anchorRef.current;
-                          if (c) unmergeCell(store, c.tableId, c.cellId);
-                          close();
-                        }}
-                      >
-                        <NavIcon name="Ungroup" />
-                        Unmerge cell
-                      </AriaButton>
-                    ) : null}
-                    <div className="px-1 text-xs font-medium text-base-content/60">
-                      Fill color
-                    </div>
-                    <div className="flex flex-wrap gap-2 px-1">
-                      {FILL_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          aria-label={`Fill ${color}`}
-                          className="size-6 rounded-full border border-base-300 transition hover:scale-110"
-                          style={{ background: color }}
-                          onClick={() => {
-                            applyFill(color);
-                            close();
-                          }}
-                        />
-                      ))}
-                      <button
-                        type="button"
-                        aria-label="Clear fill"
-                        className="grid size-6 place-items-center rounded-full border border-base-300 text-base-content/60 transition hover:scale-110"
-                        onClick={() => {
-                          applyFill(undefined);
-                          close();
-                        }}
-                      >
-                        <NavIcon name="X" />
-                      </button>
-                    </div>
-                    <div className="px-1 text-xs font-medium text-base-content/60">
-                      Vertical align
-                    </div>
-                    <div className="flex gap-1 px-1">
-                      {(["top", "middle", "bottom"] as const).map((align) => (
-                        <AriaButton
-                          key={align}
-                          className="flex-1 cursor-pointer rounded-field px-2 py-1 text-sm capitalize outline-none hover:bg-base-200"
-                          onPress={() => {
-                            applyAlign(align);
-                            close();
-                          }}
-                        >
-                          {align}
-                        </AriaButton>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </PopoverTrigger>
+              />
             </div>,
             document.body,
           )

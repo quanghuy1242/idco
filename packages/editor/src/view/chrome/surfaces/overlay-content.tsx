@@ -99,10 +99,19 @@ export function OverlayContent(props: {
   const { envelope, ctx, authority } = props;
   // A pushed drill-in panel covers the root view (docs/029 §4.5).
   if (envelope.panel) return <>{envelope.panel.render(ctx)}</>;
-  if (envelope.contentKind === "actions") {
+  // The *projected* actions bar (the selection bar): an `actions` root that names a command
+  // list. A render-bearing `actions` surface (the touch caret-paste, which carries its body as
+  // a payload and has no `projects`) is NOT this — it falls through to render its own body,
+  // exactly like a form/card/menu does. Without this `projects` guard such a surface would hit
+  // ActionsBar and resolve an empty command list (an empty box).
+  if (
+    envelope.contentKind === "actions" &&
+    envelope.slots.some((slot) => slot.contributor.projects)
+  ) {
     return <ActionsBar authority={authority} ctx={ctx} envelope={envelope} />;
   }
-  // form / card / menu root contributors render their own body.
+  // Every other root (form / card / menu, and a render-bearing actions surface) renders its
+  // contributor's own body.
   return (
     <>
       {envelope.slots.map((slot) => (

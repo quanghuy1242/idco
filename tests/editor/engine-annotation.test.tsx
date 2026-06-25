@@ -16,16 +16,21 @@ import {
   type EditorStore,
   type PanelHost,
 } from "../../packages/editor/src";
-import { registerBuiltInBlockTypes } from "../../packages/editor/src/view/spi";
+import {
+  buildCommandContext,
+  registerBuiltInBlockTypes,
+  type OverlaySurfaceContext,
+  type ToolbarCapabilities,
+} from "../../packages/editor/src/view/spi";
 import { registerBuiltInNodeViews } from "../../packages/editor/src/view/nodes";
 import { registerBuiltInMarks } from "../../packages/editor/src/view/render";
 import {
-  AnnotationPopover,
   caretCommentHit,
   CommentAffordance,
   GlossaryPane,
+  GlossaryReadCard,
+  probeAnnotationMark,
   registerBuiltInCommands,
-  useAnnotationInteraction,
 } from "../../packages/editor/src/view/chrome";
 import { createDocumentIndexStore } from "../../packages/editor/src/view/controllers/document-index-store";
 import { DocumentIndexProvider } from "../../packages/editor/src/view/document-index";
@@ -47,11 +52,29 @@ function fakePanelHost(): PanelHost & { readonly calls: string[] } {
   };
 }
 
-function glossaryStore(): EditorStore {
+const CAPS: ToolbarCapabilities = {
+  ai: false,
+  insertTable: true,
+  media: false,
+  review: false,
+};
+
+/** A store whose single block carries a glossary mark `gm1` referencing term `t1`. */
+function glossaryMarkStore(): { store: EditorStore; nodeId: string } {
   const allocator = createIdAllocator("idco_client_anno");
+  const content = allocator.createTextSlice("SPI here");
   const node = makeTextNode({
-    content: allocator.createTextSlice("SPI here"),
+    content,
     id: allocator.createNodeId(),
+    marks: [
+      {
+        attrs: { term: "t1" },
+        from: boundaryAtOffset(content, 0, "before"),
+        id: "gm1",
+        kind: "glossary",
+        to: boundaryAtOffset(content, 3, "after"),
+      },
+    ],
     type: "paragraph",
   });
   const store = createEditorStore({
@@ -69,67 +92,59 @@ function glossaryStore(): EditorStore {
     ],
     type: "set-collection",
   });
-  return store;
+  return { nodeId: node.id, store };
 }
 
-/** A harness that wires the hook to clickable mark elements + the popover. */
-function Harness(props: {
-  readonly store: EditorStore;
-  readonly panelHost: PanelHost;
-}) {
-  const interaction = useAnnotationInteraction();
-  return (
-    <div>
-      <span data-engine-mark="comment" data-engine-comment-thread="c1">
-        <abbr
-          data-engine-glossary-term="t1"
-          data-engine-mark="glossary"
-          data-testid="nested"
-          onClick={(event) => interaction.openAt(event.currentTarget)}
-        >
-          SPI
-        </abbr>
-      </span>
-      <AnnotationPopover
-        interaction={interaction}
-        panelHost={props.panelHost}
-        store={props.store}
-      />
-    </div>
-  );
+/** Build the surface context the `mark.glossary` card receives, anchored at `gm1`. */
+function cardContext(
+  store: EditorStore,
+  nodeId: string,
+  panelHost: PanelHost,
+  onDismiss: () => void,
+): OverlaySurfaceContext {
+  return {
+    ...buildCommandContext(store, CAPS, panelHost),
+    anchor: { kind: "mark", markId: "gm1", nodeId: nodeId as never },
+    dismiss: onDismiss,
+    focusEditor: () => {},
+    pop: () => {},
+    push: () => {},
+  };
 }
 
-describe("useAnnotationInteraction + AnnotationPopover (docs/027 §16 P6)", () => {
-  it("reads a glossary definition and routes to the Glossary pane with a focusId", () => {
+describe("probeAnnotationMark + GlossaryReadCard (docs/029 R1-G)", () => {
+  it("probes a clicked glossary mark into its { kind, markId, nodeId }", () => {
+    // The `<abbr>` carries the mark id + term and sits under a text-leaf, exactly as
+    // mark-render paints it; comments are not claimed here (caret affordance owns them).
+    const leaf = document.createElement("span");
+    leaf.setAttribute("data-engine-text-id", "n1");
+    const abbr = document.createElement("abbr");
+    abbr.setAttribute("data-engine-mark", "glossary");
+    abbr.setAttribute("data-engine-mark-id", "gm1");
+    abbr.setAttribute("data-engine-glossary-term", "t1");
+    leaf.appendChild(abbr);
+    expect(probeAnnotationMark(abbr)).toEqual({
+      kind: "glossary",
+      markId: "gm1",
+      nodeId: "n1",
+    });
+  });
+
+  it("returns null for a click off any glossary mark", () => {
+    const plain = document.createElement("button");
+    expect(probeAnnotationMark(plain)).toBeNull();
+  });
+
+  it("reads the definition off the anchored mark and routes to the Glossary pane", () => {
     const host = fakePanelHost();
-    const { getByTestId, getByText } = render(
-      <Harness panelHost={host} store={glossaryStore()} />,
-    );
-    // Clicking the nested abbr: glossary (innermost) wins over the enclosing comment.
-    fireEvent.click(getByTestId("nested"));
+    const { store, nodeId } = glossaryMarkStore();
+    const dismissed: string[] = [];
+    const ctx = cardContext(store, nodeId, host, () => dismissed.push("x"));
+    const { getByText } = render(<GlossaryReadCard ctx={ctx} />);
     expect(getByText("Service Provider Interface")).toBeTruthy();
     fireEvent.click(getByText("Open in Glossary"));
     expect(host.calls).toEqual(["open:glossary:t1"]);
-  });
-
-  it("opens nothing for a click off any annotation mark", () => {
-    const interactionResult = { value: true };
-    function Probe() {
-      const interaction = useAnnotationInteraction();
-      return (
-        <button
-          onClick={(event) => {
-            interactionResult.value = interaction.openAt(event.currentTarget);
-          }}
-          type="button"
-        >
-          plain
-        </button>
-      );
-    }
-    const { getByText } = render(<Probe />);
-    fireEvent.click(getByText("plain"));
-    expect(interactionResult.value).toBe(false);
+    expect(dismissed).toEqual(["x"]);
   });
 });
 
