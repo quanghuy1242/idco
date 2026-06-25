@@ -165,7 +165,13 @@ export function resolveAnchorRect(
     case "caret":
       return caretRect(store, doc);
     case "cell":
-      return blockRect(store, doc, anchor.cellId, opts);
+      // A cell action popover anchors to its trigger affordance — the hovered `…` button at the
+      // cell's top-right — not the cell's origin, so it drops from where the user pressed. The
+      // opener passes the button's live screen point as `at`; absent it, fall back to the cell's
+      // model rect (which, start-biased, would otherwise place the panel at the cell's far edge).
+      return anchor.at
+        ? { height: 0, left: anchor.at.x, top: anchor.at.y, width: 0 }
+        : blockRect(store, doc, anchor.cellId, opts);
     case "block":
       return blockRect(store, doc, anchor.blockId, opts);
     case "mark":

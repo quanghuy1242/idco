@@ -5,8 +5,8 @@
  * (1) renders an envelope through the transform-free portal layer, (2) autofocuses the form's
  * field (the focus policy that replaces `useAutoFocusWithin`), and (3) drives the focus-
  * reclaim seam (`store.isReclaimSuspended()` goes true while the form owns focus, false on
- * dismissal). This is Phase-1 infra exercised in isolation; the live editor still uses the
- * old coordinator (nothing user-visible changed).
+ * dismissal). This exercises the layer in isolation; the same layer drives the live editor
+ * since the Phase 2/3 migration (docs/029 §6.1).
  */
 import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

@@ -45,20 +45,7 @@ import {
 } from "../../../core/table/operations";
 import type { Command, CommandContext, CommandRenderContext } from "../../spi";
 import { getCellRange } from "./cell-range";
-
-// A compact fill palette that reads on light and dark surfaces; "none" clears (moved
-// here from `table-interactions` — the menu now lives in `contributeCommands`).
-const FILL_COLORS: readonly string[] = [
-  "#7f1d1d",
-  "#7c2d12",
-  "#713f12",
-  "#14532d",
-  "#0f766e",
-  "#1e3a8a",
-  "#4c1d95",
-  "#831843",
-  "#3f3f46",
-];
+import { CellFillPalette } from "./cell-fill-palette";
 
 const TABLE_LAYOUTS: readonly { value: string; label: string; icon: string }[] =
   [
@@ -99,35 +86,17 @@ function hasMergeRange(store: EditorStore): boolean {
 }
 
 function FillPaletteBody({ ctx }: { readonly ctx: CommandRenderContext }) {
-  const apply = (color: string | undefined) => {
-    setCellBackground(ctx.store, liveTargets(ctx.store), color);
-    ctx.close();
-  };
   return (
-    <div className="flex w-56 flex-col gap-2" data-engine-surface-child>
+    <div className="flex w-56 flex-col gap-2">
       <div className="px-1 text-xs font-medium text-base-content/60">
         Fill color
       </div>
-      <div className="flex flex-wrap gap-2 px-1">
-        {FILL_COLORS.map((color) => (
-          <button
-            aria-label={`Fill ${color}`}
-            className="size-6 rounded-full border border-base-300 transition hover:scale-110"
-            key={color}
-            onClick={() => apply(color)}
-            style={{ background: color }}
-            type="button"
-          />
-        ))}
-        <button
-          aria-label="Clear fill"
-          className="grid size-6 place-items-center rounded-full border border-base-300 text-base-content/60 transition hover:scale-110"
-          onClick={() => apply(undefined)}
-          type="button"
-        >
-          <NavIcon name="X" />
-        </button>
-      </div>
+      <CellFillPalette
+        onPick={(color) => {
+          setCellBackground(ctx.store, liveTargets(ctx.store), color);
+          ctx.close();
+        }}
+      />
     </div>
   );
 }
@@ -138,7 +107,7 @@ function VerticalAlignBody({ ctx }: { readonly ctx: CommandRenderContext }) {
     ctx.close();
   };
   return (
-    <div className="flex w-40 flex-col gap-1" data-engine-surface-child>
+    <div className="flex w-40 flex-col gap-1">
       <div className="px-1 text-xs font-medium text-base-content/60">
         Vertical align
       </div>
@@ -162,7 +131,7 @@ function TableLayoutBody({ ctx }: { readonly ctx: CommandRenderContext }) {
     ctx.close();
   };
   return (
-    <div className="flex w-44 flex-col gap-1" data-engine-surface-child>
+    <div className="flex w-44 flex-col gap-1">
       <div className="px-1 text-xs font-medium text-base-content/60">
         Table layout
       </div>

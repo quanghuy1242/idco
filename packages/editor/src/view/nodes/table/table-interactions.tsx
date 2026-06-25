@@ -38,6 +38,7 @@ import {
   type OverlaySurfaceContext,
 } from "../../spi";
 import { getCellRange, setCellRange } from "./cell-range";
+import { CellFillPalette } from "./cell-fill-palette";
 
 /** Register the table's overlay contributors (docs/029 R1-E): the cell `…` popover. */
 export function registerTableOverlays(): void {
@@ -66,19 +67,6 @@ type RangeState = {
 
 const CELL_SELECTOR = '[data-engine-structural="tablecell"]';
 const TABLE_SELECTOR = '[data-engine-structural="table"]';
-
-// A compact fill palette that reads on light and dark surfaces; "none" clears.
-const FILL_COLORS: readonly string[] = [
-  "#7f1d1d",
-  "#7c2d12",
-  "#713f12",
-  "#14532d",
-  "#0f766e",
-  "#1e3a8a",
-  "#4c1d95",
-  "#831843",
-  "#3f3f46",
-];
 
 /** Resolve a client point to the table cell under it, with its grid coordinates. */
 function cellHitAt(store: EditorStore, x: number, y: number): CellHit | null {
@@ -192,32 +180,12 @@ export function CellActionsPanel(props: {
       <div className="px-1 text-xs font-medium text-base-content/60">
         Fill color
       </div>
-      <div className="flex flex-wrap gap-2 px-1">
-        {FILL_COLORS.map((color) => (
-          <button
-            aria-label={`Fill ${color}`}
-            className="size-6 rounded-full border border-base-300 transition hover:scale-110"
-            key={color}
-            onClick={() => {
-              setCellBackground(store, targets(), color);
-              dismiss();
-            }}
-            style={{ background: color }}
-            type="button"
-          />
-        ))}
-        <button
-          aria-label="Clear fill"
-          className="grid size-6 place-items-center rounded-full border border-base-300 text-base-content/60 transition hover:scale-110"
-          onClick={() => {
-            setCellBackground(store, targets(), undefined);
-            dismiss();
-          }}
-          type="button"
-        >
-          <NavIcon name="X" />
-        </button>
-      </div>
+      <CellFillPalette
+        onPick={(color) => {
+          setCellBackground(store, targets(), color);
+          dismiss();
+        }}
+      />
       <div className="px-1 text-xs font-medium text-base-content/60">
         Vertical align
       </div>
@@ -249,6 +217,9 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
   const rangeRef = useRef<RangeState | null>(null);
   const dragRef = useRef<(CellHit & { moved: boolean }) | null>(null);
   const hoveredRef = useRef<CellHit | null>(null);
+  // The floating `…` button's own element, so the popover anchors to the button (its bottom-left)
+  // and drops from it, instead of the cell's origin (docs/029 R1-E; the cell anchor's `at`).
+  const cellButtonRef = useRef<HTMLDivElement | null>(null);
   rangeRef.current = range;
 
   // Mirror the drag range into the per-store channel so both the cell `…` panel and the
@@ -400,6 +371,7 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
             <div
               className="pointer-events-auto fixed z-40"
               data-engine-cell-toolbar=""
+              ref={cellButtonRef}
               style={{
                 left: Math.max(4, anchorRect.right - 34),
                 top: anchorRect.top + 6,
@@ -408,12 +380,19 @@ export function TableInteractions(props: { readonly store: EditorStore }) {
               <ChromeButton
                 icon="Ellipsis"
                 label="Cell actions"
-                onPress={() =>
+                onPress={() => {
+                  // Anchor the panel to the button's live rect so it drops from the button, not
+                  // the cell's far corner (the resolver's `at` override, docs/029 R1-E).
+                  const r = cellButtonRef.current?.getBoundingClientRect();
                   authorityRef?.current?.open(
-                    { cellId: anchorCell.cellId, kind: "cell" },
+                    {
+                      at: r ? { x: r.left, y: r.bottom } : undefined,
+                      cellId: anchorCell.cellId,
+                      kind: "cell",
+                    },
                     "cell.actions",
-                  )
-                }
+                  );
+                }}
               />
             </div>,
             document.body,

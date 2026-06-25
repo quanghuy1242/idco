@@ -52,7 +52,17 @@ export type AnchorTargetKind =
 export type AnchorRef =
   | { readonly kind: "selection" }
   | { readonly kind: "caret" }
-  | { readonly kind: "cell"; readonly cellId: NodeId }
+  | {
+      readonly kind: "cell";
+      readonly cellId: NodeId;
+      /**
+       * The trigger affordance's live screen point (the hovered `…` button's bottom-left), so
+       * the cell action popover drops from the button the user pressed rather than the cell's
+       * origin (docs/029 §7.4: the affordance, not the cell box, is the anchor). Absent for a
+       * programmatic open, where the resolver falls back to the cell's model rect.
+       */
+      readonly at?: { readonly x: number; readonly y: number };
+    }
   | { readonly kind: "block"; readonly blockId: NodeId }
   | { readonly kind: "mark"; readonly nodeId: NodeId; readonly markId: string }
   | { readonly kind: "point"; readonly x: number; readonly y: number };

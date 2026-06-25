@@ -14,9 +14,10 @@
  * positioning are deliberately *not* here — they live in `../overlays/overlay-anchor.ts` and
  * `overlay-positioning.ts`, consumed by the render layer (`overlay-layer.tsx`).
  *
- * In Phase 1 the authority is built and tested but not yet wired into the live editor (the
- * old coordinator still drives the live surfaces); mounting it is the Phase 2 selection-
- * surface migration (docs/029 §6.1). So nothing user-visible changes — the P1 gate.
+ * Live since the Phase 2/3 migration (docs/029 §6.1): the authority drives the selection bar,
+ * slash menu, mark popovers, object-config, find, and the table cell `…` through the
+ * `OverlayLayer` the editing view mounts. The legacy `use-command-surfaces.ts` coordinator now
+ * owns only the right-click context menu (a deliberate clean RA `MenuTrigger`, docs/029 R1-F).
  */
 import {
   createContext,

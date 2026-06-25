@@ -844,7 +844,7 @@ Tasks:
 - [x] Migrate forms/cards (link → `mark`/form, glossary read → `mark`/card, object-config → ambient `block`/form, find → `point`/sticky form); delete `useAutoFocusWithin`.
 - [x] Delete the ribbon `onMouseDownCapture` gate and the close-bounce RAF (ribbon `popover`/`dropdown` actions now open through `openForm`).
 - [x] Wire foreign-modal coordination via `ariaHideOutside` (the overlay layer dismisses all envelopes when its portal becomes `aria-hidden`, §7.6).
-- [x] Standardize editor on `AnchoredPopover` (the editor now uses no `PopoverTrigger`); trim editor narrative from `popover.tsx` (local). **Cross-repo `@idco/ui` release deferred by request** — the publish (version bump + tag + dev:unlink) is the one remaining gated step; the local trim is a doc-comment + an already-supported prop, so consumers are unaffected until the release.
+- [x] Standardize editor on `AnchoredPopover` — the editor now uses **no `PopoverTrigger`** (every trigger-coupled popover is gone). The `popover.tsx` editor-narrative trim was **intentionally NOT applied**: it is a doc-comment-only change to `@idco/ui`, and shipping it would force the full cross-repo release ritual (bump every package + tag + publish + dev:unlink) for a comment. Leaving `popover.tsx` untouched means **no `@idco/ui` change at all this phase, hence no release to run and nothing deferred** — the substantive §8.7 goal (no trigger-coupled popovers in the editor, no editor focus semantics relied on in `@idco/ui`) is met by the editor-side migration alone. The cosmetic narrative cleanup can ride any future `@idco/ui` release at zero marginal cost.
 
 New engine capabilities this phase added (not in the original §4 model, discovered during implementation):
 
@@ -869,7 +869,7 @@ Tests:
 
 ## 13. Definition Of Done
 
-- All sixteen floating surfaces in §3.1 (excluding the intentional non-goals) render through `useOverlayAuthority`; none passes `isNonModal`/`shouldCloseOnInteractOutside`/`pressInsideRef`/`onMouseDownCapture`/autofocus RAFs/`createPortal`-to-body/`closest("[data-engine-*]")` from a call site.
+- Every floating surface in §3.1 (excluding the intentional non-goals) renders through `useOverlayAuthority` **except the RA `Menu` surfaces** — the right-click context menu, the block-type chooser, and the overflow menu — which R1-F deliberately keeps as clean React Aria `MenuTrigger`s (a well-behaved RA menu carries none of the forbidden patterns; force-wrapping it in an envelope adds risk without behavioral gain). Those menus stay on the thin `use-command-surfaces.ts` state holder; everything else is authority-owned. No surface passes `isNonModal`/`shouldCloseOnInteractOutside`/`pressInsideRef`/`onMouseDownCapture`/autofocus RAFs/`createPortal`-to-body/`closest("[data-engine-*]")` from a call site. (The context menu retains a single `requestAnimationFrame(focusEditor)` to return focus to the editor after RA restores it to the menu trigger — intrinsic to RA `MenuTrigger`, not a 029 workaround.)
 - The focus-reclaim seam (§7.1) exists in core and is the only place editor refocus is gated; `shouldKeepFlyoutOpen`, `keepCellPopoverOpen`, `pressInsideRef`, `flyoutChildOpen`, `useAutoFocusWithin`, the ribbon capture-gate, and the close-bounce RAF are all deleted.
 - The mobile double-bar is gone: one device-adaptive `selection` surface, proven by a new e2e spec.
 - The slash menu's raw portal + bespoke keyboard handler and the context-menu reopen-standalone workaround are deleted, replaced by transparent keyboard routing and a drill-in.

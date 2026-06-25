@@ -13,11 +13,10 @@
  * (the contributor's `render` returns RA Menu / Dialog / Toolbar content); this layer owns
  * only position, stacking, ownership, and focus policy *around* it.
  *
- * Phase 1 builds and tests this layer in isolation; it is mounted into the live editor in
- * Phase 2 when the selection surface migrates (docs/029 §6.1), so nothing user-visible
- * changes yet. Projected slots (`contributor.projects`) render via the projection renderer
- * the Phase 2 surface migration supplies; until then a projected slot with no `render`
- * contributes no DOM, while `render`-bearing forms/cards/panels render fully.
+ * Live since the Phase 2/3 migration (docs/029 §6.1): the editing view mounts this layer
+ * (via `SelectionSurfaceHost`) and it renders every authority-owned surface. Projected slots
+ * (`contributor.projects`) render through `OverlayContent`'s projection renderer (the merged
+ * selection bar); `render`-bearing forms/cards/panels render their own body.
  */
 import {
   useEffect,
@@ -27,6 +26,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { POPOVER_SURFACE_CLASS } from "@quanghuy1242/idco-ui";
 import type { EditorStore } from "../../../core";
 import type { OffsetModel } from "../../../core/offset-model";
 import { resolveAnchorRect, type ScrollerGeometry } from "../../overlays";
@@ -100,6 +100,12 @@ function EnvelopeBox(props: {
 }): ReactNode {
   const { envelope, placement, authority, onMeasure } = props;
   const ref = useRef<HTMLDivElement | null>(null);
+  // Until the box has been measured once, the central solve only has a zero size, so the first
+  // frame would paint it at the anchor and the second (measured) frame would snap it to its real
+  // placement — a visible jump on every open (the symptom the selection-form open shows). Gate
+  // visibility on the first measure so the box appears once, already placed (docs/029 §7.4); the
+  // entrance animation then plays from the correct spot.
+  const [measured, setMeasured] = useState(false);
 
   // Containment by ownership (docs/029 §7.4): register this surface's element so a press can
   // be tested as "inside me or a descendant overlay" without a `closest("[data-engine-*]")`.
@@ -108,12 +114,15 @@ function EnvelopeBox(props: {
     return () => authority.ownership.unregister(envelope.id);
   }, [authority, envelope.id]);
 
-  // Measure for the central positioning solve (the layer re-solves with the real size).
+  // Measure for the central positioning solve (the layer re-solves with the real size), and flip
+  // `measured` so the placed box becomes visible. setState in a layout effect re-renders before
+  // paint, so the user never sees the pre-measure frame.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     onMeasure(envelope.id, { height: rect.height, width: rect.width });
+    setMeasured(true);
   }, [envelope, onMeasure]);
 
   // Focus policy (docs/029 §7.1, replaces useAutoFocusWithin): a focus-owning `form`
@@ -144,7 +153,13 @@ function EnvelopeBox(props: {
       : "p-3";
   return (
     <div
-      className={`rounded-box border border-base-300 bg-base-100 shadow-lg ${pad}`}
+      // The DaisyUI popover surface chrome is the one shared `@idco/ui` token
+      // (`POPOVER_SURFACE_CLASS`), so authority-owned overlays match every other popover's box
+      // and cannot drift from it. Padding varies by content-kind; the entrance plays once on
+      // first appear (gated by `measured`) — a controlled box cannot use RA's `data-[entering]`
+      // variant, so `animate-popover-in` is applied directly (exit animation needs presence
+      // management the controlled layer does not have yet).
+      className={`${POPOVER_SURFACE_CLASS} ${pad} ${measured ? "animate-popover-in" : ""}`}
       data-engine-overlay={envelope.target}
       ref={ref}
       style={{
@@ -152,6 +167,7 @@ function EnvelopeBox(props: {
         pointerEvents: "auto",
         position: "fixed",
         top: placement?.top ?? 0,
+        visibility: measured ? "visible" : "hidden",
         zIndex: envelope.z,
       }}
     >

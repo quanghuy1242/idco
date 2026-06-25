@@ -19,8 +19,18 @@ type Placement =
   | "bottom start"
   | "bottom end";
 
+/**
+ * The canonical DaisyUI popover-surface chrome (the box: radius, border, base-100 fill, and
+ * shadow) shared by every floating surface so they cannot drift. The padding, `z-index`, and
+ * entrance/exit animation are layered on by each consumer because they vary: a React Aria
+ * `Popover` toggles `animate-popover-in/out` through its `data-[entering]/[exiting]` states,
+ * while a controlled surface (the editor's overlay layer) applies the entrance class directly.
+ */
+export const POPOVER_SURFACE_CLASS =
+  "rounded-box border border-base-300 bg-base-100 shadow-lg";
+
 const panelClass =
-  "z-50 rounded-box border border-base-300 bg-base-100 p-3 shadow-lg " +
+  `z-50 ${POPOVER_SURFACE_CLASS} p-3 ` +
   "data-[entering]:animate-popover-in data-[exiting]:animate-popover-out";
 
 /**

@@ -190,6 +190,13 @@ export function useGapCursor(args: {
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const selection = store.selection;
       if (selection?.type !== "gap") return;
+      // Ignore keys bubbling from an overlay-authority surface portaled to <body>
+      // but rendered inside this React subtree (docs/029 §3.2): if a gap cursor is
+      // active and the user types in a drill-in form, the keystroke would otherwise
+      // materialize a paragraph here AND be `preventDefault`-eaten from the form
+      // input. Only keys whose DOM target is inside the editor drive the gap cursor.
+      const root = rootRef.current;
+      if (root && !root.contains(event.target as Node)) return;
       if (event.ctrlKey || event.metaKey) {
         const key = event.key.toLowerCase();
         if (key === "z") {
@@ -239,6 +246,7 @@ export function useGapCursor(args: {
       deleteAtGap,
       dismissGap,
       materializeGap,
+      rootRef,
       store,
       syncFocusToSelection,
     ],
@@ -256,6 +264,16 @@ export function useGapCursor(args: {
       const target = event.target as Element;
       const root = rootRef.current;
       if (!root) return;
+      // React synthetic events bubble through the React *component* tree, not the
+      // DOM tree (docs/029 §3.2). An overlay-authority surface (the selection-bar
+      // drill-in link/comment/glossary form, a read card) is rendered inside this
+      // view's React subtree but portaled to <body>, so a mousedown on its input
+      // re-enters this root handler with a target whose DOM lives outside the
+      // editor. Honoring it would run `resolveTextPointAt` at the form's screen
+      // coords and dispatch a collapsed caret — destroying the very selection the
+      // form is about to act on (the docs/029 issue #1 selection-loss). Only real
+      // clicks whose DOM target is inside the editor root place a caret.
+      if (!root.contains(target)) return;
       // Resolve which scope a click in empty space belongs to. A click that
       // missed every block resolves in the body. A click on a structural
       // container's own box — a table cell's padding, the inter-child gap inside
