@@ -22,6 +22,7 @@
     "architecture/editor-no-direct-update-listener": "error",
     "architecture/engine-core-no-framework": "error",
     "architecture/idco-package-boundary": "error",
+    "architecture/no-inline-record-guard": "error",
     "architecture/reader-l1-purity": "error",
     "architecture/ui-no-side-effect-css": "error",
     "architecture/ui-no-native-dialog": "error",

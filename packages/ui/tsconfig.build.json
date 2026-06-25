@@ -5,6 +5,9 @@
     "emitDeclarationOnly": true,
     "declaration": true,
     "declarationMap": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "paths": {
+      "@quanghuy1242/idco-lib": ["../lib/dist/index.d.ts"]
+    }
   }
 }

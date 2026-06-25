@@ -16,13 +16,14 @@
  * never throws. A wrong-but-safe metric only costs estimate accuracy, which
  * anchoring and re-measurement correct (docs/025 §5.4, §10).
  */
+import { isRecord } from "@quanghuy1242/idco-lib";
 import type { BlockMetrics } from "./block-estimator";
 import type { EditorNode, JsonValue } from "../model";
 
 function asRecord(value: JsonValue | undefined): {
   readonly [key: string]: JsonValue;
 } {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return isRecord(value)
     ? (value as { readonly [key: string]: JsonValue })
     : {};
 }

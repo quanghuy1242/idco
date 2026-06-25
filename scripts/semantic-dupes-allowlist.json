@@ -1,0 +1,53 @@
+{
+  "note": "Each entry names a semantic clone family that `pnpm check:dup:semantic` accepts. `reason` is required (an empty reason fails the gate). `fingerprint` is auto-managed; regenerate with `node scripts/check-semantic-dupes.mjs --update`. A new file-pair not listed here fails the gate — deduplicate it or add a justified entry.",
+  "entries": [
+    {
+      "files": [
+        "packages/editor-legacy/src/model/layout.ts",
+        "packages/editor/src/core/table/operations.ts"
+      ],
+      "reason": "Intentional reimplementation. The owned engine re-derives the legacy column-layout geometry (resizeColumnWidths/scaleColumnWidths) framework-free in core/table; editor-legacy is a frozen Lexical-bound reference package and engine core must not import it (architecture/engine-core-no-framework). The math is mirrored on purpose, not shared.",
+      "fingerprint": "f9efdcc312de0fad"
+    },
+    {
+      "files": [
+        "packages/editor-legacy/src/plugins/editor-performance.ts",
+        "packages/editor/src/core/scheduler.ts"
+      ],
+      "reason": "Intentional reimplementation. The engine scheduler reproduces the legacy perf-dashboard metrics-snapshot shape so both schedulers publish the same contract on the shared dashboard key; engine core stays framework-agnostic and cannot import the Lexical legacy plugin, so the snapshot aggregation is mirrored.",
+      "fingerprint": "ec8493fa990c6816"
+    },
+    {
+      "files": [
+        "packages/editor/src/core/model/marks.ts",
+        "packages/reader/src/reader/model.ts"
+      ],
+      "reason": "Documented mirror (reader-convergence, docs/028): mark resolution / segmentText is mirrored-and-parity-tested rather than relocated, to keep the server reader's render path free of editor-core compat. Equivalence is held by the resting-parity tests; this fingerprint guards against one copy drifting silently.",
+      "fingerprint": "672ed22e43a126ee"
+    },
+    {
+      "files": [
+        "packages/editor/src/index.ts",
+        "packages/ui/src/nav-icons.tsx"
+      ],
+      "reason": "Detector false positive. The editor barrel's long alphabetically-sorted re-export identifier list structurally resembles nav-icons' sorted lucide-react import/map list. They share no logic and there is nothing to deduplicate.",
+      "fingerprint": "68fa722e5514152c"
+    },
+    {
+      "files": [
+        "packages/reader/src/l1/table.tsx",
+        "packages/ui/src/rich-text-content.tsx"
+      ],
+      "reason": "Cluster B (note.md §3): the server reader's L1 table renderer and the client @idco/ui table renderer emit the same DOM from different node inputs across the RSC boundary — reader L1 may not import @idco/ui (architecture/reader-l1-purity), so the JSX cannot be shared today. Tracked by the retire-content-renderer backlog; collapses when the client renderer is retired in favor of the reader path. Pure helpers (verticalAlignClass/readableTextColor) were already lifted to @idco/lib.",
+      "fingerprint": "18a88a2a033f70c3"
+    },
+    {
+      "files": [
+        "packages/reader/src/l1/toc.tsx",
+        "packages/ui/src/rich-text-content.tsx"
+      ],
+      "reason": "Cluster B (note.md §3): same as the table renderer — the reader's L1 table-of-contents renderer mirrors the client @idco/ui TOC across the RSC boundary that forbids reader L1 from importing @idco/ui. Tracked by the retire-content-renderer backlog; collapses when the client renderer is retired in favor of the reader path.",
+      "fingerprint": "2615c681b85fde5e"
+    }
+  ]
+}

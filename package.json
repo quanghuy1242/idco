@@ -13,6 +13,8 @@
     "format": "oxfmt --write \"packages/**/*.ts\" \"packages/**/*.tsx\" \"tests/**/*.ts\" \"tests/**/*.tsx\" \"stories/**/*.ts\" \"stories/**/*.tsx\" \".ladle/**/*.ts\" \".ladle/**/*.tsx\"",
     "format:check": "oxfmt --check \"packages/**/*.ts\" \"packages/**/*.tsx\" \"tests/**/*.ts\" \"tests/**/*.tsx\" \"stories/**/*.ts\" \"stories/**/*.tsx\" \".ladle/**/*.ts\" \".ladle/**/*.tsx\"",
     "check:dup": "node scripts/check-duplication-threshold.mjs",
+    "check:dup:semantic": "node scripts/check-semantic-dupes.mjs",
+    "check:dup:semantic:update": "node scripts/check-semantic-dupes.mjs --update",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "test:e2e": "pnpm test:e2e:correctness && pnpm test:e2e:perf",
@@ -20,7 +22,7 @@
     "test:e2e:fast": "playwright test --project=chromium",
     "test:e2e:perf": "playwright test --project=chromium-perf --workers=1",
     "test:e2e:editor": "playwright test --project=chromium-perf --workers=1 tests/e2e/editor-backspace.perf.spec.ts tests/e2e/editor-decorator-virtualization.perf.spec.ts tests/e2e/editor-typing-latency.perf.spec.ts",
-    "check": "pnpm format:check && pnpm lint && pnpm check:dup && pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm format:check && pnpm lint && pnpm check:dup && pnpm check:dup:semantic && pnpm typecheck && pnpm test && pnpm build",
     "advise": "aislop scan --exclude node_modules,dist,coverage,.wrangler && fallow dupes --mode semantic --min-tokens 150 --min-lines 10 --skip-local --ignore-imports --format compact --quiet",
     "advise:aislop": "aislop scan --exclude node_modules,dist,coverage,.wrangler",
     "advise:dupes": "fallow dupes --mode semantic --min-tokens 150 --min-lines 10 --skip-local --ignore-imports --format compact --quiet"

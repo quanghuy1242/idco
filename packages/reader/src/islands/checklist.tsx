@@ -7,6 +7,7 @@
  * the static list is fully readable before that. State is reader-local: toggling a box is
  * a UI affordance for the reader, never a write back to the document.
  */
+import { isRecord } from "@quanghuy1242/idco-lib";
 import { useState, type ReactNode } from "react";
 import { registerReaderIsland } from "./registry";
 
@@ -20,11 +21,7 @@ export type ChecklistData = {
 };
 
 function isChecklistData(value: unknown): value is ChecklistData {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Array.isArray((value as { items?: unknown }).items)
-  );
+  return isRecord(value) && Array.isArray(value.items);
 }
 
 function ChecklistInteractive({

@@ -1,3 +1,4 @@
+import { isRecord } from "@quanghuy1242/idco-lib";
 import type { AlertTone, CodeEditorLanguage } from "@quanghuy1242/idco-ui";
 import type { HeadingTagType } from "@lexical/rich-text";
 
@@ -153,9 +154,9 @@ export function numberValue(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+// The canonical record guard lives in `@quanghuy1242/idco-lib`; re-exported here so the
+// existing `./schema` import sites (normalize.ts, isNode below) keep their import path.
+export { isRecord };
 
 export function isNode(value: unknown): value is RichTextEditorNode {
   return isRecord(value) && typeof value.type === "string";

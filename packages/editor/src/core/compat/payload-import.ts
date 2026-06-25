@@ -23,6 +23,7 @@
  *
  * It is framework-free core: it manipulates plain JSON only.
  */
+import { isRecord } from "@quanghuy1242/idco-lib";
 import type { DocumentSettings, RichTextCompatNode } from "../model";
 import type { RichTextCompatDocument } from "../model";
 import { globalNodeDefinitions } from "../registry";
@@ -69,9 +70,7 @@ function str(value: unknown): string {
 }
 
 function record(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return isRecord(value) ? value : {};
 }
 
 /**

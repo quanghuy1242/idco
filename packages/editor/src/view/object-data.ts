@@ -4,13 +4,12 @@
  * one-file-per-node split; lifting them here lets each `view/nodes/*` file and the
  * dispatcher read object data the same way without re-deriving it.
  */
+import { isRecord } from "@quanghuy1242/idco-lib";
 import { type EditorStore, type JsonValue, type NodeId } from "../core";
 
 /** Coerce an opaque object `data`/`payload` value to a plain string-keyed record. */
 export function asRecord(value: unknown): Record<string, JsonValue> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, JsonValue>)
-    : {};
+  return isRecord(value) ? (value as Record<string, JsonValue>) : {};
 }
 
 /** Read a string field from an object record, defaulting to "". */

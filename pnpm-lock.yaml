@@ -216,6 +216,9 @@ importers:
       '@internationalized/date':
         specifier: 3.12.2
         version: 3.12.2
+      '@quanghuy1242/idco-lib':
+        specifier: workspace:^
+        version: link:../lib
       lucide-react:
         specifier: 1.16.0
         version: 1.16.0(react@19.2.6)

@@ -9,6 +9,7 @@
  * knowledge into a list. Pure: it reads the object statuses the store already holds —
  * no new resolve, no host call.
  */
+import { isRecord } from "@quanghuy1242/idco-lib";
 import type { EditorStore, JsonObject, NodeId } from "../../../core";
 
 export type BrokenRef = {
@@ -24,9 +25,7 @@ export type BrokenRef = {
 
 function snapshotOf(data: JsonObject): JsonObject | undefined {
   const snapshot = data.snapshot;
-  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
-    ? (snapshot as JsonObject)
-    : undefined;
+  return isRecord(snapshot) ? (snapshot as JsonObject) : undefined;
 }
 
 /**

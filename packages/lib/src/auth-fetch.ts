@@ -1,4 +1,5 @@
 import { AuthApiError } from "./shared/errors";
+import { isRecord } from "./guards";
 export { AuthApiError } from "./shared/errors";
 
 /**
@@ -156,10 +157,6 @@ const PRIVATE_KEY_PATTERN =
 const STRUCTURED_ERROR_TEXT_PATTERN = /^(?:\{|\[)|<html|<!doctype/i;
 /** Maximum validation issue messages to display before summarising the rest. */
 const MAX_VALIDATION_ISSUES = 3;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function readString(
   record: Record<string, unknown>,

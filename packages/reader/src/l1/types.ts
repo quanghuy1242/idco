@@ -27,34 +27,9 @@ export const RT_ALIGN_CLASS: Record<RichTextAlign, string> = {
   right: "text-right",
 };
 
-/** Map a cell's `verticalAlign` attr to its Tailwind vertical-align class. */
-export function verticalAlignClass(verticalAlign?: string): string {
-  if (verticalAlign === "middle") return "align-middle";
-  if (verticalAlign === "bottom") return "align-bottom";
-  return "align-top";
-}
-
-/**
- * A readable text color (near-black or near-white) for a cell's explicit background,
- * by perceived luminance. A user-set cell fill is theme-independent, so the themed
- * `text-base-content` can collapse into it; picking the contrast color from the fill
- * keeps text legible regardless of theme. Returns `undefined` for an unset/unparseable
- * color, leaving the themed default. (Moved verbatim from `@idco/ui` `rich-text-content`.)
- */
-export function readableTextColor(background?: string): string | undefined {
-  if (!background) return undefined;
-  const hex = background.trim().replace(/^#/, "");
-  const full =
-    hex.length === 3
-      ? hex
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : hex;
-  if (!/^[0-9a-fA-F]{6}$/.test(full)) return undefined;
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.55 ? "#111827" : "#f9fafb";
-}
+// `verticalAlignClass` and `readableTextColor` are pure cell-styling helpers shared with
+// the client renderer (`@idco/ui` rich-text-content) and the editor's table view. They live
+// in `@quanghuy1242/idco-lib` (RSC-safe, the one package both the client and this server-safe
+// L1 layer may import) so the same logic is defined once, not mirrored per renderer. Re-exported
+// here to keep the L1 vocabulary surface — and the editor's `idco-reader` import path — intact.
+export { readableTextColor, verticalAlignClass } from "@quanghuy1242/idco-lib";

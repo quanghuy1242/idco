@@ -8,6 +8,7 @@
  * mismatch"). Hydrates on `idle`: the highlight is a nicety, not content, so it waits for
  * a free main thread. With no JS the TOC still links and navigates.
  */
+import { isRecord } from "@quanghuy1242/idco-lib";
 import { useEffect, useRef, type ReactNode } from "react";
 import { registerReaderIsland } from "./registry";
 
@@ -16,11 +17,7 @@ export type ScrollSpyData = {
 };
 
 function isScrollSpyData(value: unknown): value is ScrollSpyData {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Array.isArray((value as { anchorIds?: unknown }).anchorIds)
-  );
+  return isRecord(value) && Array.isArray(value.anchorIds);
 }
 
 const ACTIVE_CLASS = "menu-active";

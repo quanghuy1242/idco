@@ -76,6 +76,7 @@ import {
   importFlatBlock,
   type FlatBlockImportContext,
 } from "../registry/flat-blocks";
+import { isRecord } from "@quanghuy1242/idco-lib";
 import { createEditorStore, type EditorStore } from "../store";
 import { safeHref } from "../url-safety";
 
@@ -631,8 +632,8 @@ function inlineLinkHref(node: RichTextCompatNode): string {
   const href = (node as { href?: unknown }).href;
   if (typeof href === "string") return safeHref(href);
   const fields = (node as { fields?: unknown }).fields;
-  if (fields && typeof fields === "object") {
-    const url = (fields as { url?: unknown }).url;
+  if (isRecord(fields)) {
+    const url = fields.url;
     if (typeof url === "string") return safeHref(url);
   }
   return "";

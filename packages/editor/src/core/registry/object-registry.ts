@@ -23,6 +23,7 @@
  * `structural-registry.ts`. `compatObjectFromValue` is exported only so the
  * runtime registry's `toCompatObject` fallback can share the one default shape.
  */
+import { isRecord } from "@quanghuy1242/idco-lib";
 import type {
   BakedSnapshot,
   JsonValue,
@@ -589,9 +590,5 @@ function toJsonValue(value: unknown): JsonValue {
 function isJsonObject(
   value: JsonValue,
 ): value is { readonly [key: string]: JsonValue } {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return isRecord(value);
 }

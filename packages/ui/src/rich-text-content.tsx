@@ -4,6 +4,7 @@
 // DaisyUI 5: https://daisyui.com/components/menu/
 "use client";
 
+import { readableTextColor, verticalAlignClass } from "@quanghuy1242/idco-lib";
 import type { ReactNode } from "react";
 import { Link as AriaLink } from "react-aria-components";
 import { Alert, type AlertTone } from "./alert";
@@ -413,38 +414,11 @@ export function RichTextTableRow({ children }: RichTextChildrenProps) {
   return <tr>{children}</tr>;
 }
 
-/** Map a cell's `verticalAlign` attr to its Tailwind vertical-align class. */
-export function verticalAlignClass(verticalAlign?: string): string {
-  if (verticalAlign === "middle") return "align-middle";
-  if (verticalAlign === "bottom") return "align-bottom";
-  return "align-top";
-}
-
-/**
- * A readable text color (near-black or near-white) for a cell's explicit
- * background, by perceived luminance. A user-set cell fill is theme-independent,
- * so the cell's `text-base-content` (which follows the theme) can collapse into
- * the fill — a dark fill in a light theme, or vice versa. Picking the contrast
- * color from the fill keeps the text legible regardless of theme. Returns
- * `undefined` for an unset/unparseable color, leaving the themed default.
- */
-export function readableTextColor(background?: string): string | undefined {
-  if (!background) return undefined;
-  const hex = background.trim().replace(/^#/, "");
-  const full =
-    hex.length === 3
-      ? hex
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : hex;
-  if (!/^[0-9a-fA-F]{6}$/.test(full)) return undefined;
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.55 ? "#111827" : "#f9fafb";
-}
+// `verticalAlignClass` and `readableTextColor` are pure cell-styling helpers shared with the
+// server reader (`reader/l1`) and the editor's table view; the single definition lives in
+// `@quanghuy1242/idco-lib` (the product-neutral package both renderers may import). Re-exported
+// here so this module's public surface is unchanged for consumers importing them from `@idco/ui`.
+export { readableTextColor, verticalAlignClass };
 
 export function RichTextTableCell({
   header,

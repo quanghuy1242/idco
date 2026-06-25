@@ -337,12 +337,63 @@ var readerL1PurityRule = {
   },
 };
 
+// The one file allowed to spell out the record check — the canonical `isRecord` lives here
+// and every other call site must import it. Keyed by path suffix so it matches regardless of
+// the absolute prefix the linter reports.
+function isCanonicalRecordGuardSource(filename) {
+  filename = normalizeFilename(filename);
+  return filename.endsWith("/packages/lib/src/guards.ts");
+}
+
+function isTypeofObjectOperand(node) {
+  return (
+    node &&
+    node.type === "UnaryExpression" &&
+    node.operator === "typeof"
+  );
+}
+
+function isObjectLiteralOperand(node) {
+  return node && node.type === "Literal" && node.value === "object";
+}
+
+// Cluster C of note.md §3: `isRecord` was redefined three times and re-inlined as a bare
+// `typeof x === "object"` record guard in ~13 more files across editor/reader/lib. Each guard
+// is ~6 tokens — below any token-based duplicate detector's floor — so `check:dup` is
+// structurally blind to it. A lint rule is the only thing that catches this class: ban the
+// inline `typeof x === "object"` comparison in @idco package sources and point every call site
+// at the single shared `isRecord` from `@quanghuy1242/idco-lib`. The canonical definition file
+// is exempt; tests are out of scope (they are not @idco package source).
+var noInlineRecordGuardRule = {
+  meta: { type: "problem", docs: { description: "use the shared isRecord guard instead of an inline `typeof x === \"object\"` check" } },
+  create: function (context) {
+    var filename = context.filename || context.physicalFilename || "";
+    if (!isIdcoPackageSource(filename) || isCanonicalRecordGuardSource(filename)) return {};
+
+    return {
+      BinaryExpression: function (node) {
+        if (node.operator !== "===" && node.operator !== "==") return;
+        var matches =
+          (isTypeofObjectOperand(node.left) && isObjectLiteralOperand(node.right)) ||
+          (isTypeofObjectOperand(node.right) && isObjectLiteralOperand(node.left));
+        if (!matches) return;
+        context.report({
+          node: node,
+          message:
+            "Do not inline a record guard (`typeof x === \"object\"`); import { isRecord } from \"@quanghuy1242/idco-lib\" so the check lives in one place (note.md §3 Cluster C).",
+        });
+      },
+    };
+  },
+};
+
 var plugin = {
   meta: { name: "architecture" },
   rules: {
     "editor-no-direct-update-listener": editorNoDirectUpdateListenerRule,
     "engine-core-no-framework": engineCoreNoFrameworkRule,
     "idco-package-boundary": idcoPackageBoundaryRule,
+    "no-inline-record-guard": noInlineRecordGuardRule,
     "reader-l1-purity": readerL1PurityRule,
     "ui-no-side-effect-css": uiNoSideEffectCssRule,
     "ui-no-native-dialog": uiNoNativeDialogRule,

@@ -20,6 +20,7 @@
  */
 import { Fragment, type ReactNode } from "react";
 import {
+  isRecord,
   normalizeTocSettings,
   type RichTextTocSettingsInput,
 } from "@quanghuy1242/idco-lib";
@@ -71,9 +72,7 @@ import type {
 } from "./types";
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : {};
+  return isRecord(value) ? value : {};
 }
 
 function str(value: unknown): string {

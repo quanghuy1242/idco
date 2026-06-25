@@ -25,6 +25,7 @@ import {
 } from "../model";
 import { mapTextOffset } from "../model";
 import type { Step } from "../model";
+import { isRecord } from "@quanghuy1242/idco-lib";
 import type { EditorStore } from "./editor-store";
 
 export function remapMarksForReplace(
@@ -310,16 +311,10 @@ function selectionAtNodeEdge(
 }
 
 export function bakedSnapshot(value: JsonValue | undefined) {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    "kind" in value &&
-    typeof value.kind === "string"
-  ) {
+  if (isRecord(value) && typeof value.kind === "string") {
     return {
       kind: value.kind,
-      payload: "payload" in value ? value.payload : null,
+      payload: "payload" in value ? (value.payload as JsonValue) : null,
     };
   }
   return undefined;

@@ -8,6 +8,7 @@
  * then. This is the one island that imports `@idco/ui` — allowed because islands are
  * `"use client"` and live behind the `./islands` entry, never in the server graph.
  */
+import { isRecord } from "@quanghuy1242/idco-lib";
 import type { ReactNode } from "react";
 import { CodeEditor, type CodeEditorLanguage } from "@quanghuy1242/idco-ui";
 import { registerReaderIsland } from "./registry";
@@ -18,11 +19,7 @@ export type LiveCodeData = {
 };
 
 function isLiveCodeData(value: unknown): value is LiveCodeData {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { value?: unknown }).value === "string"
-  );
+  return isRecord(value) && typeof value.value === "string";
 }
 
 function codeEditorLanguage(value: unknown): CodeEditorLanguage {
