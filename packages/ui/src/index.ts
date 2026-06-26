@@ -11,6 +11,7 @@ export * from "./empty-state";
 export * from "./error-alert";
 export * from "./search-input";
 export * from "./filter-dropdown";
+export * from "./inline-text-filter";
 export * from "./mobile-filter-menu";
 export * from "./responsive-breadcrumb";
 export * from "./responsive-actions";
