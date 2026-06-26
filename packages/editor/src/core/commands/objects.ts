@@ -1,6 +1,8 @@
 /** Object/structural insert + mutation compilers (docs/020 §7.5). */
 import {
   makeObjectNode,
+  makeStructuralNode,
+  makeTextNode,
   pointAtOffset,
   type EditorNode,
   type EditorSelection,
@@ -111,6 +113,114 @@ export function compileInsertBlocks(
     tr.setSelection({ node: last.id, type: "node" });
   }
   return tr;
+}
+
+/**
+ * Insert a native snapshot fragment at the caret (docs/030 §7.1 / §7.2): the markdown-paste
+ * builder and the native-clipboard reader both produce `{ order, blocks }` where a structural
+ * top-level node references descendants by id. Unlike `compileInsertBlocks` (flat leaves
+ * only), this gathers each top-level node's descendant subtree from `blocks` so the whole
+ * container inserts as one atomic, invertible subtree (one undo). The caret lands at the end
+ * of the last top-level leaf, or node-selects the last block when it is an object/container —
+ * the same caret contract HTML paste already uses, so focus reclaim behaves identically.
+ */
+export function compileInsertFragment(
+  store: EditorStore,
+  fragment: {
+    readonly order: readonly NodeId[];
+    readonly blocks: Readonly<Record<NodeId, EditorNode>>;
+  },
+): TransactionBuilder | null {
+  // Remap every node id (and text-mark id) to a fresh store-unique id before inserting. A
+  // native-clipboard fragment carries the *original* ids of the copied nodes, so pasting it
+  // back into the same document would collide with the live nodes ("Node exists") — the
+  // headline lossless workflow. Remapping also lets the same fragment paste many times.
+  const remapped = remapFragment(store, fragment);
+  const tops = remapped.order
+    .map((id) => remapped.blocks[id])
+    .filter((node): node is EditorNode => Boolean(node));
+  if (tops.length === 0) return null;
+  const tr = store.transaction();
+  const point = insertionPointForInsert(tr, store);
+  placeNodes(tr, store, point, tops, (node) =>
+    gatherDescendants(remapped.blocks, node),
+  );
+  const last = tops[tops.length - 1]!;
+  if (last.kind === "text") {
+    const focus = pointAtOffset(
+      last.id,
+      last.content,
+      last.content.text.length,
+    );
+    tr.setSelection({ anchor: focus, focus, type: "text" });
+  } else {
+    tr.setSelection({ node: last.id, type: "node" });
+  }
+  return tr;
+}
+
+/**
+ * Rewrite a fragment so every node id (and text-mark id) is fresh and store-unique, keeping
+ * the graph internally consistent (structural `children` and `order` are remapped through the
+ * same old→new map). This is what makes a native copy/paste collision-free on the same
+ * document. A dangling child id (not in `blocks`) maps to itself and is dropped downstream.
+ */
+function remapFragment(
+  store: EditorStore,
+  fragment: {
+    readonly order: readonly NodeId[];
+    readonly blocks: Readonly<Record<NodeId, EditorNode>>;
+  },
+): {
+  readonly order: readonly NodeId[];
+  readonly blocks: Readonly<Record<NodeId, EditorNode>>;
+} {
+  const idMap = new Map<NodeId, NodeId>();
+  for (const oldId of Object.keys(fragment.blocks) as NodeId[]) {
+    idMap.set(oldId, store.allocator.createNodeId());
+  }
+  const mapId = (id: NodeId): NodeId => idMap.get(id) ?? id;
+  const blocks: Record<NodeId, EditorNode> = {};
+  for (const [oldId, node] of Object.entries(fragment.blocks) as [
+    NodeId,
+    EditorNode,
+  ][]) {
+    const id = mapId(oldId);
+    if (node.kind === "structural") {
+      blocks[id] = makeStructuralNode({
+        ...node,
+        children: node.children.map(mapId),
+        id,
+      });
+    } else if (node.kind === "text") {
+      blocks[id] = makeTextNode({
+        ...node,
+        id,
+        // Mark ids must also be store-unique (an undo/redo or a later edit keys off them).
+        marks: node.marks.map((mark) => ({ ...mark, id: store.nextMarkId() })),
+      });
+    } else {
+      blocks[id] = makeObjectNode({ ...node, id });
+    }
+  }
+  return { blocks, order: fragment.order.map(mapId) };
+}
+
+/** Depth-first descendant subtree of a structural node, resolved from a fragment's blocks. */
+function gatherDescendants(
+  blocks: Readonly<Record<NodeId, EditorNode>>,
+  node: EditorNode,
+): readonly EditorNode[] {
+  if (node.kind !== "structural") return [];
+  const out: EditorNode[] = [];
+  const visit = (id: NodeId): void => {
+    const child = blocks[id];
+    if (!child) return;
+    out.push(child);
+    if (child.kind === "structural") child.children.forEach(visit);
+  };
+  node.children.forEach(visit);
+  return out;
 }
 
 /**

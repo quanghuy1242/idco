@@ -291,6 +291,11 @@ export function runQuery(
 // §6.2) instead of going through the single-command `compileCommand` path.
 export { compileAddRefMark } from "./marks";
 
+// The fragment insert powers markdown paste and native-clipboard paste (docs/030 §7.1/§7.2):
+// it inserts a `{ order, blocks }` snapshot fragment descendant-aware, unlike the flat
+// `compileInsertBlocks`. Exported so the view's clipboard controller can build a transaction.
+export { compileInsertFragment } from "./objects";
+
 // Re-export the shared scope/insertion helpers and type so the public
 // `core/commands` surface is unchanged after the split (docs/020 §7.5).
 export {

@@ -180,6 +180,7 @@ export {
   childrenOf,
   compileAddRefMark,
   compileCommand,
+  compileInsertFragment,
   isDisposableEmpty,
   pendingFormatMarkSteps,
   placeNodes,

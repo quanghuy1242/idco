@@ -545,6 +545,7 @@ export type ReaderRenderUnit =
 
 export function groupListRuns(
   nodes: readonly ReaderBlockNode[],
+  snapshot?: ReaderSnapshot,
 ): readonly ReaderRenderUnit[] {
   const units: ReaderRenderUnit[] = [];
   let run: ReaderBlockNode[] = [];
@@ -556,6 +557,17 @@ export function groupListRuns(
     runFlavour = null;
   };
   for (const node of nodes) {
+    // A structural `listitem` at body order (SN-1 Option A) joins the surrounding run so a
+    // flat/structural *heterogeneous* run renders as one `<ul>`/`<ol>` with continuous
+    // numbering (the `<ol>` numbers its `<li>` children, flat and structural alike). When it
+    // opens a run it adopts its inner leaf's flavour (snapshot needed to read the inner leaf).
+    if (node.kind === "structural" && node.type === "listitem") {
+      if (run.length === 0) {
+        runFlavour = structuralListItemFlavour(node, snapshot) ?? "bullet";
+      }
+      run.push(node);
+      continue;
+    }
     const flavour = listFlavour(node);
     if (flavour) {
       if (run.length > 0 && flavour !== runFlavour) flush();
@@ -568,6 +580,21 @@ export function groupListRuns(
   }
   flush();
   return units;
+}
+
+/** The flavour of a structural list item, read from its inner `listitem` leaf (or bullet). */
+function structuralListItemFlavour(
+  node: ReaderStructuralNode,
+  snapshot: ReaderSnapshot | undefined,
+): "bullet" | "number" | "checklist" | null {
+  if (!snapshot) return null;
+  const inner = node.children
+    .map((id) => snapshot.body.blocks[id])
+    .find(
+      (child): child is ReaderTextNode =>
+        Boolean(child) && child!.kind === "text" && child!.type === "listitem",
+    );
+  return inner ? listFlavour(inner) : null;
 }
 
 /** Project the snapshot's headings into TOC entries for a settings payload (for `<Reader>`). */
@@ -589,11 +616,20 @@ export function renderUnit(
   key: string,
 ): ReactNode {
   if (unit.kind === "list") {
-    const items = unit.items.map((item) => (
-      <Fragment key={item.id}>
-        {renderTextLeaf(item as ReaderTextNode, snapshot)}
-      </Fragment>
-    ));
+    const items = unit.items.map((item) =>
+      // A structural `listitem` (SN-1) renders via `renderListItem` (its inner leaf + nested
+      // block children); a flat leaf renders its own `<li>` via `renderTextLeaf`. Both are
+      // direct `<li>` children of the one list, so ordered numbering stays continuous.
+      item.kind === "structural" && item.type === "listitem" ? (
+        <Fragment key={item.id}>
+          {renderListItem(item, snapshot, options, item.id)}
+        </Fragment>
+      ) : (
+        <Fragment key={item.id}>
+          {renderTextLeaf(item as ReaderTextNode, snapshot)}
+        </Fragment>
+      ),
+    );
     // A checklist run wraps in `<ul data-rt-checklist>` (the checklist island
     // hydrates over it); bullet/number runs in a real `<ul>`/`<ol>`. The items
     // themselves render as the matching `<li>` in `renderTextLeaf` (docs/030 §4.3c).
@@ -616,7 +652,7 @@ function renderSequence(
   snapshot: ReaderSnapshot,
   options: ReaderOptions,
 ): ReactNode {
-  return groupListRuns(children).map((unit, index) =>
+  return groupListRuns(children, snapshot).map((unit, index) =>
     renderUnit(unit, snapshot, options, `seq.${index}`),
   );
 }
@@ -647,19 +683,29 @@ function renderListItem(
   }
   if (node.kind === "structural" && node.type === "listitem") {
     const kids = childrenOf(node, snapshot);
-    return (
-      <RichTextListItem key={key}>
-        {kids.map((child) =>
-          child.kind === "text" && child.type === "listitem" ? (
-            <Fragment key={child.id}>
-              {renderLeafMarks(child, snapshot)}
-            </Fragment>
-          ) : (
-            renderBlock(child, snapshot, options)
-          ),
-        )}
-      </RichTextListItem>
+    const inner = kids.find(
+      (child): child is ReaderTextNode =>
+        child.kind === "text" && child.type === "listitem",
     );
+    const body = kids.map((child) =>
+      child === inner ? (
+        <Fragment key={child.id}>{renderLeafMarks(child, snapshot)}</Fragment>
+      ) : (
+        <Fragment key={child.id}>
+          {renderBlock(child, snapshot, options)}
+        </Fragment>
+      ),
+    );
+    // A structural item whose inner leaf is a checklist item keeps its checkbox affordance
+    // (docs/030 §4.3c) rather than degrading to a plain `<li>` (the A1 a11y edge).
+    if (inner && typeof inner.attrs?.checked === "boolean") {
+      return (
+        <RichTextCheckListItem checked={inner.attrs.checked} key={key}>
+          {body}
+        </RichTextCheckListItem>
+      );
+    }
+    return <RichTextListItem key={key}>{body}</RichTextListItem>;
   }
   return renderBlock(node, snapshot, options);
 }

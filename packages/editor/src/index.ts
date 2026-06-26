@@ -205,6 +205,22 @@ export {
   wordRangeAt,
 } from "./view";
 export { sanitizeHtmlToCompat } from "./view";
+// Markdown I/O (docs/030 MIO): lossy one-way `snapshotToMarkdown` export, the native
+// snapshot-fragment clipboard for lossless in-app copy/paste, and the lossy-set contract.
+// `markdownToNodes` (the markdown-it paste parser) is intentionally NOT here — it is
+// lazy-loaded by the clipboard on first paste to stay out of the initial bundle.
+export {
+  IDCO_SNAPSHOT_MIME,
+  collectSelectionFragment,
+  parseFragment,
+  serializeFragment,
+  snapshotToMarkdown,
+  CALLOUT_TONES,
+  MARKDOWN_LOSSY_MARK_KINDS,
+  normalizeCalloutTone,
+  type CalloutTone,
+  type SnapshotFragment,
+} from "./view";
 
 // ============================================================================
 // Engine core — the model, store, commands, compat boundary, and the helpers a

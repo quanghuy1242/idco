@@ -20,6 +20,8 @@
     "@quanghuy1242/idco-lib": "workspace:^",
     "@quanghuy1242/idco-reader": "workspace:^",
     "@quanghuy1242/idco-ui": "workspace:^",
+    "markdown-it": "^14.2.0",
+    "markdown-it-mark": "^4.0.0",
     "react-aria-components": "1.17.0"
   },
   "peerDependencies": {

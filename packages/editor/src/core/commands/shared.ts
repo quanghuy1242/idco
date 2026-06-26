@@ -137,7 +137,20 @@ export function placeNodes(
   store: EditorStore,
   point: InsertionPoint,
   nodes: readonly EditorNode[],
+  // Optional descendant resolver (docs/030 §7.1 fragment paste / native clipboard). When a
+  // top-level node is a structural container, its descendant subtree must ride the one
+  // `insert-node` step as `descendants` (the engine ingests root + descendants atomically).
+  // Flat callers omit it and insert leaf/object nodes with no children, exactly as before.
+  descendantsOf?: (node: EditorNode) => readonly EditorNode[],
 ): void {
+  const insert = (parent: NodeId, index: number, node: EditorNode): void => {
+    const descendants = descendantsOf?.(node);
+    if (descendants && descendants.length > 0) {
+      tr.push({ descendants, index, node, parent, type: "insert-node" });
+    } else {
+      tr.insertNode(parent, index, node);
+    }
+  };
   if (point.kind === "replace") {
     const entry = store.parentEntry(point.node);
     const removed = store.getNode(point.node);
@@ -145,14 +158,12 @@ export function placeNodes(
       // Remove the placeholder, then insert at its vacated index. One
       // TransactionBuilder = one invertible transaction (undo restores it).
       tr.removeNode(entry.parent, entry.index, removed);
-      nodes.forEach((node, i) =>
-        tr.insertNode(entry.parent, entry.index + i, node),
-      );
+      nodes.forEach((node, i) => insert(entry.parent, entry.index + i, node));
       return;
     }
     // Defensive: the target vanished mid-race; append at the body end.
     nodes.forEach((node, i) =>
-      tr.insertNode(store.bodyId, store.order.length + i, node),
+      insert(store.bodyId, store.order.length + i, node),
     );
     return;
   }
@@ -163,16 +174,14 @@ export function placeNodes(
     const seam = splitLeafAt(tr, store, point);
     if (!seam) {
       nodes.forEach((node, i) =>
-        tr.insertNode(store.bodyId, store.order.length + i, node),
+        insert(store.bodyId, store.order.length + i, node),
       );
       return;
     }
-    nodes.forEach((node, i) =>
-      tr.insertNode(seam.parent, seam.index + 1 + i, node),
-    );
+    nodes.forEach((node, i) => insert(seam.parent, seam.index + 1 + i, node));
     return;
   }
-  nodes.forEach((node, i) => tr.insertNode(point.scope, point.index + i, node));
+  nodes.forEach((node, i) => insert(point.scope, point.index + i, node));
 }
 
 /**

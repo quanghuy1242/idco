@@ -165,6 +165,21 @@ export {
   type Thread,
 } from "./spi";
 export { sanitizeHtmlToCompat } from "./paste-html";
+// Markdown I/O (docs/030 MIO). `snapshotToMarkdown` (lossy export) and the native fragment
+// clipboard are parser-free and on the public surface; `markdownToNodes` (the markdown-it
+// import path) stays lazy-only — import it from `view/markdown/from-markdown` directly.
+export {
+  IDCO_SNAPSHOT_MIME,
+  collectSelectionFragment,
+  parseFragment,
+  serializeFragment,
+  snapshotToMarkdown,
+  CALLOUT_TONES,
+  MARKDOWN_LOSSY_MARK_KINDS,
+  normalizeCalloutTone,
+  type CalloutTone,
+  type SnapshotFragment,
+} from "./markdown";
 export { UploadProvider, useUpload, type UploadImage } from "./upload-context";
 export {
   useAutosave,

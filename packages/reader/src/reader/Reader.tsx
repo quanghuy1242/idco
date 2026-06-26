@@ -100,7 +100,7 @@ export function Reader({
 }: ReaderOptions & { readonly value: ReaderSnapshot }): ReactNode {
   const snapshot = value;
   if (!snapshot?.body?.order) return null;
-  const units = groupListRuns(bodyNodes(snapshot));
+  const units = groupListRuns(bodyNodes(snapshot), snapshot);
 
   const content = (
     <>

@@ -20,6 +20,7 @@ import {
   registerCommand,
   registerCommentSource,
   registerDataSource,
+  snapshotToMarkdown,
   unregisterCommand,
   unregisterCommentSource,
   unregisterDataSource,
@@ -718,6 +719,12 @@ export const FullEditor: Story = () => {
   const [previewDoc, setPreviewDoc] = useState<EditorDocumentSnapshot | null>(
     null,
   );
+  // Export (docs/030 §7.2): the lossy one-way markdown projection of the live document, shown
+  // read-only. `snapshotToMarkdown` reads each object's baked fields, so it is the same open
+  // format an "export to markdown" menu would write. Captured at click time from the NATIVE
+  // snapshot — no compat anywhere.
+  const [exportOpen, setExportOpen] = useState(false);
+  const [markdown, setMarkdown] = useState("");
   // Add a "Save" button next to undo/redo through the command SPI (docs/023/024):
   // a `button` command in the persistent `global.history` slot. The `useState`
   // initializer registers it during this story's first render — before the child
@@ -751,6 +758,26 @@ export const FullEditor: Story = () => {
       run: (ctx) => {
         setPreviewDoc(bakeSnapshotForReader(ctx.store.toSnapshot()));
         setPreviewOpen(true);
+      },
+      slot: "global.history",
+      surfaces: { ribbon: "primary" },
+    });
+    // Export, registered right after Preview so it sits next to it in the same slot
+    // (docs/030 §7.2). It renders the lossy markdown projection of the live document into a
+    // read-only dialog — the open-format counterpart to Preview's reader render.
+    registerCommand({
+      group: "history",
+      icon: "Download",
+      id: "story.export",
+      kind: "button",
+      label: "Export",
+      run: (ctx) => {
+        setMarkdown(
+          snapshotToMarkdown(ctx.store.toSnapshot(), {
+            registry: ctx.store.registry,
+          }),
+        );
+        setExportOpen(true);
       },
       slot: "global.history",
       surfaces: { ribbon: "primary" },
@@ -806,6 +833,7 @@ export const FullEditor: Story = () => {
     () => () => {
       unregisterCommand("story.save");
       unregisterCommand("story.preview");
+      unregisterCommand("story.export");
       unregisterDataSource("media");
       unregisterDataSource("posts");
       unregisterCommentSource("comments");
@@ -863,6 +891,27 @@ export const FullEditor: Story = () => {
         <div className="max-h-[70vh] overflow-auto p-1">
           {previewDoc ? <Reader value={previewDoc} /> : null}
         </div>
+      </ConfirmDialog>
+      {/* Export: the lossy one-way markdown projection (docs/030 §7.2), read-only. The
+          counterpart to Preview — same captured native snapshot, open format instead of the
+          reader render. */}
+      <ConfirmDialog
+        confirmLabel="Close"
+        hideCancel
+        onConfirm={() => {}}
+        onOpenChange={setExportOpen}
+        open={exportOpen}
+        size="xl"
+        title="Export — markdown (lossy, one-way)"
+      >
+        <CodeEditor
+          label="snapshotToMarkdown()"
+          language="text"
+          maxHeight="lg"
+          onChange={() => {}}
+          readOnly
+          value={markdown}
+        />
       </ConfirmDialog>
       <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
         Try the table: hover it, then use the chrome's cell button (paint

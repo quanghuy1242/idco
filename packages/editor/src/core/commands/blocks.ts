@@ -545,12 +545,108 @@ export function compileIndent(
       ? compileIndentItem(store, item)
       : compileOutdentItem(store, item);
   }
-  // No nested-list context (a flat body-level `listitem` or an ordinary
+  // Structural nesting from a flat body-level list (docs/030 §7.3 D3 Option A): indenting a
+  // flat `listitem` at body order under a preceding list item promotes *only the predecessor*
+  // to a structural `listitem` holding [prevLeaf, sublist[item]] — in place at body order —
+  // so the flat siblings stay windowed leaves and only the nested subtree mounts as a unit.
+  // Once nested, the item's parent is a structural `list`, so a further indent flows through
+  // the existing `compileIndentItem` algebra and outdent through `compileOutdentItem`.
+  if (direction === "indent") {
+    const nested = compileIndentBodyItem(store);
+    if (nested) return nested;
+  }
+  // No list-nesting context (a flat list with no predecessor, or an ordinary
   // paragraph/heading — the shape the Payload import produces, docs/010 §14):
   // indent/outdent adjust a visual `indent` level on the block(s), the way the
   // legacy Lexical editor indents any element. Outdenting a list item already at
   // zero indent drops it back to a paragraph.
   return compileIndentAttr(store, direction);
+}
+
+/**
+ * The Option A body-root indent (docs/030 §7.3): promote a flat `listitem` leaf at body order
+ * under its preceding list item. Mirrors the `else`-branch of `compileIndentItem` with the
+ * body as the list parent — the only new producer of the first structural list from flat
+ * leaves. Returns null when the focus is not a flat body-level list item with a preceding
+ * list item (so `compileIndent` falls back to visual indent).
+ */
+function compileIndentBodyItem(store: EditorStore): TransactionBuilder | null {
+  const sel = store.selection;
+  if (sel?.type !== "text") return null;
+  const id = sel.focus.node;
+  const node = store.getNode(id);
+  if (!node || node.kind !== "text" || node.type !== "listitem") return null;
+  const entry = store.parentEntry(id);
+  if (!entry || entry.parent !== store.bodyId || entry.index === 0) return null;
+  const prevId = store.order[entry.index - 1]!;
+  const prev = store.getNode(prevId);
+  if (!prev) return null;
+  const prevIsItem =
+    (prev.kind === "text" && prev.type === "listitem") ||
+    (prev.kind === "structural" && prev.type === "listitem");
+  if (!prevIsItem) return null;
+  const tr = store.transaction();
+  if (prev.kind === "structural" && prev.type === "listitem") {
+    // Predecessor is already a structural item: reuse its trailing sublist, or add one, and
+    // move the flat item into it (the same reuse path as `compileIndentItem`).
+    const last = prev.children.at(-1);
+    const lastNode = last ? store.requireNode(last) : undefined;
+    if (
+      lastNode &&
+      lastNode.kind === "structural" &&
+      lastNode.type === "list"
+    ) {
+      tr.push({
+        from: { index: entry.index, parent: store.bodyId },
+        node: id,
+        to: { index: lastNode.children.length, parent: lastNode.id },
+        type: "move-node",
+      });
+    } else {
+      const sublistId = tr.allocator.createNodeId();
+      tr.insertNode(
+        prev.id,
+        prev.children.length,
+        makeStructuralNode({ id: sublistId, type: "list" }),
+      );
+      tr.push({
+        from: { index: entry.index, parent: store.bodyId },
+        node: id,
+        to: { index: 0, parent: sublistId },
+        type: "move-node",
+      });
+    }
+  } else {
+    // Predecessor is a flat leaf: wrap it into a structural item holding [prevLeaf,
+    // sublist[item]], inserted in place at body order. The index arithmetic mirrors
+    // `compileIndentItem`'s else-branch (container at `index`, then prev and item move in,
+    // each `from` index live-valid after the prior step).
+    const containerId = tr.allocator.createNodeId();
+    const sublistId = tr.allocator.createNodeId();
+    tr.insertNode(
+      store.bodyId,
+      entry.index,
+      makeStructuralNode({ id: containerId, type: "listitem" }),
+    );
+    tr.insertNode(
+      containerId,
+      0,
+      makeStructuralNode({ id: sublistId, type: "list" }),
+    );
+    tr.push({
+      from: { index: entry.index - 1, parent: store.bodyId },
+      node: prevId,
+      to: { index: 0, parent: containerId },
+      type: "move-node",
+    });
+    tr.push({
+      from: { index: entry.index, parent: store.bodyId },
+      node: id,
+      to: { index: 0, parent: sublistId },
+      type: "move-node",
+    });
+  }
+  return tr.setSelection(store.selection as EditorSelection);
 }
 
 export function compileIndentAttr(
