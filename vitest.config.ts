@@ -13,6 +13,14 @@ export default defineConfig({
         ),
       },
       {
+        // The `@idco/ui` subpath the live-code island imports (Prism-only `CodeEditor`,
+        // never the react-aria barrel). More specific, so it precedes the barrel alias below.
+        find: "@quanghuy1242/idco-ui/code-editor",
+        replacement: fileURLToPath(
+          new URL("./packages/ui/src/code-editor.tsx", import.meta.url),
+        ),
+      },
+      {
         find: "@quanghuy1242/idco-ui",
         replacement: fileURLToPath(
           new URL("./packages/ui/src/index.ts", import.meta.url),
@@ -28,6 +36,17 @@ export default defineConfig({
         find: "@quanghuy1242/idco-lib",
         replacement: fileURLToPath(
           new URL("./packages/lib/src/index.ts", import.meta.url),
+        ),
+      },
+      {
+        // More specific than the `/islands` barrel below, so it must come first — vite
+        // matches string aliases by prefix and would otherwise rewrite this to the barrel.
+        find: "@quanghuy1242/idco-reader/islands/live-code",
+        replacement: fileURLToPath(
+          new URL(
+            "./packages/reader/src/islands/live-code.tsx",
+            import.meta.url,
+          ),
         ),
       },
       {

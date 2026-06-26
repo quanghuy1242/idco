@@ -20,6 +20,10 @@ import {
   createIslandRenderer,
   listReaderIslands,
 } from "@quanghuy1242/idco-reader/islands";
+// The live-code island lives behind its own entry (it pulls Prism / `@idco/ui`), so the core
+// `./islands` barrel never drags it into a public reader's graph. Importing it here registers
+// the `code-block` island, the way a host that wants live code highlighting opts in.
+import { liveCodeIsland } from "@quanghuy1242/idco-reader/islands/live-code";
 
 // --- native snapshot builders (no compat anywhere) ---------------------------
 
@@ -365,11 +369,15 @@ describe("Reader — islands are opt-in", () => {
     expect(codeIsland).toBeDefined();
   });
 
-  it("registers the three built-in islands", () => {
+  it("registers the built-in islands (checklist + TOC from the barrel, code-block from its own entry)", () => {
     const kinds = listReaderIslands().map((island) => island.kind);
-    expect(kinds).toContain("code-block");
+    // checklist + table-of-contents come from the `./islands` barrel; code-block is only
+    // present because this file also imports `./islands/live-code` (see the top of the file).
     expect(kinds).toContain("checklist");
     expect(kinds).toContain("table-of-contents");
+    expect(kinds).toContain("code-block");
+    // The opt-in entry is what carries the code-block island.
+    expect(liveCodeIsland.kind).toBe("code-block");
   });
 });
 

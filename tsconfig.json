@@ -13,12 +13,22 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
+      "@idco/ui/code-editor": ["./packages/ui/src/code-editor.tsx"],
+      "@quanghuy1242/idco-ui/code-editor": [
+        "./packages/ui/src/code-editor.tsx"
+      ],
       "@idco/ui": ["./packages/ui/src/index.ts"],
       "@quanghuy1242/idco-ui": ["./packages/ui/src/index.ts"],
       "@idco/lib": ["./packages/lib/src/index.ts"],
       "@quanghuy1242/idco-lib": ["./packages/lib/src/index.ts"],
       "@idco/reader": ["./packages/reader/src/index.ts"],
       "@quanghuy1242/idco-reader": ["./packages/reader/src/index.ts"],
+      "@idco/reader/islands/live-code": [
+        "./packages/reader/src/islands/live-code.tsx"
+      ],
+      "@quanghuy1242/idco-reader/islands/live-code": [
+        "./packages/reader/src/islands/live-code.tsx"
+      ],
       "@idco/reader/islands": ["./packages/reader/src/islands/index.ts"],
       "@quanghuy1242/idco-reader/islands": [
         "./packages/reader/src/islands/index.ts"
