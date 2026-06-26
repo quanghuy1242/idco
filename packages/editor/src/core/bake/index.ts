@@ -11,3 +11,4 @@
  */
 export * from "./bake";
 export * from "./bake-service";
+export * from "./bake-cache";

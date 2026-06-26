@@ -270,6 +270,29 @@ export {
   type ResolvedMark,
   type TextSegment,
 } from "./core";
+// ============================================================================
+// Snapshot lifecycle & performance (docs/030 §7.4–§7.6, SLP). Incremental save is
+// internal to the store; these are the host-configurable knobs and the building
+// blocks for the deferred body-paging follow-on: the memory arbiter and its pool
+// contract, the bake LRU, the cold-store SPI, and the undo-budget config. The
+// dev-invariant gate lets a host opt a production build in/out of the load tripwires.
+// ============================================================================
+export {
+  MemoryArbiter,
+  createBakeCache,
+  createInMemoryBodyStore,
+  isDevInvariantsEnabled,
+  resetDevInvariants,
+  setDevInvariants,
+  type BakeCache,
+  type BakeCacheOptions,
+  type BodyStore,
+  type HistoryConfig,
+  type HistoryOverflow,
+  type MemoryArbiterOptions,
+  type MemoryPool,
+  type NodeBody,
+} from "./core";
 export {
   childrenOf,
   scopePath,

@@ -87,13 +87,11 @@ import {
   type StoreDirty,
   type TransactionDraft,
 } from "../model";
-import {
-  TYPING_COALESCE_MS,
-  canCoalesceTyping,
-  marksCoveringCaret,
-  mergeTypingEntries,
-  nowMs,
-} from "./history";
+import { marksCoveringCaret } from "./history";
+import { HistoryPool, type HistoryConfig } from "./history-pool";
+import { createInMemoryBodyStore, type BodyStore } from "./body-store";
+import { MemoryArbiter, type MemoryArbiterOptions } from "../memory/pool";
+import { isDevInvariantsEnabled } from "../dev-flags";
 import {
   bakedSnapshot,
   canSkipActiveTextNotify,
@@ -138,6 +136,26 @@ export type EditorStoreOptions = {
   readonly registry?: BlockRegistry;
   /** Per-deployment schema profile (note.md item 6); permits everything when omitted. */
   readonly schemaProfile?: SchemaProfile;
+  /**
+   * Overall soft memory budget (docs/030 §7.6 D6, SLP-4). Omitted/`Infinity` keeps
+   * today's unbounded behavior — the arbiter is inert until a host sets a finite budget
+   * calibrated to measured RSS. `highWater`/`lowWater` tune the eviction hysteresis.
+   */
+  readonly memoryBudget?: MemoryArbiterOptions;
+  /**
+   * Undo budget (docs/030 §7.6 Stage three): cap the inverse-step stacks by depth and/or
+   * bytes, evicting the oldest. `overflow: "drop"` (default) forgets deep undo past the
+   * cap; `"cold-store"` pages it out and faults it back. Omitted = unbounded undo.
+   */
+  readonly history?: HistoryConfig;
+  /**
+   * Injected cold store for purged node bodies (docs/030 §7.6 D6 Stage two, SLP-4). The
+   * in-memory default serves tests and today's behavior; the view layer supplies an
+   * IndexedDB implementation for durable, larger-than-heap paging. Held for the
+   * skeleton/body pager (the "larger, later" follow-on); the seam is defined now so the
+   * first cut does not paint it into a corner.
+   */
+  readonly bodyStore?: BodyStore;
 };
 
 /**
@@ -170,11 +188,6 @@ export type PendingFormat = {
 export type EditorSubscriber = (dirty: StoreDirty) => void;
 
 export type EditorCommitSubscriber = (committed: CommittedTransaction) => void;
-
-type HistoryState = {
-  readonly done: CommittedTransaction[];
-  readonly undone: CommittedTransaction[];
-};
 
 type MutableDispatchState = {
   readonly touched: Set<NodeId>;
@@ -331,7 +344,17 @@ export class TransactionBuilder {
 export class EditorStore {
   readonly #allocator: IdAllocator;
   readonly #registry: BlockRegistry;
-  readonly #history: HistoryState = { done: [], undone: [] };
+  // Undo/redo history as a budgeted pool (docs/030 §7.6 Stage three): owns the done/undone
+  // stacks, the typing-coalesce bookkeeping, and the depth/byte cap. Registered with the
+  // memory arbiter below.
+  readonly #history: HistoryPool;
+  // The memory budget arbiter (docs/030 §7.6 D6, SLP-4): caps the summed bytes of its
+  // registered pools (history here; the view registers the bake cache; the body pool lands
+  // with paging) and rebalances under pressure. Inert until a finite `memoryBudget` is set.
+  readonly #arbiter: MemoryArbiter;
+  // The injected cold store for purged bodies (docs/030 §7.6 Stage two). Held for the
+  // skeleton/body pager follow-on; the in-memory default keeps `core/**` framework-free.
+  readonly #bodyStore: BodyStore;
   readonly #nodeSubscribers = new Map<NodeId, Set<EditorSubscriber>>();
   readonly #orderSubscribers = new Set<EditorSubscriber>();
   readonly #settingsSubscribers = new Set<EditorSubscriber>();
@@ -375,13 +398,13 @@ export class EditorStore {
   #collections: Record<string, readonly CollectionItem[]> = {};
   #pendingFormat: PendingFormat | null = null;
   #markCounter = 0;
-  // Undo-coalescing bookkeeping (docs/011 §7.5, docs/018 §2.2). A typing run
-  // folds consecutive same-direction text edits on one leaf into a single history
-  // entry; `#coalesceBroken` starts true so the first edit opens its own group,
-  // and a hard boundary (undo/redo, paste, object activation, a caret move) sets
-  // it again so the next edit starts fresh.
-  #coalesceBroken = true;
-  #lastEditAt = 0;
+  // The incrementally-maintained persisted block map (docs/030 §7.4 D4, SLP-1). Kept in
+  // lockstep with `#nodes` (minus ROOT) so `toSnapshot()` is O(changed) instead of
+  // rebuilding the whole map each save. `#snapshotBlocksPublished` drives copy-on-write:
+  // once `toSnapshot()` has returned this object, the next mutation clones it so a snapshot
+  // a caller is still holding is never mutated underneath it.
+  #snapshotBlocks: Record<NodeId, EditorNode> = {};
+  #snapshotBlocksPublished = false;
 
   constructor(options: EditorStoreOptions) {
     /*
@@ -393,6 +416,12 @@ export class EditorStore {
     this.#registry = options.registry ?? createDefaultBlockRegistry();
     this.#selection = options.selection ?? null;
     this.#schemaProfile = options.schemaProfile;
+    this.#history = new HistoryPool(options.history);
+    this.#bodyStore = options.bodyStore ?? createInMemoryBodyStore();
+    this.#arbiter = new MemoryArbiter(options.memoryBudget);
+    // History is the one always-present elastic pool the core owns; the view registers the
+    // bake cache (and, later, the resident-body pool) via `memoryArbiter`.
+    this.#arbiter.register(this.#history);
     const root = makeStructuralNode({
       children: options.snapshot?.body.order ?? [],
       id: ROOT_NODE_ID,
@@ -401,18 +430,42 @@ export class EditorStore {
     this.#nodes.set(ROOT_NODE_ID, root);
     if (options.snapshot) {
       this.#settings = options.snapshot.settings;
+      // Single-pass ingest (docs/030 §7.5 D5, SLP-2). Two costs the old load paid before
+      // first paint are dev-only tripwires gated off in production: `freezeNode`
+      // self-gates (model.ts), and `assertParentInvariant` is skipped below. The third
+      // pass — the separate `#rebuildParentIndex` tree walk — is *folded into this ingest*:
+      // every child's parent entry is exactly its parent's `children` index, and this loop
+      // already visits every structural parent, so we set parent entries here instead of
+      // re-walking the tree. ROOT's children (the body order) are indexed just after.
+      // Difference from the old root-down `#rebuildParentIndex`: that walked only nodes
+      // reachable from ROOT, so a malformed snapshot with an orphan structural subtree got
+      // no entries for it; this loop indexes every structural node's children regardless of
+      // reachability. `assertParentInvariant` (dev) still catches the orphan; in production a
+      // snapshot's structural validity is a host invariant, and an unreachable node never
+      // enters `#order`-driven traversal, so the extra entries are inert.
       for (const node of Object.values(options.snapshot.body.blocks)) {
-        this.#nodes.set(node.id, freezeNode(node));
+        const frozen = freezeNode(node);
+        this.#nodes.set(node.id, frozen);
+        this.#snapshotBlocks[node.id] = frozen;
+        if (node.kind === "structural") {
+          node.children.forEach((childId, index) =>
+            this.#parentOf.set(childId, { index, parent: node.id }),
+          );
+        }
       }
       this.#order = [...options.snapshot.body.order];
+      this.#order.forEach((childId, index) =>
+        this.#parentOf.set(childId, { index, parent: ROOT_NODE_ID }),
+      );
       // Ingest document-owned collections (docs/027 §5.4); plain JSON, so it rides
       // the existing snapshot transport with no special handling.
       if (options.snapshot.collections) {
         this.#collections = { ...options.snapshot.collections };
       }
     }
-    this.#rebuildParentIndex();
-    this.assertParentInvariant();
+    // Validate the folded parent index only in dev/test; in production the build above is
+    // authoritative and the walk is pure overhead (docs/030 §7.5).
+    if (isDevInvariantsEnabled()) this.assertParentInvariant();
   }
 
   get allocator(): IdAllocator {
@@ -422,6 +475,22 @@ export class EditorStore {
   /** Object-block registry; the bake source for object edits. */
   get registry(): BlockRegistry {
     return this.#registry;
+  }
+
+  /**
+   * The memory budget arbiter (docs/030 §7.6 D6, SLP-4). The view registers its bake cache
+   * (and, later, the resident-body pool) here so they share one soft ceiling with history.
+   */
+  get memoryArbiter(): MemoryArbiter {
+    return this.#arbiter;
+  }
+
+  /**
+   * The injected cold store for purged bodies (docs/030 §7.6 Stage two). Exposed for the
+   * skeleton/body pager follow-on; unused by the resident-everything path today.
+   */
+  get bodyStore(): BodyStore {
+    return this.#bodyStore;
   }
 
   get selection(): EditorSelection | null {
@@ -824,7 +893,7 @@ export class EditorStore {
    * activation, so a typing run never coalesces across those.
    */
   breakUndoCoalescing(): void {
-    this.#coalesceBroken = true;
+    this.#history.breakCoalescing();
   }
 
   #isCollapsedTextCaret(): boolean {
@@ -888,7 +957,7 @@ export class EditorStore {
     // exactly like a caret move.
     const recordHistory = options?.recordHistory ?? draft.steps.length > 0;
     const committed = this.#commit(draft, { recordHistory });
-    if (recordHistory) this.#history.undone.length = 0;
+    if (recordHistory) this.#history.clearRedo();
     return committed;
   }
 
@@ -928,21 +997,22 @@ export class EditorStore {
 
   /** Whether there is an applied transaction to undo (toolbar enablement). */
   get canUndo(): boolean {
-    return this.#history.done.length > 0;
+    return this.#history.canUndo;
   }
 
   /** Whether there is an undone transaction to redo (toolbar enablement). */
   get canRedo(): boolean {
-    return this.#history.undone.length > 0;
+    return this.#history.canRedo;
   }
 
   /** Apply the latest inverse transaction and restore its stored selection. */
   undo(): CommittedTransaction | null {
-    const entry = this.#history.done.pop();
+    // takeUndo pops the done stack (faulting one cold-stored entry back first under
+    // `overflow: "cold-store"`) and re-breaks coalescing; it returns null when nothing is
+    // reachable — undo stops cleanly at the cap under `overflow: "drop"` (docs/030 §7.6).
+    const entry = this.#history.takeUndo();
     if (!entry) return null;
-    // Undo/redo end any open typing run and drop a pending format, so the next
-    // edit starts a fresh history group (docs/011 §7.5).
-    this.#coalesceBroken = true;
+    // Undo/redo drop a pending format so the next edit starts a fresh group (docs/011 §7.5).
     this.#pendingFormat = null;
     const committed = this.#commit(
       {
@@ -952,15 +1022,14 @@ export class EditorStore {
       },
       { recordHistory: false },
     );
-    this.#history.undone.push(entry);
+    this.#history.pushUndone(entry);
     return committed;
   }
 
   /** Re-apply the latest undone transaction and restore its selection. */
   redo(): CommittedTransaction | null {
-    const entry = this.#history.undone.pop();
+    const entry = this.#history.takeRedo();
     if (!entry) return null;
-    this.#coalesceBroken = true;
     this.#pendingFormat = null;
     const committed = this.#commit(
       {
@@ -970,7 +1039,7 @@ export class EditorStore {
       },
       { recordHistory: false },
     );
-    this.#history.done.push(entry);
+    this.#history.pushDone(entry);
     return committed;
   }
 
@@ -1016,9 +1085,19 @@ export class EditorStore {
   }
 
   toSnapshot(): EditorDocumentSnapshot {
-    const blocks = Object.fromEntries(
-      [...this.#nodes.entries()].filter(([id]) => id !== ROOT_NODE_ID),
-    ) as Record<NodeId, EditorNode>;
+    // Incremental save (docs/030 §7.4 D4, SLP-1): `#snapshotBlocks` is maintained in
+    // lockstep with `#nodes` on every commit (`#reconcileSnapshotBlocks`), so this no
+    // longer rebuilds the whole block map (the old `Object.fromEntries` was O(all nodes)
+    // on every 1 s autosave). Mark it published: the next mutation copies-on-write before
+    // touching it, so the object returned here is never mutated underneath a caller that is
+    // still holding it (e.g. a parity assertion that captured a "before" snapshot).
+    this.#snapshotBlocksPublished = true;
+    // In dev/test, verify the maintained map against a full rebuild and fall back to the
+    // rebuild on any divergence (a surfaced dev-only error, never a corrupt save — docs/030
+    // §9). Gated out of production, where the maintained map is authoritative.
+    const blocks = isDevInvariantsEnabled()
+      ? this.#parityCheckedSnapshotBlocks()
+      : this.#snapshotBlocks;
     // Include `collections` only when something is stored, so a document with no
     // collections serializes byte-identically to before this slot existed (docs/027
     // §5.4) — existing snapshots and equality assertions stay unchanged.
@@ -1035,6 +1114,99 @@ export class EditorStore {
       settings: this.#settings,
       version: 1,
     };
+  }
+
+  /** The full O(n) block rebuild — the pre-incremental form, kept as the parity oracle. */
+  #fullSnapshotBlocks(): Record<NodeId, EditorNode> {
+    return Object.fromEntries(
+      [...this.#nodes.entries()].filter(([id]) => id !== ROOT_NODE_ID),
+    ) as Record<NodeId, EditorNode>;
+  }
+
+  /**
+   * Return the maintained block map, but in dev/test compare it to a full rebuild first; on
+   * any divergence surface a dev-only error and fall back to the rebuild so a touched-set
+   * bug can never produce a corrupt save (docs/030 §7.4 / §9). The fallback also repairs the
+   * maintained map so the next save is consistent again.
+   */
+  #parityCheckedSnapshotBlocks(): Record<NodeId, EditorNode> {
+    const full = this.#fullSnapshotBlocks();
+    if (!this.#snapshotBlocksMatches(full)) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "EditorStore: incremental snapshot diverged from full rebuild; falling back",
+      );
+      this.#snapshotBlocks = full;
+      this.#snapshotBlocksPublished = true;
+    }
+    return this.#snapshotBlocks;
+  }
+
+  /** Whether the maintained map has exactly the same keys mapped to the same node objects. */
+  #snapshotBlocksMatches(full: Record<NodeId, EditorNode>): boolean {
+    const fullKeys = Object.keys(full);
+    const ownKeys = Object.keys(this.#snapshotBlocks);
+    if (fullKeys.length !== ownKeys.length) return false;
+    for (const key of fullKeys) {
+      // Identity, not deep-equality: every commit replaces a changed node with a new frozen
+      // object, so the maintained map must hold the *same reference* `#nodes` holds.
+      if (this.#snapshotBlocks[key as NodeId] !== full[key as NodeId]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Assert the maintained `#snapshotBlocks` is byte-for-byte the full rebuild (docs/030
+   * §7.4 parity AC). A diagnostics/test entry point, mirroring `assertParentInvariant`:
+   * throws on any divergence so a touched-set bug fails loudly under test.
+   */
+  assertIncrementalSnapshotParity(): void {
+    if (!this.#snapshotBlocksMatches(this.#fullSnapshotBlocks())) {
+      throw new Error("Incremental snapshot diverged from full rebuild");
+    }
+  }
+
+  /**
+   * Reconcile the maintained block map after a commit (docs/030 §7.4, SLP-1). The complete
+   * set of changed keys is the `touched` set *plus* the descendants of every insert/remove
+   * step: `touched` records the top node and its parent for a structural step but not the
+   * subtree, so a subtree insert/remove would otherwise miss its descendants. `removedByStep`
+   * already carries each removed subtree in full; insert descendants ride the step. For each
+   * changed key, mirror `#nodes` — set when present, delete when gone. Copy-on-write once if
+   * the map was already published, so a returned snapshot is never mutated in place.
+   */
+  #reconcileSnapshotBlocks(
+    committed: CommittedTransaction,
+    steps: readonly Step[],
+    removedByStep: ReadonlyMap<Step, ReadonlySet<NodeId>>,
+  ): void {
+    const changed = new Set<NodeId>(committed.touched);
+    for (const step of steps) {
+      if (step.type === "insert-node") {
+        for (const descendant of step.descendants ?? []) {
+          changed.add(descendant.id);
+        }
+      }
+    }
+    for (const ids of removedByStep.values()) {
+      for (const id of ids) changed.add(id);
+    }
+    changed.delete(ROOT_NODE_ID);
+    if (changed.size === 0) return;
+    if (this.#snapshotBlocksPublished) {
+      // The previous map was handed to a caller; clone before mutating so that snapshot
+      // stays frozen-in-time. This O(n) copy happens at most once per save cycle (on the
+      // first edit after a `toSnapshot()`); individual node objects are shared by reference.
+      this.#snapshotBlocks = { ...this.#snapshotBlocks };
+      this.#snapshotBlocksPublished = false;
+    }
+    for (const id of changed) {
+      const node = this.#nodes.get(id);
+      if (node) this.#snapshotBlocks[id] = node;
+      else delete this.#snapshotBlocks[id];
+    }
   }
 
   parentEntry(id: NodeId): ParentEntry | undefined {
@@ -1147,7 +1319,11 @@ export class EditorStore {
       structureChanged: state.structureChanged,
       touched: new Set(state.touched),
     };
-    if (options.recordHistory) this.#recordHistory(committed);
+    if (options.recordHistory) this.#history.record(committed);
+    // Keep the persisted block map in lockstep with `#nodes` (docs/030 §7.4, SLP-1). Runs
+    // for every commit — including a `recordHistory:false` resolve/SWR data change — so the
+    // snapshot reflects genuine data changes while leaving untouched keys alone.
+    this.#reconcileSnapshotBlocks(committed, draft.steps, state.removedByStep);
     this.#reconcilePendingFormat(draft.steps.length > 0, selectionChanged);
     const dirtyNodes = new Set(committed.touched);
     // Skipping the active leaf's re-render is only safe when its DOM was already
@@ -1184,40 +1360,19 @@ export class EditorStore {
     // it after a pure text edit would walk the whole document for nothing, which
     // 010 §10.1 AC9 / 011 §10.4 forbid on the keystroke hot path. Guard the O(N)
     // check so it runs only when a structural mutation could have broken it.
-    if (committed.structureChanged) this.assertParentInvariant();
+    if (committed.structureChanged && isDevInvariantsEnabled()) {
+      this.assertParentInvariant();
+    }
     // A commit-level notification carries the whole transaction, so the public
     // handle (docs/011 §12.2) can fire change/dirty/selection events for every
     // edit, including typing the view dispatches directly.
     this.#commitSubscribers.forEach((subscriber) => subscriber(committed));
+    // Rebalance the memory budget after the edit settled (docs/030 §7.6, SLP-4). A no-op
+    // unless a finite `memoryBudget` is set; under one, a long edit session grows history
+    // and the arbiter sheds the deepest undo (or whichever pool is heaviest) back to the
+    // low-water mark.
+    this.#arbiter.rebalance();
     return committed;
-  }
-
-  /**
-   * Record a committed transaction in history, coalescing a typing run into the
-   * previous entry instead of pushing a new one (docs/011 §7.5, docs/018 §2.2).
-   * The merge keeps the run's original `selectionBefore` and the latest
-   * `selectionAfter`, so a single undo reverts the whole run and lands the caret
-   * where it started. A hard boundary (`#coalesceBroken`), a stale gap, a
-   * direction change, or any non-text step opens a fresh entry.
-   */
-  #recordHistory(committed: CommittedTransaction): void {
-    const now = nowMs();
-    const previous = this.#history.done.at(-1);
-    if (
-      !this.#coalesceBroken &&
-      previous &&
-      now - this.#lastEditAt <= TYPING_COALESCE_MS &&
-      canCoalesceTyping(previous, committed)
-    ) {
-      this.#history.done[this.#history.done.length - 1] = mergeTypingEntries(
-        previous,
-        committed,
-      );
-    } else {
-      this.#history.done.push(committed);
-    }
-    this.#coalesceBroken = false;
-    this.#lastEditAt = now;
   }
 
   /**

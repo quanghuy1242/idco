@@ -20,3 +20,13 @@ export {
   type EditorCommitSubscriber,
 } from "./editor-store";
 export { collectSelectionText, orderedTextLeaves } from "./selection";
+export {
+  HistoryPool,
+  type HistoryConfig,
+  type HistoryOverflow,
+} from "./history-pool";
+export {
+  createInMemoryBodyStore,
+  type BodyStore,
+  type NodeBody,
+} from "./body-store";

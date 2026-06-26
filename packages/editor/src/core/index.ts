@@ -99,6 +99,17 @@ export {
   headingAnchor,
   runBakeWorkerJob,
 } from "./bake";
+export { createBakeCache, type BakeCache, type BakeCacheOptions } from "./bake";
+export {
+  MemoryArbiter,
+  type MemoryArbiterOptions,
+  type MemoryPool,
+} from "./memory/pool";
+export {
+  isDevInvariantsEnabled,
+  resetDevInvariants,
+  setDevInvariants,
+} from "./dev-flags";
 export {
   registerIdentityMark,
   isIdentityMark,
@@ -198,11 +209,17 @@ export {
   ROOT_NODE_ID,
   TransactionBuilder,
   createEditorStore,
+  createInMemoryBodyStore,
+  HistoryPool,
+  type BodyStore,
   type CompositionRange,
   type EditorCommitSubscriber,
   type EditorStore,
   type EditorStoreOptions,
   type EditorSubscriber,
+  type HistoryConfig,
+  type HistoryOverflow,
+  type NodeBody,
   type PendingFormat,
   type SchemaProfile,
 } from "./store";

@@ -24,6 +24,8 @@
  * what lets a mark or selection survive insertion before it without being
  * re-derived from formatting output.
  */
+import { isDevInvariantsEnabled } from "../dev-flags";
+
 export type JsonPrimitive = string | number | boolean | null;
 
 export type JsonValue =
@@ -544,7 +546,15 @@ export function freezeNode<T extends EditorNode>(node: T): T {
    * Store mutation happens by replacing node objects in a mutable Map. Freezing
    * makes accidental mutation of a retained node fail loudly and keeps object
    * identity meaningful for per-node subscribers.
+   *
+   * The freeze is a *dev-only immutability tripwire* (docs/030 §7.5 D5, SLP-2): it
+   * is an O(n) deep walk over attrs/runs/marks/baked paid on every node
+   * construction *and* across the whole document on load. Identity (a fresh object
+   * per change) — not frozenness — is what per-node subscribers rely on, so in
+   * production the freeze buys nothing and only stalls open. Gate it off there so
+   * the load and edit hot paths skip the walk entirely; dev/test keep it firing.
    */
+  if (!isDevInvariantsEnabled()) return node;
   if (node.attrs) Object.freeze(node.attrs);
   if (node.kind === "structural") Object.freeze(node.children);
   if (node.kind === "text") {
