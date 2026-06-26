@@ -14,6 +14,10 @@
     "./islands": {
       "types": "./dist/islands/index.d.ts",
       "default": "./dist/islands/index.js"
+    },
+    "./islands/live-code": {
+      "types": "./dist/islands/live-code.d.ts",
+      "default": "./dist/islands/live-code.js"
     }
   },
   "scripts": {
