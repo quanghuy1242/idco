@@ -406,7 +406,15 @@ Rollback: each phase is independently revertible because each attaches to the sn
 
 ## 10. Implementation Backlog
 
-### R1-A. Markdown Paste
+The backlog is organized by theme, not by release order. Sequencing and the first-release cut are defined in §1 and §6; each item carries its own priority note. Three themes: Markdown I/O, Structural Nesting, and Snapshot Lifecycle & Performance.
+
+### Markdown I/O
+
+Import and export are one theme — both sides of the D2 type↔syntax correspondence (one spec, round-trip-tested for the representable set), with the native clipboard riding export. Markdown stays out of `core/**`.
+
+#### MIO-1. Markdown Paste (Import)
+
+Priority: first-cut (§6 Phase 1).
 
 Scope:
 
@@ -430,48 +438,9 @@ Tests:
 
 - `tests/editor/engine-markdown-paste.test.ts`
 
-### R1-B. Structural List Nesting
+#### MIO-2. Markdown Export + Native Clipboard
 
-Scope:
-
-- `packages/editor/src/core/commands/blocks.ts`
-- `packages/editor/src/core/registry/flat-blocks.ts`
-- `packages/reader/src/reader/render.tsx`
-
-Tasks:
-
-- [ ] Option A indent: generalize the `compileIndentItem` `else`-branch to `body.order` (promote the predecessor to a structural `listitem` in place; flat siblings stay leaves); confirm the model union allows a structural `listitem` at body order (else Option B fallback + documented cliff).
-- [ ] Promote-on-block-child trigger producing the `importListItemChildren` shape.
-- [ ] Reader: merge heterogeneous flat/structural runs into one list with continuous numbering + structural-item block children; keep checklist routing.
-
-Acceptance criteria:
-
-- Indent promotes one item to a structural `listitem` at body order while flat siblings stay windowed; a code block can live inside a list item; outdent demotes, cleans up, and re-merges; the reader renders a heterogeneous run as one correctly-numbered list.
-
-Tests:
-
-- `tests/editor/engine-list-nesting.test.ts`, `tests/reader.test.tsx`
-
-### R1-C. Incremental Save
-
-Scope:
-
-- `packages/editor/src/core/store/editor-store.ts`
-
-Tasks:
-
-- [ ] Maintain `body.blocks` from `state.touched`; `toSnapshot()` returns the maintained object.
-- [ ] Parity assertion vs full rebuild; undo/redo update the map from inverse touched.
-
-Acceptance criteria:
-
-- `toSnapshot()` is O(changed) and deep-equals the full rebuild across arbitrary edit/undo/redo sequences.
-
-Tests:
-
-- `tests/editor/engine-incremental-save.test.ts`
-
-### R2-A. Markdown Export + Native Clipboard
+Priority: later (§6 Phase 4).
 
 Scope:
 
@@ -493,25 +462,62 @@ Tests:
 
 - `tests/editor/engine-markdown-export.test.ts`
 
-### R2-B. Bake LRU (Memory Stage One)
+### Structural Nesting
+
+A document-model capability — distinct from markdown I/O and from the lifecycle/perf work: a list item becomes a scope that can hold block children.
+
+#### SN-1. Structural List Nesting
+
+Priority: first-cut (§6 Phase 2).
 
 Scope:
 
-- `packages/editor/src/core/bake/*`
+- `packages/editor/src/core/commands/blocks.ts`
+- `packages/editor/src/core/registry/flat-blocks.ts`
+- `packages/reader/src/reader/render.tsx`
 
 Tasks:
 
-- [ ] Size-bounded LRU on baked snapshots; evict offscreen; re-bake on demand.
+- [ ] Option A indent: generalize the `compileIndentItem` `else`-branch to `body.order` (promote the predecessor to a structural `listitem` in place; flat siblings stay leaves); confirm the model union allows a structural `listitem` at body order (else Option B fallback + documented cliff).
+- [ ] Promote-on-block-child trigger producing the `importListItemChildren` shape.
+- [ ] Reader: merge heterogeneous flat/structural runs into one list with continuous numbering + structural-item block children; keep checklist routing.
 
 Acceptance criteria:
 
-- Bake-cache memory stays within budget while scrolling; evicted bakes regenerate identically.
+- Indent promotes one item to a structural `listitem` at body order while flat siblings stay windowed; a code block can live inside a list item; outdent demotes, cleans up, and re-merges; the reader renders a heterogeneous run as one correctly-numbered list.
 
 Tests:
 
-- `tests/editor/engine-bake-lru.test.ts`
+- `tests/editor/engine-list-nesting.test.ts`, `tests/reader.test.tsx`
 
-### R2-C. Load In-Place Optimization (Step Zero)
+### Snapshot Lifecycle & Performance
+
+Save/load/memory internals (the §4 "bound the snapshot lifecycle" family). Membership is thematic; priority varies per item and is noted on each.
+
+#### SLP-1. Incremental Save
+
+Priority: first-cut (§6 Phase 3), though an internals/perf item — the full-rebuild `toSnapshot()` is O(n) on every 1s autosave, so it stalls recurringly on a large doc and the fix is cheap and self-contained behind the existing `onSave` contract.
+
+Scope:
+
+- `packages/editor/src/core/store/editor-store.ts`
+
+Tasks:
+
+- [ ] Maintain `body.blocks` from `state.touched`; `toSnapshot()` returns the maintained object.
+- [ ] Parity assertion vs full rebuild; undo/redo update the map from inverse touched.
+
+Acceptance criteria:
+
+- `toSnapshot()` is O(changed) and deep-equals the full rebuild across arbitrary edit/undo/redo sequences.
+
+Tests:
+
+- `tests/editor/engine-incremental-save.test.ts`
+
+#### SLP-2. Load In-Place Optimization (Step Zero)
+
+Priority: independent quick win, anytime — lands the biggest load win for near-zero cost, no dependency on any other item.
 
 Scope:
 
@@ -533,7 +539,29 @@ Tests:
 
 - `tests/editor/engine-load-perf.test.ts` (pass-count/timing assertion)
 
-### R3-A. Memory Arbiter + Body Paging + Lazy Load (Memory Stage Two/Three)
+#### SLP-3. Bake LRU (Memory Stage One)
+
+Priority: independent quick win, anytime — the cheapest memory reclaim (the largest unbounded allocator).
+
+Scope:
+
+- `packages/editor/src/core/bake/*`
+
+Tasks:
+
+- [ ] Size-bounded LRU on baked snapshots; evict offscreen; re-bake on demand.
+
+Acceptance criteria:
+
+- Bake-cache memory stays within budget while scrolling; evicted bakes regenerate identically.
+
+Tests:
+
+- `tests/editor/engine-bake-lru.test.ts`
+
+#### SLP-4. Memory Arbiter + Body Paging + Lazy Load + History (Memory Stage Two/Three)
+
+Priority: the larger, later memory project.
 
 Scope:
 
@@ -564,7 +592,7 @@ Tests:
 - Ordered-list arbitrary start number and bullet/number style variants (`note.md` §4.3d).
 - Code-fence language capture on the typing path (deferred from the shipped §4.1 line→object work). Input redirection into the new code block already shipped: a line→object affordance for an editable in-place object drills into its surface via the `activateOnInsert` NodeView flag + `activateInsertedObject`, the same activation the slash/insert palette uses.
 - Checklist-item indent in the reader render (the live editor already indents).
-- HTML-paste migration onto the native node-builder (removes compat's last non-legacy caller) — strictly a follow-on to R1-A.
+- HTML-paste migration onto the native node-builder (removes compat's last non-legacy caller) — strictly a follow-on to MIO-1 (markdown paste).
 - Page/publication settings (docs/006 §6) — a separate workstream that also hangs on the snapshot's `settings` field.
 - `editor-native` Rust/WASM core — `docs/031_editor_native_rust_wasm_core.md`; this document is its parity spec (§5.7). The CRDT op-log (docs/013/014) folds incremental save (§7.4) and memory paging (§7.6) into one foundation when collaboration lands.
 
