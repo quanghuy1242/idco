@@ -193,6 +193,35 @@ const HR_MARKERS = ["---", "***", "___"];
 const CODE_FENCE = "```";
 
 /**
+ * Trim trailing characters a bare URL should not swallow (GFM autolink rule), so
+ * `https://x.test.` links `https://x.test` and the `.` stays prose. A run of
+ * `.,;:!?` is dropped; a trailing `)` is dropped only when it is unbalanced, so a
+ * URL whose own path carries a `(…)` group (`…/Foo_(bar)`) keeps its closing
+ * paren while a sentence-final `)` does not.
+ */
+function trimAutolinkUrl(url: string): string {
+  let end = url.length;
+  while (end > 0) {
+    const ch = url[end - 1]!;
+    if (".,;:!?".includes(ch)) {
+      end -= 1;
+      continue;
+    }
+    if (ch === ")") {
+      const slice = url.slice(0, end);
+      const opens = slice.split("(").length - 1;
+      const closes = slice.split(")").length - 1;
+      if (closes > opens) {
+        end -= 1;
+        continue;
+      }
+    }
+    break;
+  }
+  return url.slice(0, end);
+}
+
+/**
  * Find a completed paired-marker run ending at `caret` on the current line, or
  * null. Scans back from the just-typed closing marker to the nearest matching
  * opener — the one mechanism inline-code already used, generalized.
@@ -326,13 +355,20 @@ export function detectMarkdownShortcut(
     }
   }
   // Autolink: a bare http(s) URL immediately followed by the just-typed space.
+  // The greedy `[^\s]+` over-captures sentence punctuation (`see https://x.test.`
+  // / `(https://x.test)`), so the raw match is trimmed back the GFM way before the
+  // mark is placed — the trailing punctuation stays plain text after the link.
   if (typed === " " && caret >= 2) {
     const before = text.slice(lineStart, caret - 1);
     const match = /(?:^|\s)(https?:\/\/[^\s]+)$/.exec(before);
     if (match) {
-      const url = match[1]!;
-      const to = caret - 1;
-      return { from: to - url.length, kind: "autolink", to, url };
+      const raw = match[1]!;
+      const url = trimAutolinkUrl(raw);
+      // `https://` alone (everything after the scheme trimmed away) is not a link.
+      if (url.length > "https://".length) {
+        const from = caret - 1 - raw.length;
+        return { from, kind: "autolink", to: from + url.length, url };
+      }
     }
   }
   // Smart quotes: replace the straight quote with its curly form by context.

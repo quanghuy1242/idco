@@ -447,8 +447,10 @@ export function compileAutolinkShortcut(
  * The object is normalized + baked through the registry so it is publish-ready
  * immediately, exactly like an insert or a compat import. A `divider` is an atom,
  * so a fresh empty paragraph is appended to land the caret; a `code-block` is
- * editable, so the caret selects the new object (the same node-selection an
- * insert leaves — input redirection into the code surface is its own follow-up).
+ * editable, so this leaves the same node-selection an insert leaves. The view
+ * then drills into that selection (`activateInsertedObject`, gated on the node
+ * view's `activateOnInsert`) so the caret lands in the code surface — kept in the
+ * view because activation is runtime focus state, not a document/history step.
  */
 export function compileBlockObjectShortcut(
   store: EditorStore,

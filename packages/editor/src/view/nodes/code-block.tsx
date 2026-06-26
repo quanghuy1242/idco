@@ -119,6 +119,11 @@ function CodeLiveSurface(props: {
 }
 
 export const codeBlockView: NodeView = {
+  // A freshly inserted code block drills straight into its editor (slash/insert
+  // palette or the markdown ` ``` ` affordance) so the caret is ready to type
+  // rather than leaving a node-selection to click into (docs/030 §4.1). The
+  // textarea focus itself happens in `CodeLiveSurface`'s mount effect.
+  activateOnInsert: true,
   ariaLabel: "Code block",
   chromeMeta: { icon: "Code", label: "Code" },
   // The Insert (+) menu can drop a fresh code block; it activates for editing on

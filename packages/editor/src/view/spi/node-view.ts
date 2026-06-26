@@ -148,6 +148,18 @@ export type NodeView = {
    * popover anchored to the block (image config, etc.).
    */
   readonly liveMode?: "in-place" | "popover";
+  /**
+   * Whether inserting this object should immediately drill into its live surface
+   * (docs/030 §4.1). An editable in-place object (code-block) wants the caret
+   * inside its editor the instant it is created — whether that creation came from
+   * the slash/insert palette or a markdown affordance (` ``` `) — instead of
+   * leaving a bare node-selection the author must click into. The insert paths
+   * honor it generically via `activateInsertedObject`; the object's `renderLive`
+   * still owns *where* the caret lands (its own mount-time focus). A reference
+   * block opens a config picker instead (`beginProvisionalInsert`), so it leaves
+   * this off; a non-editable atom (divider) has no live surface and leaves it off.
+   */
+  readonly activateOnInsert?: boolean;
   readonly insert?: NodeViewInsert;
   /**
    * Per-type metadata the dispatcher reads generically so it keeps no node-type
@@ -227,6 +239,25 @@ export function registerNodeView(view: NodeView): void {
 /** The view for a node type, or undefined → the generic baked placeholder. */
 export function getNodeView(type: string): NodeView | undefined {
   return NODE_VIEWS.get(type);
+}
+
+/**
+ * Drill into a just-inserted object when its view opts into `activateOnInsert`
+ * (docs/030 §4.1). Both object-creation paths — the slash/insert palette and a
+ * markdown affordance (` ``` ` → code-block) — leave the new object as a
+ * node-selection; this is the one shared place that turns that selection into a
+ * live edit, so the caret lands in the object's surface (code-block focuses its
+ * textarea on mount) instead of the author having to click in. A no-op unless the
+ * current selection is a node-selection over an object whose view set the flag,
+ * so callers can fire it unconditionally after any insert — a reference block
+ * (picker via `beginProvisionalInsert`) or a divider (no live surface) is skipped.
+ */
+export function activateInsertedObject(store: EditorStore): void {
+  const sel = store.selection;
+  if (sel?.type !== "node") return;
+  const node = store.getNode(sel.node);
+  if (!node || node.kind !== "object") return;
+  if (getNodeView(node.type)?.activateOnInsert) store.activateObject(sel.node);
 }
 
 /**

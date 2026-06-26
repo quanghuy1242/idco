@@ -5,17 +5,22 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  bakeObjectData,
   compatFromSnapshot,
+  createDefaultBlockRegistry,
   createEditorStore,
   createIdAllocator,
   detectMarkdownShortcut,
   editorSnapshotFromCompat,
+  makeObjectNode,
   makeTextNode,
   pointAtOffset,
   type EditorStore,
   type NodeId,
 } from "../../packages/editor/src/core";
 import { sanitizeHtmlToCompat } from "../../packages/editor/src/view/paste-html";
+import { activateInsertedObject } from "../../packages/editor/src/view/spi";
+import { registerBuiltInNodeViews } from "../../packages/editor/src/view/nodes";
 
 function single(text: string): { store: EditorStore; id: NodeId } {
   const allocator = createIdAllocator("idco_client_md");
@@ -253,6 +258,36 @@ describe("markdown hardening (docs/030 §4.1)", () => {
     expect(link?.to.offset).toBe(14);
   });
 
+  it("trims trailing sentence punctuation off an autolinked URL (GFM rule)", () => {
+    // `see https://x.test. ` — the period is prose, not part of the link.
+    const shortcut = detectMarkdownShortcut(
+      "see https://x.test. ",
+      20,
+      "paragraph",
+      " ",
+    );
+    expect(shortcut).toMatchObject({ kind: "autolink", url: "https://x.test" });
+    const { store, id } = single("see https://x.test. ");
+    store.command({ shortcut: shortcut!, type: "apply-markdown" });
+    const node = store.requireTextNode(id);
+    const link = node.marks.find((mark) => mark.kind === "link");
+    expect(link?.attrs?.href).toBe("https://x.test");
+    // The mark ends before the trailing `.` (offset 18), which stays plain text.
+    expect(link?.to.offset).toBe(18);
+  });
+
+  it("keeps a balanced `)` in the URL path but drops an unbalanced trailing one", () => {
+    // Wikipedia-style path paren is balanced, so it stays in the link…
+    expect(
+      detectMarkdownShortcut("https://x.test/a_(b) ", 21, "paragraph", " "),
+    ).toMatchObject({ url: "https://x.test/a_(b)" });
+    // …while a trailing `)` with no matching opener inside the URL is trimmed
+    // (the opener here is prose: `(see …)`).
+    expect(
+      detectMarkdownShortcut("(see https://x.test) ", 21, "paragraph", " "),
+    ).toMatchObject({ url: "https://x.test" });
+  });
+
   it("converts a `---` line into a divider object plus a trailing paragraph", () => {
     expect(detectMarkdownShortcut("---", 3, "paragraph", "-")).toMatchObject({
       kind: "block-object",
@@ -283,6 +318,57 @@ describe("markdown hardening (docs/030 §4.1)", () => {
     expect(store.getNode(id)).toBeUndefined();
     const first = store.getNode(store.order[0]!);
     expect(first?.kind === "object" && first.type).toBe("code-block");
+  });
+});
+
+// Build a store holding one object node of `type`, selected as a node-selection
+// (what every insert path — slash/palette or the markdown ` ``` ` affordance —
+// leaves behind). The default registry knows the built-in object types.
+function singleObject(type: string): { store: EditorStore; id: NodeId } {
+  const allocator = createIdAllocator("idco_client_obj");
+  const registry = createDefaultBlockRegistry();
+  const normalized = registry.normalizeSnapshotObject(type, {});
+  const baked = bakeObjectData(registry, type, normalized.data);
+  const node = makeObjectNode({
+    baked: baked.baked ?? undefined,
+    data: normalized.data,
+    id: allocator.createNodeId(),
+    status: baked.status,
+    type,
+  });
+  const store = createEditorStore({
+    allocator,
+    registry,
+    snapshot: {
+      body: { blocks: { [node.id]: node }, order: [node.id] },
+      settings: {},
+      version: 1,
+    },
+  });
+  store.dispatch({
+    origin: "local",
+    selectionAfter: { node: node.id, type: "node" },
+    steps: [],
+  });
+  return { id: node.id, store };
+}
+
+describe("inserted-object activation (docs/030 §4.1)", () => {
+  // Populate the view registry so `getNodeView` resolves the real built-in views
+  // and their `activateOnInsert` flags (code-block opts in; divider does not).
+  registerBuiltInNodeViews();
+
+  it("drills into a code-block (activateOnInsert) so the caret is ready", () => {
+    const { store, id } = singleObject("code-block");
+    expect(store.activeObjectId).toBeNull();
+    activateInsertedObject(store);
+    expect(store.activeObjectId).toBe(id);
+  });
+
+  it("leaves a divider as a bare node-selection (no live surface)", () => {
+    const { store } = singleObject("divider");
+    activateInsertedObject(store);
+    expect(store.activeObjectId).toBeNull();
   });
 });
 

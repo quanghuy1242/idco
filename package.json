@@ -2,7 +2,7 @@
   "name": "idco",
   "version": "0.1.19",
   "private": true,
-  "packageManager": "pnpm@11.1.2",
+  "packageManager": "pnpm@11.9.0",
   "type": "module",
   "scripts": {
     "build": "pnpm --filter \"./packages/*\" run --if-present build",

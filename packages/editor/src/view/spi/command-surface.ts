@@ -26,6 +26,7 @@ import { activeScope, collectSelectionText, scopePath } from "../../core";
 import { listMarks } from "./mark-registry";
 import { listBlockTypes } from "./block-type-registry";
 import {
+  activateInsertedObject,
   getNodeView,
   listInsertableNodes,
   type NodeViewResourceConfigField,
@@ -245,10 +246,15 @@ function registryCommands(store: EditorStore): Command[] {
         });
         // Choose-first (docs/026 §7.1): a reference block opens its picker
         // immediately and rolls back if dismissed before a record is picked. The
-        // insert just set the selection to the new node.
+        // insert just set the selection to the new node. An editable in-place
+        // object (code-block) instead drills straight into its live surface so the
+        // caret lands ready to type (docs/030 §4.1) — the same activation the
+        // markdown ` ``` ` affordance reuses through `activateInsertedObject`.
         if (resourceField) {
           const sel = ctx.store.selection;
           if (sel?.type === "node") ctx.store.beginProvisionalInsert(sel.node);
+        } else {
+          activateInsertedObject(ctx.store);
         }
       },
       surfaces: { contextMenu: "more", slash: "primary" },

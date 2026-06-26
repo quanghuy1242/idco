@@ -48,7 +48,7 @@ import {
   wordRangeAt,
 } from "../overlays";
 import { requestFrame } from "../raf";
-import { listTabHandlers } from "../spi";
+import { activateInsertedObject, listTabHandlers } from "../spi";
 import { leafHasMarks, renderLeafMarks } from "./mark-render";
 import { ariaLabelForLeaf } from "../overlays";
 import {
@@ -177,7 +177,16 @@ export function EngineTextBlock(props: {
           updated.type,
           update.text,
         );
-        if (shortcut) store.command({ shortcut, type: "apply-markdown" });
+        if (shortcut) {
+          store.command({ shortcut, type: "apply-markdown" });
+          // A line→object affordance (` ``` ` → code-block) lands on a bare
+          // node-selection; drill into the new object's live surface so the caret
+          // is ready to type, the same activation the slash/insert palette does
+          // (docs/030 §4.1). A no-op for non-`activateOnInsert` objects (a divider
+          // leaves a text selection on its trailing paragraph), so it is safe to
+          // fire after any markdown command.
+          if (shortcut.kind === "block-object") activateInsertedObject(store);
+        }
       }
     },
     [goalColumnRef, node.id, store],
