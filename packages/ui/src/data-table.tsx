@@ -1,5 +1,12 @@
 // DaisyUI 5: https://daisyui.com/components/table/
 "use client";
+
+/**
+ * Data table: React Aria Table behavior (sorting, selection, keyboard) with DaisyUI 5 table styling.
+ *
+ * @categoryDefault Data Display
+ */
+
 import { useEffect, useRef, type ReactNode } from "react";
 import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 import {
@@ -14,61 +21,106 @@ import {
 import { Button } from "./button";
 import { Menu, MenuItem, MenuTrigger } from "./menu";
 
+/** Sort order of the active column. */
 export type SortDirection = "asc" | "desc";
+/** Column-sizing mode: `auto` content-fit or `fixed` equal-width layout. */
 export type DataTableLayout = "auto" | "fixed";
+/** How the table reacts when it exceeds its container: scroll the page (`responsive`) or scroll inside the box (`contained`). */
 export type DataTableOverflow = "responsive" | "contained";
+/** Preset width for a fixed-layout column. */
 export type DataTableColumnWidth = "xs" | "sm" | "md" | "lg" | "xl";
+/** Minimum table width before horizontal scrolling kicks in. */
 export type DataTableMinWidth = "none" | "md" | "lg";
 
+/** Visual intent of a per-row action button. */
 type DataTableActionVariant = "primary" | "secondary" | "danger" | "ghost";
 
+/** A per-row action rendered as a button or menu item in an actions column. */
 export type DataTableAction = {
+  /** Stable identity for the action within its row. */
   readonly id: string;
+  /** Visible action label. */
   readonly label: string;
+  /** Button intent; defaults to a neutral action. */
   readonly variant?: DataTableActionVariant;
+  /** Registered icon name shown on the action. */
   readonly iconName?: string;
+  /** Accessible name when the action is icon-only. */
   readonly ariaLabel?: string;
+  /** Hover hint. */
   readonly tooltip?: string;
   readonly disabled?: boolean;
+  /** Omit this action from the row entirely. */
   readonly isHidden?: boolean;
+  /** Invoked when the action is pressed. */
   readonly onAction: () => void;
 };
 
+/** A typed column definition: how a row's cell renders and whether the column sorts. */
 export type DataTableColumn<T extends object> = {
+  /** Field key matched against the sort descriptor and used as the column id. */
   readonly key: string;
+  /** Header label. */
   readonly label: string;
+  /** Enable header-click sorting for this column. */
   readonly sortable?: boolean;
+  /** Fixed-layout width preset. */
   readonly width?: DataTableColumnWidth;
+  /** Custom cell renderer; defaults to the row's `key` value. */
   readonly render?: (row: T) => ReactNode;
+  /** Produce the row's action set, rendered as buttons/menu in this column. */
   readonly actions?: (row: T) => readonly DataTableAction[];
 };
 
+/** Controlled multi-row selection wiring for the table's checkbox column. */
 export type DataTableRowSelection<T extends object> = {
+  /** Currently selected row keys (controlled). */
   readonly selectedKeys: ReadonlySet<string>;
+  /** Called with the next selection when checkboxes change. */
   readonly onChange: (next: Set<string>) => void;
+  /** Mark specific rows as non-selectable. */
   readonly getRowDisabled?: (row: T) => boolean;
+  /** Accessible label for the selection column. */
   readonly ariaLabel?: string;
 };
 
+/** Offset-based pagination wiring for the table footer. */
 type Pagination = {
+  /** Total row count across all pages. */
   readonly total: number;
+  /** Page size. */
   readonly limit: number;
+  /** Current row offset. */
   readonly offset: number;
+  /** Called with the next offset when a page is selected. */
   readonly onChange: (offset: number) => void;
 };
 
+/** Props for {@link DataTable}. */
 type DataTableProps<T extends object> = {
+  /** Ordered column definitions. */
   readonly columns: ReadonlyArray<DataTableColumn<T>>;
+  /** Row data to render. */
   readonly rows: ReadonlyArray<T>;
+  /** Derive a stable key per row. */
   readonly getRowKey: (row: T) => string;
+  /** Invoked when a row is activated (click/Enter). */
   readonly onRowClick?: (row: T) => void;
+  /** Key of the currently sorted column (controlled). */
   readonly sortBy?: string;
+  /** Direction of the active sort. */
   readonly sortDirection?: SortDirection;
+  /** Called when a sortable header is toggled. */
   readonly onSort?: (key: string, direction: SortDirection) => void;
+  /** Enable the offset-based pagination footer. */
   readonly pagination?: Pagination;
+  /** Enable the controlled row-selection column. */
   readonly rowSelection?: DataTableRowSelection<T>;
+  /** Column-sizing mode; defaults to `auto`. */
   readonly layout?: DataTableLayout;
+  /** Overflow behavior; defaults to `responsive`. */
   readonly overflow?: DataTableOverflow;
+  /** Minimum width before horizontal scroll; defaults to `none`. */
   readonly minWidth?: DataTableMinWidth;
 };
 
@@ -244,6 +296,13 @@ function DataTableSelectionCheckbox({
   );
 }
 
+/**
+ * A data table with typed columns, header-click sorting, row selection, per-row actions, and pagination.
+ *
+ * @example
+ * <DataTable columns={cols} rows={posts} getRowKey={(p) => p.id}
+ *   sortBy={sort} sortDirection={dir} onSort={setSort} />
+ */
 export function DataTable<T extends object>({
   columns,
   rows,

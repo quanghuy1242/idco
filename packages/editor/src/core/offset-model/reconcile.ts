@@ -12,6 +12,10 @@
 import type { OffsetModel } from "./index";
 
 /**
+ * @categoryDefault Virtual Geometry
+ */
+
+/**
  * Generic, key-agnostic so it is testable with plain string ids. The view binds
  * `Key = NodeId` and `seedFor = (id) => heightCache.get(id) ?? estimate`, so a
  * block that merely *moved* keeps its measured height (the cache is keyed by id).

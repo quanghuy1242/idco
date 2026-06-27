@@ -2,6 +2,12 @@
 // React Aria: https://react-spectrum.adobe.com/react-aria/Popover.html
 "use client";
 
+/**
+ * A click-to-open info popover overlay built on React Aria with DaisyUI styling.
+ *
+ * @categoryDefault Overlays
+ */
+
 import type { ReactNode } from "react";
 import {
   Button as AriaButton,
@@ -13,10 +19,14 @@ import {
 } from "react-aria-components";
 import { CircleHelp, Info } from "lucide-react";
 
+/** Side of the trigger the popover points to. */
 type Placement = "top" | "bottom" | "left" | "right";
+/** Which trigger glyph to show: `info` for ⓘ or `help` for a question mark. */
 type IconKind = "info" | "help";
+/** Size of the circular trigger button. */
 type Size = "xs" | "sm";
 
+/** Props for {@link InfoPopover}. */
 type InfoPopoverProps = {
   /** Optional bold heading inside the popover. */
   readonly title?: string;

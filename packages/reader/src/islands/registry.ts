@@ -8,6 +8,8 @@
  * This module is types + a registry map only — no `"use client"` — so the server `<Reader>`
  * can read it (to decide which kinds get a hydration boundary) without pulling client
  * code. The island components themselves are `"use client"` and live in their own files.
+ *
+ * @categoryDefault Islands
  */
 import type { ReactNode } from "react";
 

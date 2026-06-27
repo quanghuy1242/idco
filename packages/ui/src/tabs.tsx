@@ -1,6 +1,12 @@
 // DaisyUI 5: https://daisyui.com/components/tab/
 "use client";
 
+/**
+ * Tabs: React Aria Tabs behavior (roving focus, selection) with DaisyUI 5 tab styling.
+ *
+ * @categoryDefault Navigation
+ */
+
 import type { ReactNode } from "react";
 import Link from "next/link";
 import {
@@ -11,51 +17,73 @@ import {
   Tabs as AriaTabs,
 } from "react-aria-components";
 
+/** Fields common to every tab item. */
 type BaseTabItem = {
+  /** Stable tab identity, matched against `selectedKey`. */
   readonly id: string;
+  /** Visible tab label. */
   readonly label: string;
+  /** Disable this tab. */
   readonly disabled?: boolean;
 };
 
+/** A tab that owns an inline content panel. */
 export type PanelTabItem = BaseTabItem & {
+  /** Panel body shown when this tab is selected. */
   readonly content?: ReactNode;
   readonly href?: never;
 };
 
+/** A tab that navigates to a route instead of revealing a panel. */
 export type LinkTabItem = BaseTabItem & {
+  /** Destination route. */
   readonly href: string;
   readonly content?: never;
 };
 
+/** A tab used purely as a controlled selector, with content rendered elsewhere by the caller. */
 export type ControlTabItem = BaseTabItem & {
   readonly content?: never;
   readonly href?: never;
 };
 
+/** Any tab item: panel-backed, link, or controlled selector. */
 export type TabItem = PanelTabItem | LinkTabItem | ControlTabItem;
 
+/** Selection, sizing, and styling shared by every `Tabs` mode. */
 type TabsBaseProps = {
+  /** Accessible label for the tab list. */
   readonly ariaLabel: string;
+  /** Selected tab id (controlled). */
   readonly selectedKey?: string;
+  /** Initial selected tab id (uncontrolled). */
   readonly defaultSelectedKey?: string;
+  /** Tab ids to disable; falls back to per-item `disabled`. */
   readonly disabledKeys?: readonly string[];
+  /** Called with the newly selected tab id. */
   readonly onSelectionChange?: (key: string) => void;
+  /** Tab size; defaults to `md`. */
   readonly size?: "sm" | "md";
+  /** Selection-indicator style; defaults to `border`. */
   readonly variant?: "border" | "box" | "lift";
 };
 
+/** Props for `Tabs` rendering inline content panels. */
 type PanelTabsProps = TabsBaseProps & {
   readonly items: readonly PanelTabItem[];
 };
 
+/** Props for `Tabs` acting as route navigation. */
 type LinkTabsProps = TabsBaseProps & {
   readonly items: readonly LinkTabItem[];
 };
 
+/** Props for `Tabs` acting as a controlled selector. */
 type ControlTabsProps = TabsBaseProps & {
   readonly items: readonly ControlTabItem[];
 };
 
+/** Props for {@link Tabs}; the item shape selects panel, link, or controlled mode. */
 type TabsProps = PanelTabsProps | LinkTabsProps | ControlTabsProps;
 
 const variantClass = {
@@ -68,6 +96,12 @@ function isPanelTabItem(item: TabItem): item is PanelTabItem {
   return "content" in item;
 }
 
+/**
+ * A tab strip that renders inline panels, route links, or a controlled selector depending on item shape.
+ *
+ * @example
+ * <Tabs ariaLabel="Settings" items={[{ id: "general", label: "General", content: <General /> }]} />
+ */
 export function Tabs({
   items,
   ariaLabel,

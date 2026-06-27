@@ -24,6 +24,10 @@ type LeafEntry = {
 };
 
 /**
+ * @categoryDefault Engine Core — Commands
+ */
+
+/**
  * Flatten the document into its text leaves in model order.
  *
  * The walk is depth-first over `order` and each structural node's `children`,

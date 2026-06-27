@@ -28,6 +28,8 @@
  * wired into the view orchestrator (`react-view`) alongside the node/mark/block
  * registrars; see docs/023 §5.2/§9 for why that explicit call — not a bare
  * module-load side effect — is what keeps the package `sideEffects: false` safe.
+ *
+ * @categoryDefault Commands & Toolbar SPI
  */
 import type { ReactNode } from "react";
 import type { EditorStore, NodeId, TextMarkKind } from "../../core";
@@ -117,6 +119,8 @@ export type CommandScope = {
  * separate (docs/027 §8.6). Optional on the context because the pure resolvers and the
  * unit tests build a context with no dock mounted; only a command's `run` ever reads
  * it, never `isAvailable`/`isActive` (those must stay pure functions of model state).
+ *
+ * @category Side Panel SPI
  */
 export type PanelHost = {
   /**

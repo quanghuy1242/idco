@@ -44,6 +44,12 @@ import {
   currentListType,
   isMarkActive,
 } from "./shared";
+
+/**
+ * @categoryDefault Engine Core — Commands
+ */
+
+/** A high-level editing intent the engine compiles into one invertible transaction. */
 export type EditorCommand =
   | { readonly type: "insert-text"; readonly text: string }
   | { readonly type: "delete-backward" }
@@ -151,6 +157,7 @@ export type EditorCommand =
       readonly data: JsonValue;
     };
 
+/** The discriminant string union of every `EditorCommand` `type`. */
 export type EditorCommandType = EditorCommand["type"];
 
 /** A read-only query over current state for toolbar enabled/active flags. */

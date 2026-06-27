@@ -262,6 +262,11 @@ function renderProxy(entry: RowEntry): ReactNode {
   );
 }
 
+/**
+ * @categoryDefault Editor Components
+ */
+
+/** The ribbon-lite formatting toolbar: tabbed command rows resolved from the toolbar SPI registries, operating on the model selection. */
 export function EditorToolbar(props: {
   readonly store: EditorStore;
   readonly focusEditor: () => void;

@@ -7,6 +7,12 @@
 // single source of truth (docs/003 §5, docs/018 §2.8).
 "use client";
 
+/**
+ * Shared hover-reveal toolbar primitives — badge, buttons, and selectors — that float chrome around an editor block.
+ *
+ * @categoryDefault Data Display
+ */
+
 import type { CSSProperties, ReactNode } from "react";
 import { Button as AriaButton } from "react-aria-components";
 import { Menu, MenuItem, MenuTrigger } from "./menu";
@@ -33,6 +39,7 @@ const CHROME_SELECT_PILL =
 export const CHROME_REVEAL =
   "opacity-0 transition-opacity group-hover/block:opacity-100 group-focus-within/block:opacity-100";
 
+/** Color intent for a chrome button's hover state: plain, accented, or destructive. */
 export type ChromeIntent = "neutral" | "primary" | "danger";
 
 const INTENT_TEXT: Record<ChromeIntent, string> = {
@@ -52,6 +59,7 @@ const INTENT_FILL: Record<ChromeIntent, string> = {
     "text-base-content/80 hover:border-error hover:bg-error hover:text-error-content",
 };
 
+/** Maps each chrome button size to its DaisyUI/Tailwind square-dimension class. */
 const BUTTON_SIZE = {
   md: "size-6",
   sm: "size-[18px]",
@@ -180,6 +188,7 @@ export function BlockChrome({
   );
 }
 
+/** One choice in a {@link ChromeSelect}, pairing a value with its label and optional icon. */
 export type ChromeSelectOption<T extends string> = {
   readonly value: T;
   readonly label: string;

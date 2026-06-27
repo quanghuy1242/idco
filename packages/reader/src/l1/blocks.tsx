@@ -9,6 +9,8 @@
  * `"use client"`) are replaced with plain semantic elements, the `.rt-*` classes, and
  * inline SVG. Prose appearance now lives in the `.rt-*` stylesheet, not in component
  * class strings, so it is the same definition the editor uses.
+ *
+ * @categoryDefault L1 Blocks
  */
 import type { CSSProperties, ReactNode } from "react";
 import { RT_BLOCK, RT_BLOCK_CLASS, RT_CALLOUT_TONE_CLASS } from "./typography";
@@ -37,6 +39,7 @@ function indentStyle(indent?: number): CSSProperties | undefined {
     : undefined;
 }
 
+/** The article wrapper that owns the single uniform gap between top-level blocks. */
 export function RichTextArticle({ children }: RichTextChildrenProps) {
   // One spacing source (docs/028 §4.5): a single uniform gap between top-level blocks, and
   // `[&>div>*]:my-0` neutralizes each block primitive's own vertical margin (table/TOC carry
@@ -53,6 +56,7 @@ export function RichTextArticle({ children }: RichTextChildrenProps) {
   );
 }
 
+/** Renders a paragraph block with its alignment and indent. */
 export function RichTextParagraph({
   align,
   indent,
@@ -75,6 +79,7 @@ export function RichTextParagraph({
   );
 }
 
+/** Renders a heading block at its level, with an optional hover anchor link to its id. */
 export function RichTextHeading({
   level,
   align,
@@ -115,6 +120,7 @@ export function RichTextHeading({
   );
 }
 
+/** Renders a callout block with its tone styling and a leading tone glyph. */
 export function RichTextCallout({
   tone = "info",
   children,
@@ -136,6 +142,7 @@ export function RichTextCallout({
   );
 }
 
+/** Renders a blockquote block with its indent. */
 export function RichTextBlockquote({
   indent,
   children,
@@ -150,6 +157,7 @@ export function RichTextBlockquote({
   );
 }
 
+/** Renders a list block as a bullet `<ul>` or numbered `<ol>` per its kind. */
 export function RichTextList({
   kind,
   start,
@@ -181,6 +189,7 @@ export function RichTextList({
   );
 }
 
+/** Renders a list item as an `<li>` with its indent. */
 export function RichTextListItem({
   indent,
   children,

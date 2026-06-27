@@ -22,6 +22,11 @@ import type { ImeBoundsSnapshot } from "../types";
 import type { ViewRefs } from "./refs";
 import type { VirtualWindow } from "./use-virtual-window";
 
+/**
+ * @categoryDefault Editor Components
+ */
+
+/** Per-object-block diagnostics: its type, status, resting/live state, and whether its data is baked. */
 export type ObjectBlockDiagnostics = {
   readonly type: string;
   readonly status: string;
@@ -29,6 +34,7 @@ export type ObjectBlockDiagnostics = {
   readonly hasBaked: boolean;
 };
 
+/** The Playwright-facing diagnostics snapshot of the editor view: selection, window range, mounted blocks, object states, IME, and index. */
 export type OwnedModelEditorViewDiagnostics = {
   readonly activeNodeId: NodeId | null;
   readonly activeInputBackend: "native" | "polyfill" | null;
@@ -63,6 +69,7 @@ export type OwnedModelEditorViewDiagnostics = {
   readonly workerRoundTrips: number;
 };
 
+/** The imperative handle exposed by the editor view: diagnostics, focus/selection control, scroll-to-block, and the public editor handle. */
 export type OwnedModelEditorViewHandle = {
   readonly diagnostics: () => OwnedModelEditorViewDiagnostics;
   readonly focusBlock: (id: NodeId) => void;

@@ -24,6 +24,10 @@ import {
 } from "../../core";
 import { caretClientRect, clampOffset, pointToModelPosition } from "./geometry";
 
+/**
+ * @categoryDefault Editing Helpers
+ */
+
 export type TextDiff = {
   readonly at: number;
   readonly removed: string;

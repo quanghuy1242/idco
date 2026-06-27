@@ -31,6 +31,8 @@
  * DaisyUI theme custom properties (`var(--color-*)`) with literal fallbacks, so it is
  * framework-neutral: it needs no Tailwind compilation and themes correctly when
  * DaisyUI is present.
+ *
+ * @categoryDefault Typography
  */
 
 /** The base class every prose block carries; sets the shared line-height baseline. */

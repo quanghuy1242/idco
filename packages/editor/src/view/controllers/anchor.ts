@@ -9,6 +9,11 @@
  * move it; only corrections to blocks above it do. When nothing above moved, the
  * delta is ~0 and this returns `null` (no scroll write).
  */
+/**
+ * @categoryDefault Virtual Geometry
+ */
+
+/** Compute the `scrollTop` adjustment that keeps the topmost visible block anchored when a geometry correction lands, or null when no write is needed. */
 export function anchorScrollAdjustment(args: {
   readonly prevPrefix: number;
   readonly newPrefix: number;

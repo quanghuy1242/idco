@@ -24,6 +24,10 @@
 import type { EditorNode, NodeId } from "../model";
 
 /**
+ * @categoryDefault Snapshot & Performance
+ */
+
+/**
  * A node body in the cold store. The whole immutable node *is* the body: its heavy fields
  * (text content + marks, or object `data` + baked) are exactly what costs memory, and
  * re-materializing the node from the cold store restores them with no aliasing hazard

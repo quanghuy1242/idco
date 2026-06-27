@@ -7,9 +7,11 @@
  * the DOM — it does not re-render a different tree (docs/015 §13 "island hydration
  * mismatch"). Hydrates on `idle`: the highlight is a nicety, not content, so it waits for
  * a free main thread. With no JS the TOC still links and navigates.
+ *
+ * @categoryDefault Islands
  */
-import { isRecord } from "@quanghuy1242/idco-lib";
 import { useEffect, useRef, type ReactNode } from "react";
+import { isRecord } from "@quanghuy1242/idco-lib";
 import { registerReaderIsland } from "./registry";
 
 export type ScrollSpyData = {
@@ -78,6 +80,11 @@ function ScrollSpyInteractive({
   );
 }
 
+/**
+ * The scroll-spy TOC island: highlights the table-of-contents entry for the heading currently in view.
+ *
+ * @category Islands
+ */
 export const scrollSpyTocIsland = {
   Interactive: ScrollSpyInteractive,
   hydrate: "idle" as const,

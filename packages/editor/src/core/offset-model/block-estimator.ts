@@ -24,6 +24,11 @@
  * measurements into {@link observe} (the estimator trusts what it is told).
  */
 
+/**
+ * @categoryDefault Virtual Geometry
+ */
+
+/** The content signal a block hands the estimator: text chars, code lines, image aspect, or opaque. */
 export type BlockMetrics =
   | { readonly kind: "text"; readonly typeKey: string; readonly chars: number }
   | { readonly kind: "code"; readonly typeKey: string; readonly lines: number }
@@ -35,6 +40,7 @@ export type BlockMetrics =
     }
   | { readonly kind: "opaque"; readonly typeKey: string };
 
+/** Tunables for the estimator: layout constants, EMA smoothing, and the per-sample correction clamp. */
 export type BlockEstimatorOptions = {
   readonly contentWidth?: number;
   readonly defaultHeight?: number;
@@ -75,6 +81,7 @@ function ema(prev: number, next: number, alpha: number): number {
   return prev + alpha * (next - prev);
 }
 
+/** Produces per-type, content-aware seed heights, calibrated in-session by real measurements. */
 export class BlockEstimator {
   private readonly o: ResolvedOptions;
   private contentWidth: number;

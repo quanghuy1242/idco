@@ -35,6 +35,10 @@ import type {
 } from "./model";
 
 /**
+ * @categoryDefault Engine Core — Model
+ */
+
+/**
  * Replace text inside one leaf.
  *
  * `removed` is checked against live content during dispatch and then replaced

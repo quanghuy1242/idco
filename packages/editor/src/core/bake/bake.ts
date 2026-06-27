@@ -24,6 +24,8 @@
  * not survive `postMessage`; the worker therefore bakes the built-in object set
  * with a default registry, while custom objects bake on the main thread through
  * the same `bakeObjectData` call.
+ *
+ * @categoryDefault Document Index
  */
 import {
   resolveBoundaryOffset,
@@ -36,7 +38,11 @@ import {
 } from "../model";
 import { createDefaultBlockRegistry, type BlockRegistry } from "../registry";
 
-/** The outcome of baking one object's opaque data. */
+/**
+ * The outcome of baking one object's opaque data.
+ *
+ * @category Snapshot & Performance
+ */
 export type BakeObjectResult = {
   /** The static snapshot, or `null` when the data cannot produce a valid bake. */
   readonly baked: BakedSnapshot | null;
@@ -110,7 +116,11 @@ export type DocumentIndex = {
   readonly collections: Readonly<Record<string, readonly CollectionItem[]>>;
 };
 
-/** Bake one object, never throwing: an unbakeable object reports `invalid`. */
+/**
+ * Bake one object, never throwing: an unbakeable object reports `invalid`.
+ *
+ * @category Snapshot & Performance
+ */
 export function bakeObjectData(
   registry: BlockRegistry,
   objectType: string,

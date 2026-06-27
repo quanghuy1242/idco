@@ -21,16 +21,25 @@ type FilterOption = {
   readonly label: string;
 };
 
+/** Configuration for one filter dimension shown in a {@link MobileFilterMenu}. */
 type FilterGroupConfig = {
+  /** Stable identifier for the group, used to route selections back to the right `onChange`. */
   readonly key: string;
+  /** Display name prefixed onto each of this group's option labels. */
   readonly label: string;
+  /** Selectable options; the implicit `"all"` value clears this group. */
   readonly options: ReadonlyArray<FilterOption>;
+  /** Currently selected option value (`"all"` means no active filter for this group). */
   readonly value: string;
+  /** Called with the chosen option value when a selection changes. */
   readonly onChange: (value: string) => void;
 };
 
+/** Props for {@link MobileFilterMenu}. */
 type MobileFilterMenuProps = {
+  /** The filter groups to expose, each owning its own selected value and change handler. */
   readonly groups: ReadonlyArray<FilterGroupConfig>;
+  /** Size scale of the trigger button (defaults to "md"). */
   readonly size?: "sm" | "md";
 };
 
@@ -54,6 +63,13 @@ type FlatItem = {
   selected: boolean;
 };
 
+/**
+ * A compact filter trigger that exposes several filter groups through a single React Aria dropdown menu on small screens.
+ *
+ * @categoryDefault Navigation
+ */
+
+/** A mobile-only filter control that flattens multiple filter groups into one dropdown with a summary of active filters. */
 export function MobileFilterMenu({
   groups,
   size = "md",

@@ -26,6 +26,11 @@ function floorHeight(height: number): number {
   return Math.max(1, height);
 }
 
+/**
+ * @categoryDefault Virtual Geometry
+ */
+
+/** The O(n)-rebuild reference `OffsetModel`: a heights array with a lazily rebuilt prefix sum. */
 export class FlatOffsetModel implements OffsetModel {
   private heights: number[];
   // `cum[k]` is the top edge of block k (sum of the first k heights); length is

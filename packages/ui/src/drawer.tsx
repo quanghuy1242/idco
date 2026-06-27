@@ -2,6 +2,12 @@
 // React Aria: https://react-spectrum.adobe.com/react-aria/Dialog.html
 "use client";
 
+/**
+ * Slide-in side panel: React Aria Modal/Dialog behavior with DaisyUI surface styling.
+ *
+ * @categoryDefault Overlays
+ */
+
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import {
   Dialog,
@@ -12,11 +18,17 @@ import {
 import { Button } from "./button";
 import { getActiveThemeName } from "./theme";
 
+/** Props for {@link Drawer}. */
 type DrawerProps = {
+  /** Whether the drawer is open (controlled). */
   readonly open: boolean;
+  /** Called when the drawer requests open/close (dismiss, Escape, close button). */
   readonly onOpenChange: (open: boolean) => void;
+  /** Heading text, wired as the dialog's accessible title. */
   readonly title: string;
+  /** Edge the panel slides in from; defaults to `right`. */
   readonly side?: "right" | "left";
+  /** Panel width preset; defaults to `md`. */
   readonly width?: "sm" | "md" | "lg";
   readonly children?: ReactNode;
 };
@@ -27,8 +39,12 @@ const widthClass: Record<NonNullable<DrawerProps["width"]>, string> = {
   lg: "w-[32rem]",
 };
 
-// A side panel for quick-peek detail. Prefer a route for durable, deep-linkable
-// detail (docs/027 §5.12); this is for ephemeral inspection only.
+/**
+ * A side panel for quick-peek detail, sliding in from the left or right with a titled header.
+ *
+ * Prefer a route for durable, deep-linkable detail (docs/027 §5.12); this is for ephemeral
+ * inspection only.
+ */
 export function Drawer({
   open,
   onOpenChange,

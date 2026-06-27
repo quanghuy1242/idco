@@ -190,6 +190,10 @@ const BUILT_IN_MARKS: readonly MarkDefinition[] = [
 let builtInMarksRegistered = false;
 
 /**
+ * @categoryDefault Resting Render
+ */
+
+/**
  * Register the built-in marks once (idempotent). Called at module load below, and
  * exported so the view orchestrator can call it explicitly (next to
  * `registerBuiltInNodeViews`). Unlike node views — which register only through the

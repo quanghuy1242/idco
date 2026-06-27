@@ -4,6 +4,8 @@
  * highlight, the checklist toggle) is an L3 island that hydrates over this markup
  * (docs/015 §6). The sticky rail is pure CSS (`lg:sticky`), so it stays L1; only the
  * active-highlight needs the client.
+ *
+ * @categoryDefault Typography
  */
 import type { ReactNode } from "react";
 import type {
@@ -26,6 +28,7 @@ const tocDepthClass: Record<number, string> = {
   5: "ms-30",
 };
 
+/** Renders a static table of contents as a nested, optionally-numbered list of heading anchors. */
 export function RichTextTableOfContents({
   entries,
   style = "plain",
@@ -164,6 +167,7 @@ export function RichTextTocLayout({
   );
 }
 
+/** Renders a checklist container as a `<ul data-rt-checklist>` the checklist island hydrates over. */
 export function RichTextCheckList({ children }: RichTextChildrenProps) {
   return (
     <ul className="rt-block m-0 ml-1 list-none space-y-1" data-rt-checklist="">

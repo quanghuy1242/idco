@@ -16,6 +16,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { EditorDocumentSnapshot, OwnedEditorHandle } from "../core";
 
+/**
+ * @categoryDefault Autosave
+ */
+
+/** Configuration for {@link useAutosave}: the persist callback plus debounce, enable, and error hooks. */
 export type AutosaveOptions = {
   /** Persist the snapshot. Throw to signal a save failure or a stale-write conflict. */
   readonly onSave: (snapshot: EditorDocumentSnapshot) => Promise<void>;
@@ -27,12 +32,14 @@ export type AutosaveOptions = {
   readonly onError?: (error: unknown) => void;
 };
 
+/** The reactive autosave status: whether the document is dirty, a save is in flight, and the last save error. */
 export type AutosaveState = {
   readonly isDirty: boolean;
   readonly isSaving: boolean;
   readonly lastError: unknown;
 };
 
+/** Persist the document on a debounce, driving save state from the editor handle's change/dirty events with in-flight and stale-write guards. */
 export function useAutosave(
   handle: OwnedEditorHandle | null,
   options: AutosaveOptions,

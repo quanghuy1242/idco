@@ -3,6 +3,12 @@
 // DaisyUI 5: https://daisyui.com/components/breadcrumbs/
 // React Aria: https://react-spectrum.adobe.com/react-aria/Menu.html
 
+/**
+ * A breadcrumb trail that measures available width and folds leading segments into a React Aria overflow menu.
+ *
+ * @categoryDefault Navigation
+ */
+
 import {
   useCallback,
   useEffect,
@@ -13,11 +19,15 @@ import {
 import { MenuTrigger, Menu, MenuItem } from "./menu";
 import { Button } from "./button";
 
+/** Props for {@link ResponsiveBreadcrumb}. */
 type ResponsiveBreadcrumbProps = {
+  /** Ordered breadcrumb labels from root to current; earlier ones collapse first when space is tight. */
   readonly items: readonly string[];
+  /** Optional node rendered before the trail, such as a home icon or root link. */
   readonly leadingItem?: ReactNode;
 };
 
+/** A width-aware breadcrumb that collapses overflowing leading segments into an ellipsis overflow menu. */
 export function ResponsiveBreadcrumb({
   items,
   leadingItem,

@@ -23,6 +23,10 @@
  */
 import type { TextLeafType, TextMarkKind } from "./model";
 
+/**
+ * @categoryDefault Markdown I/O
+ */
+
 /** A block-prefix shortcut: strip `[0, removeTo)` and retype the block. */
 export type BlockShortcut = {
   readonly kind: "block";
@@ -110,6 +114,7 @@ export type WrapPairShortcut = {
   readonly close: string;
 };
 
+/** The detected markdown affordance the view translates into editor commands. */
 export type MarkdownShortcut =
   | BlockShortcut
   | BlockObjectShortcut

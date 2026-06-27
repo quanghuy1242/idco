@@ -30,6 +30,12 @@
  * Implementations: {@link FlatOffsetModel} (the O(n)-rebuild reference and test
  * oracle) and the augmented treap (docs/025 §5.2, the O(log n) terminal impl).
  */
+
+/**
+ * @categoryDefault Virtual Geometry
+ */
+
+/** The block-index → pixel-offset geometry virtualization queries to place its window. */
 export interface OffsetModel {
   /** Number of blocks currently modeled. */
   readonly count: number;

@@ -17,6 +17,8 @@
  * pairing with `content-visibility`); `idle` activates after first paint when the main
  * thread is free (`requestIdleCallback`, with a timeout fallback); `interaction` activates
  * on first pointer/focus intent.
+ *
+ * @categoryDefault Islands
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ReaderIslandHydrate } from "./registry";
@@ -26,6 +28,7 @@ type IdleWindow = Window & {
   cancelIdleCallback?: (handle: number) => void;
 };
 
+/** Renders static markup until its hydrate policy fires, then swaps in the interactive enhancement. */
 export function IslandBoundary({
   hydrate = "visible",
   children,

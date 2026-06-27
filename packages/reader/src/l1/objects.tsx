@@ -5,9 +5,12 @@
  * their Tailwind/DaisyUI chrome classes (these are object chrome the editor's resting
  * render already shares via the same primitive, not prose duplicated against the engine
  * CSS), and replace the `react-aria-components` link with a plain `<a>`.
+ *
+ * @categoryDefault L1 Objects
  */
 import type { ReactNode } from "react";
 
+/** Renders a media figure object: an image with an optional caption. */
 export function RichTextMediaFigure({
   alt,
   caption,
@@ -33,6 +36,7 @@ export function RichTextMediaFigure({
   );
 }
 
+/** Renders an embed object as a sandboxed, lazy-loaded `<iframe>`. */
 export function RichTextEmbed({
   title,
   url,
@@ -59,6 +63,7 @@ export function RichTextEmbed({
   );
 }
 
+/** Renders a post reference object as a linked card, or a badge when it has no href. */
 export function RichTextPostReference({
   href,
   label,

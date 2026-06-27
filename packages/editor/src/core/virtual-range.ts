@@ -15,6 +15,11 @@
  */
 import { type OffsetModel, FlatOffsetModel } from "./offset-model";
 
+/**
+ * @categoryDefault Virtual Geometry
+ */
+
+/** Inputs to the back-compat range calculation: item count, scroll geometry, and a size function. */
 export type VirtualRangeInput = {
   readonly itemCount: number;
   readonly scrollOffset: number;
@@ -23,6 +28,7 @@ export type VirtualRangeInput = {
   readonly getItemSize: (index: number) => number;
 };
 
+/** The window slice to render: the index range plus the spacer heights above, below, and total. */
 export type VirtualRange = {
   readonly startIndex: number;
   readonly endIndex: number;
@@ -31,6 +37,7 @@ export type VirtualRange = {
   readonly totalHeight: number;
 };
 
+/** A per-frame window query against a prebuilt offset model: scroll offset, viewport size, and overscan. */
 export type VirtualRangeQuery = {
   readonly scrollOffset: number;
   readonly viewportSize: number;

@@ -1,4 +1,11 @@
 // DaisyUI 5: https://daisyui.com/components/avatar/
+/**
+ * Renders a circular user avatar from an image or fallback initials.
+ *
+ * @categoryDefault Data Display
+ */
+
+/** Diameter preset for an avatar, from extra-small to large. */
 export type AvatarSize = "xs" | "sm" | "md" | "lg";
 
 const sizeMap: Record<AvatarSize, string> = {
@@ -15,13 +22,19 @@ const textSizeMap: Record<AvatarSize, string> = {
   lg: "text-lg",
 };
 
+/** Props for {@link Avatar}. */
 type AvatarProps = {
+  /** Fallback text shown when no image is given; first two characters are used. */
   readonly initials?: string;
+  /** Image source URL; when present it replaces the initials placeholder. */
   readonly image?: string;
+  /** Alt text for the avatar image. */
   readonly alt?: string;
+  /** Diameter preset; defaults to `md`. */
   readonly size?: AvatarSize;
 };
 
+/** A circular avatar that shows the given image, or initials as a placeholder. */
 export function Avatar({ initials, image, alt, size = "md" }: AvatarProps) {
   const sizeClass = sizeMap[size];
   const textClass = textSizeMap[size];

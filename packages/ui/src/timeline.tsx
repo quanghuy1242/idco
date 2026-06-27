@@ -1,7 +1,13 @@
 // DaisyUI 5: https://daisyui.com/components/timeline/
+/**
+ * Vertical timeline of events with tone-driven markers and DaisyUI styling.
+ *
+ * @categoryDefault Feedback
+ */
 import type { ReactNode } from "react";
 import { NavIcon } from "./nav-icons";
 
+/** Color intent of a timeline entry's marker. */
 export type TimelineTone =
   | "neutral"
   | "primary"
@@ -10,17 +16,27 @@ export type TimelineTone =
   | "error"
   | "info";
 
+/** A single entry in a {@link Timeline}. */
 export type TimelineItem = {
+  /** Stable React key for the entry. */
   readonly id: string;
+  /** Registered icon name to render inside the marker; falls back to a plain dot. */
   readonly icon?: string;
+  /** Color intent of the marker; defaults to `neutral`. */
   readonly tone?: TimelineTone;
+  /** Headline of the entry. */
   readonly title: ReactNode;
+  /** Optional secondary line, typically a timestamp. */
   readonly meta?: string;
+  /** Optional expanded body shown below the title. */
   readonly detail?: ReactNode;
 };
 
+/** Props for {@link Timeline}. */
 type TimelineProps = {
+  /** Ordered entries to render, top to bottom. */
   readonly items: ReadonlyArray<TimelineItem>;
+  /** Tightens vertical spacing between entries when set. */
   readonly compact?: boolean;
 };
 
@@ -42,6 +58,7 @@ const markerClass: Record<TimelineTone, string> = {
   info: "bg-info text-info-content",
 };
 
+/** A vertical timeline of events with tone-driven markers. */
 export function Timeline({ items, compact }: TimelineProps) {
   return (
     <ul

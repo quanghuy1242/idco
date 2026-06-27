@@ -6,6 +6,8 @@
  * structurally compatible with the editor's `EditorDocumentSnapshot`/`EditorNode` (wide
  * `unknown` payloads) so the editor can pass its snapshot straight in, while the reader
  * stays free of any editor import (the editor depends on the reader, not the reverse).
+ *
+ * @categoryDefault Server Reader
  */
 import type { ReactNode } from "react";
 import type { ReaderTextContent, ReaderTextMark } from "./model";
@@ -46,6 +48,7 @@ export type ReaderStructuralNode = {
   readonly attrs?: ReaderAttrs;
 };
 
+/** Any body block: a text leaf, a heavy object, or a structural container. */
 export type ReaderBlockNode =
   | ReaderTextNode
   | ReaderObjectNode
@@ -85,6 +88,7 @@ export type ReaderStructuralRenderer = (
   children: ReactNode,
 ) => ReactNode;
 
+/** The render options that tune a `<Reader>` pass: host resolvers, embed allowlist, and island opt-in. */
 export type ReaderOptions = {
   /** Resolve a media object to a fresh src/alt/caption (default: render its baked snapshot). */
   readonly resolveMedia?: (node: ReaderObjectNode) => {

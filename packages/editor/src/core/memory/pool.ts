@@ -26,6 +26,10 @@
  */
 
 /**
+ * @categoryDefault Snapshot & Performance
+ */
+
+/**
  * A budget-managed allocator the arbiter can size and shrink. The arbiter never learns
  * what a pool stores — only its accounted size and how to shed toward a target.
  */
@@ -42,6 +46,7 @@ export type MemoryPool = {
   evict(targetBytes: number): number;
 };
 
+/** Construction options for a `MemoryArbiter`: the soft budget and its water marks. */
 export type MemoryArbiterOptions = {
   /**
    * The overall soft budget in accounted bytes. `Infinity` (the default) keeps today's

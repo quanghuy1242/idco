@@ -32,14 +32,26 @@ function decomposeSeconds(seconds: number): { quantity: number; unit: string } {
   return { quantity: 1, unit: "3600" };
 }
 
+/** Props for {@link DurationInput}. */
 type DurationInputProps = {
   readonly label: string;
   readonly name: string;
+  /** Initial duration in seconds; decomposed into the largest whole quantity-and-unit pair. */
   readonly defaultValue?: number;
   readonly required?: boolean;
+  /** Control height: `sm` for compact, `md` (default) for standard. */
   readonly size?: "sm" | "md";
 };
 
+/**
+ * Quantity-plus-unit duration field that submits a single seconds value.
+ *
+ * @categoryDefault Forms
+ */
+
+/**
+ * A duration picker pairing a numeric quantity with a unit (minutes through months) that posts the total seconds via a hidden input.
+ */
 export function DurationInput({
   label,
   name,

@@ -7,12 +7,24 @@
  * free of island code. For each island-eligible node the server already rendered, it wraps
  * the static output in an `IslandBoundary` plus the registered island's `Interactive`
  * enhancement. A kind with no registered island falls through to the static output.
+ *
+ * @categoryDefault Islands
  */
-import type { ReactNode } from "react";
 import type { IslandRenderer } from "../reader/types";
+import type { ReactNode } from "react";
 import { IslandBoundary } from "./boundary";
 import { getReaderIsland } from "./registry";
 
+/**
+ * Builds the `renderIsland` bridge that turns on interactivity for a `<Reader>`.
+ *
+ * For each island-eligible node it wraps the server's static output in an `IslandBoundary`
+ * plus the registered island's enhancement; a kind with no island stays static.
+ *
+ * @category Islands
+ * @example
+ * <Reader value={snapshot} renderIsland={createIslandRenderer()} />
+ */
 export function createIslandRenderer(): IslandRenderer {
   return ({ kind, data, children }): ReactNode => {
     const island = getReaderIsland(kind);

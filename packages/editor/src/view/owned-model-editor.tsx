@@ -58,6 +58,11 @@ import {
 import { UploadProvider, type UploadImage } from "./upload-context";
 import { useAutosave, type AutosaveOptions } from "./use-autosave";
 
+/**
+ * @categoryDefault Editor Components
+ */
+
+/** Props for {@link OwnedModelEditor}: the view props plus the chrome, upload, embed, and autosave wiring. */
 export type OwnedModelEditorProps = OwnedModelEditorViewProps & {
   /** Hide the formatting toolbar (default: shown). */
   readonly hideToolbar?: boolean;
@@ -79,6 +84,7 @@ export type OwnedModelEditorProps = OwnedModelEditorViewProps & {
   readonly toolbarCapabilities?: Partial<ToolbarCapabilities>;
 };
 
+/** Imperative handle for {@link OwnedModelEditor}: the view handle plus find-bar and side-panel control. */
 export type OwnedModelEditorHandle = OwnedModelEditorViewHandle & {
   /** Open the in-editor find bar (the Ctrl/Cmd+F replacement). */
   readonly openFind: () => void;
@@ -93,6 +99,7 @@ export type OwnedModelEditorHandle = OwnedModelEditorViewHandle & {
   readonly closePanel: () => void;
 };
 
+/** The batteries-included owned-model editor: the engine view wrapped with the formatting toolbar, find bar, side-panel dock, and upload/autosave wiring. */
 export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   props: OwnedModelEditorProps,
   ref: Ref<OwnedModelEditorHandle>,

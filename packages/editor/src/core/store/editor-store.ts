@@ -25,6 +25,8 @@
  *   dispatch -> record history -> notify touched node/order/settings/selection
  *
  * There is intentionally no React, DOM, Lexical, or rendering code here.
+ *
+ * @categoryDefault Engine Core — Store
  */
 import {
   freezeNode,
@@ -106,6 +108,7 @@ import {
   withAttrs,
 } from "./mapping-helpers";
 
+/** The fixed NodeId of the document root that holds the top-level body order. */
 export const ROOT_NODE_ID = "idco_node_root" as NodeId;
 
 /**
@@ -118,6 +121,8 @@ export const ROOT_NODE_ID = "idco_node_root" as NodeId;
  * deleting it (lossless; the server's Zod union stays the hard authority on write).
  * `undefined` (or `allowedGroups` omitted) permits every node — the backward-compatible
  * default, so an editor with no profile behaves exactly as before.
+ *
+ * @category Schema Profile
  */
 export type SchemaProfile = {
   /**
@@ -128,6 +133,7 @@ export type SchemaProfile = {
   readonly allowedGroups?: readonly string[];
 };
 
+/** Construction options for an editor store: the id allocator, an optional starting snapshot/selection, the object registry, and the schema/memory/history/cold-store knobs. */
 export type EditorStoreOptions = {
   readonly allocator: IdAllocator;
   readonly snapshot?: EditorDocumentSnapshot;
@@ -185,8 +191,10 @@ export type PendingFormat = {
   readonly link?: { readonly href: string } | null;
 };
 
+/** Callback notified on every store change with the set of dirty slices that changed. */
 export type EditorSubscriber = (dirty: StoreDirty) => void;
 
+/** Callback notified once per committed transaction with the transaction that landed. */
 export type EditorCommitSubscriber = (committed: CommittedTransaction) => void;
 
 type MutableDispatchState = {
@@ -1857,6 +1865,7 @@ export class EditorStore {
   }
 }
 
+/** Build an editor store from a snapshot and id allocator — the entry point for loading or starting a document. */
 export function createEditorStore(options: EditorStoreOptions): EditorStore {
   return new EditorStore(options);
 }

@@ -18,6 +18,8 @@
  *
  * RSC-safe: pure data + pure functions, no React, no hooks, no client imports — so
  * the server `<Reader>` and the dispatch run it with zero client JavaScript.
+ *
+ * @categoryDefault Server Reader
  */
 
 /** Run-encoded character ids for a text leaf (mirror of core `CharacterRun`). */

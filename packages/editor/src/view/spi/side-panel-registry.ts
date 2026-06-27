@@ -21,6 +21,8 @@
  * returns registration order (docs/027 §8.5 — tab order is registration sequence,
  * never an explicit index). All imports are type-only, so nothing lands in the
  * runtime graph from this file alone.
+ *
+ * @categoryDefault Side Panel SPI
  */
 import type { ReactNode } from "react";
 import type { EditorStore, NodeId } from "../../core";

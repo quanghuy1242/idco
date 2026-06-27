@@ -1,6 +1,9 @@
 /**
  * Shared rich-text cell-styling helpers — product-neutral, framework-free, RSC-safe.
  *
+ * @module
+ * @categoryDefault Styling
+ *
  * These two pure functions were copy-pasted verbatim between the client renderer
  * (`@idco/ui` `rich-text-content`) and the server reader's L1 layer (`reader/l1/types`),
  * with the reader copy's own header admitting "Moved verbatim from `@idco/ui`". They are

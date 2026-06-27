@@ -12,6 +12,8 @@
  * register themselves when `object-block.tsx` loads; a custom node calls
  * `registerNode` once and renders without any edit to the view internals — that
  * is the whole point of the SPI (docs/016 §10).
+ *
+ * @categoryDefault Node SPI
  */
 import type { ReactNode, RefObject } from "react";
 import type { ResourceOption } from "@quanghuy1242/idco-ui";

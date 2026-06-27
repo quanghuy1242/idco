@@ -36,6 +36,11 @@ type PayloadNode = {
   readonly [key: string]: unknown;
 };
 
+/**
+ * @categoryDefault Compat (import-only)
+ */
+
+/** A raw Payload/Lexical document (`{ root: { children } }` plus settings) to import. */
 export type PayloadLexicalInput = {
   readonly root?: { readonly children?: readonly PayloadNode[] };
   readonly settings?: DocumentSettings;
@@ -49,6 +54,7 @@ export type PayloadImportReport = {
   readonly mapped: Readonly<Record<string, number>>;
 };
 
+/** The compat document an import produced, paired with its mapped/dropped report. */
 export type PayloadImportResult = {
   readonly document: RichTextCompatDocument;
   readonly report: PayloadImportReport;

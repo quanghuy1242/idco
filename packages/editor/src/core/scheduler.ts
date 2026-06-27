@@ -41,6 +41,10 @@
  * opt out so they do not clobber the legacy scheduler's dashboard.
  */
 
+/**
+ * @categoryDefault Engine Core — Store
+ */
+
 /** Which timing lane owns a task. Lane choice is semantic, not just delay. */
 export type EngineSchedulerLane = "sync" | "frame" | "idle" | "debounced";
 

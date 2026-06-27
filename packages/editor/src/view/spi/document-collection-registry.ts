@@ -17,6 +17,8 @@
  * thread. `validate` is an optional dev-time guard only; production trusts the stored
  * items. Mirrors the sibling registries: module singleton, idempotent by id,
  * registration-order listing.
+ *
+ * @categoryDefault Document Collections SPI
  */
 import type { CollectionItem } from "../../core";
 

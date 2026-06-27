@@ -20,6 +20,8 @@
  * surface's contents are unit-asserted by calling it (docs/024 §10) — exactly as
  * docs/023 §5.5 made the ribbon testable. The renderers in `chrome/surfaces/*` hold
  * zero command knowledge; all of it flows as data from here.
+ *
+ * @categoryDefault Commands & Toolbar SPI
  */
 import type { EditorStore, EditorSelection, NodeId } from "../../core";
 import { activeScope, collectSelectionText, scopePath } from "../../core";

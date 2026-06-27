@@ -1,10 +1,20 @@
 // DaisyUI 5: https://daisyui.com/components/mockup-code/
+/**
+ * Renders pretty-printed, syntax-highlighted JSON in a scrollable code surface.
+ *
+ * @categoryDefault Data Display
+ */
 import { Fragment, type ReactNode } from "react";
 
+/** Props for {@link JsonViewer}. */
 type JsonViewerProps = {
+  /** JSON to display, either a value to stringify or an already-serialized string. */
   readonly value: object | string;
+  /** Optional heading shown in the toolbar above the code. */
   readonly label?: string;
+  /** Caps the scroll height of the code area; defaults to `md`. */
   readonly maxHeight?: "sm" | "md" | "lg";
+  /** Optional toolbar slot, e.g. a copy button, aligned to the right of the label. */
   readonly action?: ReactNode;
 };
 
@@ -21,6 +31,7 @@ const tokenPattern =
   /("(?:\\.|[^"\\])*"\s*:?)|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
 
 // In-house JSON highlighter: no external dep (side-effect-free, SSR-safe); renders React spans, not raw HTML.
+/** Splits a JSON string into React spans that color keys, strings, numbers, and literals. */
 export function highlightJson(json: string): ReactNode[] {
   const out: ReactNode[] = [];
   let lastIndex = 0;
@@ -48,6 +59,7 @@ export function highlightJson(json: string): ReactNode[] {
   return out;
 }
 
+/** A scrollable, syntax-highlighted JSON panel with an optional label and action slot. */
 export function JsonViewer({
   value,
   label,

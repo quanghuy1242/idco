@@ -40,14 +40,26 @@ import {
 
 type DateValue = CalendarDate | CalendarDateTime;
 
+/**
+ * Segmented date/time field with a calendar popover built on React Aria `DatePicker`.
+ *
+ * @categoryDefault Forms
+ */
+
+/** Props for {@link DateTimeInput}. */
 type DateTimeInputProps = {
   readonly label: string;
   readonly name?: string;
+  /** Controlled value as epoch milliseconds; `null` clears the field. Pair with {@link DateTimeInputProps.onChange}. */
   readonly value?: number | null;
+  /** Initial value as epoch milliseconds when uncontrolled. */
   readonly defaultValue?: number | null;
+  /** Called with the new value as epoch milliseconds, or `null` when cleared. */
   readonly onChange?: (value: number | null) => void;
+  /** Whether to pick a date and time (`datetime`, default) or a date only (`date`). */
   readonly mode?: "datetime" | "date";
   readonly required?: boolean;
+  /** Control height: `sm` for compact, `md` (default) for standard. */
   readonly size?: "sm" | "md";
   readonly description?: string;
 };
@@ -68,6 +80,9 @@ function toMillis(value: DateValue | null): number | null {
 
 // DaisyUI `input` shell around a React Aria `DatePicker` (segmented field + calendar
 // popover) so dates/times are picked, never typed as raw ISO strings into a text box.
+/**
+ * A date or date-and-time field with a segmented input plus calendar popover that reads and writes epoch milliseconds.
+ */
 export function DateTimeInput({
   label,
   name,

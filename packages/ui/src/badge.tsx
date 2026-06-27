@@ -1,6 +1,12 @@
 // DaisyUI 5: https://daisyui.com/components/badge/
+/**
+ * Outlined label badge with tone and size variants.
+ *
+ * @categoryDefault Feedback
+ */
 import type { ReactNode } from "react";
 
+/** Color intent of a badge, mapped to a DaisyUI `badge-*` color. */
 type BadgeTone =
   | "neutral"
   | "primary"
@@ -10,10 +16,14 @@ type BadgeTone =
   | "warning"
   | "error"
   | "info";
+/** Size of a badge; `md` is the default and `sm` is more compact. */
 type BadgeSize = "sm" | "md";
 
+/** Props for {@link Badge}. */
 type BadgeProps = {
+  /** Color intent of the badge; defaults to `neutral`. */
   readonly tone?: BadgeTone;
+  /** Size of the badge; defaults to `md`. */
   readonly size?: BadgeSize;
   readonly children?: ReactNode;
 };
@@ -34,6 +44,7 @@ const sizeClass: Record<BadgeSize, string> = {
   md: "",
 };
 
+/** An outlined label badge with tone and size variants. */
 export function Badge({ tone = "neutral", size = "md", children }: BadgeProps) {
   return (
     <span

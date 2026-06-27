@@ -28,6 +28,8 @@
  * and tests), mirroring `listOverlayStructuralViews`/`listTabHandlers` (note.md
  * W1/VP6); the registration functions and descriptor types are the host API
  * (docs/023 §5.8).
+ *
+ * @categoryDefault Commands & Toolbar SPI
  */
 import type { ReactNode } from "react";
 import type { EditorStore, TextMarkKind } from "../../core";

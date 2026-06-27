@@ -110,6 +110,11 @@ export type {
   OwnedModelEditorViewHandle,
 };
 
+/**
+ * @categoryDefault Editor Components
+ */
+
+/** Props for {@link OwnedModelEditorView}: the store plus virtualization, worker, index, and overlay-authority wiring. */
 export type OwnedModelEditorViewProps = {
   readonly store: EditorStore;
   readonly scheduler?: EngineScheduler;
@@ -156,6 +161,7 @@ export type OwnedModelEditorViewProps = {
   readonly overlayPanelHost?: PanelHost;
 };
 
+/** The bare engine view: renders the document as windowed blocks with caret, selection, and virtualization, with no toolbar or chrome. */
 export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   props: OwnedModelEditorViewProps,
   ref: Ref<OwnedModelEditorViewHandle>,

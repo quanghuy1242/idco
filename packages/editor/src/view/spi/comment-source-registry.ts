@@ -15,6 +15,8 @@
  *
  * Shape mirrors the sibling registries: module singleton, register-by-id, idempotent,
  * registration-order listing. All imports are type-only.
+ *
+ * @categoryDefault Comments SPI
  */
 
 /** Comment author identity (docs/027 §7.2); lives in the host, never the document. */

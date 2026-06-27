@@ -37,6 +37,10 @@ import { renderLeafMarks } from "./mark-render";
 import { indentMarginStyle } from "../styles";
 
 /**
+ * @categoryDefault Resting Render
+ */
+
+/**
  * The single resting render of a heavy object's baked content — the editor's at-rest
  * *live-surface* render (`BakedObjectView`). Bakes on the fly when `node.baked` is absent
  * (imported objects carry no baked snapshot, docs/010 §14) — for display only, never written
@@ -131,6 +135,7 @@ export function RestingLeaf(props: { readonly node: TextLeafNode }) {
   }
 }
 
+/** Props for {@link RestingDocument}: the snapshot to render plus an optional class and bake registry. */
 export type RestingDocumentProps = {
   readonly snapshot: EditorDocumentSnapshot;
   readonly className?: string;

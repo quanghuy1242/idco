@@ -20,20 +20,39 @@ import {
 import { useFilter } from "react-aria";
 import { ChevronDown } from "lucide-react";
 
+/**
+ * Scope/permission multi-select: a React Aria ComboBox + TagGroup with DaisyUI badge styling.
+ *
+ * @categoryDefault Pickers
+ */
+
+/** A selectable scope offered in the builder's suggestion list. */
 export type ScopeSuggestion = {
+  /** The scope token (e.g. `posts:write`). */
   readonly value: string;
+  /** Human-readable explanation shown beside the value. */
   readonly description?: string;
+  /** Optional grouping label for organizing suggestions. */
   readonly group?: string;
 };
 
+/** Props for {@link ScopeBuilder}. */
 type ScopeBuilderProps = {
+  /** Accessible label for the combobox. */
   readonly label: string;
+  /** Selected scope tokens (controlled). */
   readonly value: ReadonlyArray<string>;
+  /** Called with the next selection when scopes are added or removed. */
   readonly onChange: (next: string[]) => void;
+  /** Suggested scopes to filter and pick from. */
   readonly suggestions?: ReadonlyArray<ScopeSuggestion>;
+  /** Allow committing a typed value not present in `suggestions`. */
   readonly allowCustom?: boolean;
+  /** Validate a candidate scope; return an error message to reject it. */
   readonly validate?: (scope: string) => string | undefined;
+  /** Field name to submit the joined scopes under. */
   readonly name?: string;
+  /** Control size; defaults to `md`. */
   readonly size?: "sm" | "md";
   /**
    * Retained for API compatibility. The builder now always renders the same
@@ -41,18 +60,28 @@ type ScopeBuilderProps = {
    */
   readonly variant?: "inline" | "menu";
   readonly placeholder?: string;
+  /** Controlled search text for the input. */
   readonly searchValue?: string;
+  /** Called as the search text changes (for async suggestion loading). */
   readonly onSearchValueChange?: (next: string) => void;
 };
 
 const scopePattern = /^[a-z][a-z0-9:_-]*$/;
 
+/** The default scope validator: accepts lowercase tokens of letters, numbers, and `: _ -`. */
 export function defaultScopeValidate(scope: string): string | undefined {
   return scopePattern.test(scope)
     ? undefined
     : "Scopes are lowercase and may contain letters, numbers, : _ -";
 }
 
+/**
+ * A multi-select for scopes/permissions with filtering, suggestions, custom entries, and tag chips.
+ *
+ * @example
+ * <ScopeBuilder label="Scopes" value={scopes} onChange={setScopes}
+ *   suggestions={available} allowCustom />
+ */
 export function ScopeBuilder({
   label,
   value,

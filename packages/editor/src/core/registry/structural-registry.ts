@@ -45,6 +45,10 @@ import {
 import { tableStructuralDefinitions } from "../table/definitions";
 
 /**
+ * @categoryDefault Node SPI
+ */
+
+/**
  * The initial subtree a structural insert builds: the container root plus its
  * already-built descendants (carried on one `insert-node` step so the whole
  * subtree registers atomically), and the optional leaf to land the caret in.

@@ -36,6 +36,11 @@ function numberField(
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/**
+ * @categoryDefault Virtual Geometry
+ */
+
+/** Map an editor node to the `BlockMetrics` its height estimate is derived from. */
 export function metricsForNode(node: EditorNode): BlockMetrics {
   switch (node.kind) {
     case "text":

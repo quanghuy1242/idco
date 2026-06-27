@@ -44,6 +44,11 @@ const DocumentIndexContext = createContext<DocumentIndexContextValue | null>(
   null,
 );
 
+/**
+ * @categoryDefault Document Index
+ */
+
+/** Provides the live document index and reveal callback to the block subtree so views can read it through {@link useDocumentIndex}. */
 export function DocumentIndexProvider(props: {
   readonly store: DocumentIndexStore;
   readonly revealNode?: (id: NodeId) => void;

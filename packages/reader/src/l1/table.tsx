@@ -3,6 +3,8 @@
  * grid borders, the numbered-column gutter) is the same Tailwind/DaisyUI markup the
  * editor's resting render already shares, moved verbatim from `@idco/ui`. The numbered
  * gutter ships its own scoped `<style>` because L1 ships no global stylesheet for it.
+ *
+ * @categoryDefault L1 Table
  */
 import type { ReactNode } from "react";
 import { readableTextColor, verticalAlignClass } from "./types";
@@ -17,6 +19,7 @@ const NUMBERED_TABLE_CSS = `
 .rt-table-numbered tr>*:first-child::before{content:counter(rt-row);position:absolute;left:0;top:0;bottom:0;width:2.25rem;display:grid;place-items:center;font-size:0.7rem;font-variant-numeric:tabular-nums;color:var(--color-base-content);opacity:0.45;background:var(--color-base-200);border-right:1px solid var(--color-base-300)}
 `;
 
+/** Renders a table with its column widths, layout mode, and optional numbered-row gutter. */
 export function RichTextTable({
   children,
   colWidths,
@@ -64,10 +67,12 @@ export function RichTextTable({
   );
 }
 
+/** Renders a table row as a `<tr>`. */
 export function RichTextTableRow({ children }: RichTextChildrenProps) {
   return <tr>{children}</tr>;
 }
 
+/** Renders a table cell as a `<th>` or `<td>` with its span, background, and vertical alignment. */
 export function RichTextTableCell({
   header,
   children,

@@ -18,11 +18,25 @@ import {
   type ThemeMode,
 } from "./theme";
 
+/** Props for {@link ThemeDialog}. */
 type ThemeDialogProps = {
+  /** Whether the dialog is currently open (controlled). */
   readonly open: boolean;
+  /** Called when the dialog requests to open or close (e.g. dismissal). */
   readonly onOpenChange: (open: boolean) => void;
 };
 
+/**
+ * A modal for selecting the DaisyUI theme, built on React Aria with DaisyUI
+ * modal styling.
+ *
+ * @categoryDefault Overlays
+ */
+
+/**
+ * A modal that lets the user pick the system/light/dark theme mode and applies
+ * the choice on confirm.
+ */
 export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
   const [themeName, setThemeName] = useState("idco-light");
   const [selected, setSelected] = useState<ThemeMode>("system");

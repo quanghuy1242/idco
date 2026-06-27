@@ -15,15 +15,22 @@
  * whole react-aria family — so a barrel import would put ~300 KB of react-aria one failed
  * tree-shake away from this chunk. `CodeEditor` only needs Prism; the subpath resolves to
  * that one ~3.7 KB module and can never pull react-aria, tree-shaking or not.
+ *
+ * @categoryDefault Islands
  */
-import { isRecord } from "@quanghuy1242/idco-lib";
 import type { ReactNode } from "react";
+import { isRecord } from "@quanghuy1242/idco-lib";
 import {
   CodeEditor,
   type CodeEditorLanguage,
 } from "@quanghuy1242/idco-ui/code-editor";
 import { registerReaderIsland } from "./registry";
 
+/**
+ * The island data for a code block: its source plus an optional language hint.
+ *
+ * @category Islands
+ */
 export type LiveCodeData = {
   readonly value: string;
   readonly language?: string;
@@ -70,6 +77,11 @@ function LiveCodeInteractive({
   );
 }
 
+/**
+ * The live-code island: upgrades a static `<pre>` into a syntax-highlighted read-only `CodeEditor`.
+ *
+ * @category Islands
+ */
 export const liveCodeIsland = {
   Interactive: LiveCodeInteractive,
   hydrate: "visible" as const,

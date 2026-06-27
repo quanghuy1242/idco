@@ -1,7 +1,13 @@
 // DaisyUI 5: https://daisyui.com/components/stat/
+/**
+ * Statistic cards and their grouping containers using DaisyUI stat styling.
+ *
+ * @categoryDefault Feedback
+ */
 import type { ReactNode } from "react";
 import { NavIcon } from "./nav-icons";
 
+/** Color intent of a stat's value and figure. */
 export type StatTone =
   | "neutral"
   | "primary"
@@ -9,9 +15,13 @@ export type StatTone =
   | "warning"
   | "error"
   | "info";
+/** Number of columns in a grid stat group, or `auto` for a responsive default. */
 export type StatColumns = "auto" | 2 | 3 | 4;
+/** Arrangement of a stat group: a responsive `grid` or a horizontal `inline` strip. */
 export type StatGroupLayout = "grid" | "inline";
+/** Spacing density of a stat group's cards. */
 export type StatGroupDensity = "comfortable" | "compact";
+/** Whether a stat group draws its own bordered frame or sits seamlessly inline. */
 export type StatGroupFrame = "standalone" | "seamless";
 
 const columnsClass: Record<string, string> = {
@@ -30,14 +40,20 @@ const toneClass: Record<StatTone, string> = {
   info: "text-info",
 };
 
+/** Props for {@link StatGroup}. */
 type StatGroupProps = {
   readonly children: ReactNode;
+  /** Grid column count; ignored when `layout` is `inline`. Defaults to `auto`. */
   readonly columns?: StatColumns;
+  /** Layout mode of the group; defaults to `grid`. */
   readonly layout?: StatGroupLayout;
+  /** Card spacing density; defaults to `comfortable`. */
   readonly density?: StatGroupDensity;
+  /** Whether the group draws its own frame; defaults to `standalone`. */
   readonly frame?: StatGroupFrame;
 };
 
+/** A responsive grid or inline strip of {@link Stat} cards. */
 export function StatGroup({
   children,
   columns = "auto",
@@ -70,10 +86,12 @@ export function StatGroup({
   );
 }
 
+/** Props for {@link StatSummaryGroup}. */
 type StatSummaryGroupProps = {
   readonly children: ReactNode;
 };
 
+/** A vertically stacked, framed list of {@link Stat} cards for summary rows. */
 export function StatSummaryGroup({ children }: StatSummaryGroupProps) {
   return (
     <div className="flex flex-col gap-px overflow-hidden rounded-box border border-base-300 bg-base-300">
@@ -82,15 +100,23 @@ export function StatSummaryGroup({ children }: StatSummaryGroupProps) {
   );
 }
 
+/** Props for {@link Stat}. */
 type StatProps = {
+  /** Label shown above the value. */
   readonly title: ReactNode;
+  /** The primary statistic figure. */
   readonly value: ReactNode;
+  /** Optional caption shown beneath the value. */
   readonly description?: ReactNode;
+  /** Color intent of the value and figure; defaults to `neutral`. */
   readonly tone?: StatTone;
+  /** Registered icon name to render in the stat figure. */
   readonly iconName?: string;
+  /** Optional progress meter rendered below the value. */
   readonly meter?: { readonly value: number; readonly max: number };
 };
 
+/** A single DaisyUI stat card with title, value, and optional icon and meter. */
 export function Stat({
   title,
   value,

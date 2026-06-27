@@ -24,6 +24,8 @@
  * now so the SPI shape is fixed from day one — optionality must not be retrofitted
  * (docs/026 §4.4, §10), since adding a capability after the type ships as required
  * would break every registered source.
+ *
+ * @categoryDefault Host Data Source SPI
  */
 import type { ReactNode } from "react";
 import type { ResourceOption, ResourceSource } from "@quanghuy1242/idco-ui";

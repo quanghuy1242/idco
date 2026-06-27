@@ -1,13 +1,22 @@
 // DaisyUI 5: https://daisyui.com/components/alert/
+/**
+ * Inline alert banner with tone-driven DaisyUI styling and matching glyph.
+ *
+ * @categoryDefault Feedback
+ */
 import type { ReactNode } from "react";
 
+/** Visual intent of an alert, mapped to a DaisyUI alert color. */
 export type AlertTone = "error" | "success" | "warning" | "info";
 
+/** Props for {@link Alert}. */
 type AlertProps = {
+  /** Visual intent that selects the alert color and glyph; defaults to `info`. */
   readonly tone?: AlertTone;
   readonly children: ReactNode;
 };
 
+/** Maps each {@link AlertTone} to its DaisyUI `alert-*` color class. */
 export const alertToneClass: Record<AlertTone, string> = {
   error: "alert-error",
   success: "alert-success",
@@ -43,6 +52,7 @@ export function AlertGlyph({ tone }: { readonly tone: AlertTone }) {
   );
 }
 
+/** An inline alert banner with a tone-driven color and leading glyph. */
 export function Alert({ tone = "info", children }: AlertProps) {
   return (
     <div

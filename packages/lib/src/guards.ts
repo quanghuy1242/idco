@@ -1,6 +1,9 @@
 /**
  * Shared runtime type guards — product-neutral, framework-free, RSC-safe.
  *
+ * @module
+ * @categoryDefault Guards
+ *
  * `isRecord` is the single canonical "is this a plain object record" guard for the
  * whole monorepo. It lived in three places (lib auth-fetch, editor object-registry,
  * editor-legacy schema) and was re-inlined as a bare `typeof x === "object"` check in
@@ -14,6 +17,12 @@
  * read string keys, which an array never meaningfully carries. The two former definitions
  * that omitted the `!Array.isArray` check were the looser, less-correct variants; folding
  * everything onto the array-excluding form is the intended convergence, not a regression.
+ */
+
+/**
+ * Narrow an unknown value to a plain record (a non-null object that is not an array).
+ *
+ * @category Guards
  */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

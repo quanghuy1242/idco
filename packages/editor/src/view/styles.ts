@@ -29,6 +29,10 @@ import {
 import type { EditorStore, NodeId, TextLeafType } from "../core";
 
 /**
+ * @categoryDefault Editor Components
+ */
+
+/**
  * The `.rt-*` typography class for a text-leaf block (docs/015 §4.3). The single source of
  * prose appearance: the live editor's editable host wears the *same* class the reader's L1
  * primitive emits, so a heading/quote looks identical whether edited or read, and changing

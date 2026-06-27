@@ -26,6 +26,10 @@ import {
 } from "./object-registry";
 import type { RichTextCompatNode } from "../model";
 
+/**
+ * @categoryDefault Engine Core — Model
+ */
+
 /** Registry of object-block definitions used by compat import/export. */
 export class BlockRegistry {
   readonly #definitions = new Map<string, NodeDefinition>();

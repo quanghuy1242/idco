@@ -1,3 +1,11 @@
+/**
+ * Rich-text document contracts plus heading, anchor, and table-of-contents helpers.
+ *
+ * @module
+ * @categoryDefault Rich Text
+ */
+
+/** One node in a rich-text document tree: an optional type, text, children, and the open bag of node-specific attributes. */
 export type RichTextDocumentNode = {
   readonly type?: string;
   readonly text?: string;
@@ -12,21 +20,27 @@ export type RichTextDocumentNode = {
   readonly [key: string]: unknown;
 };
 
+/** A whole rich-text document: a single root whose children are the top-level nodes. */
 export type RichTextDocument = {
   readonly root: {
     readonly children?: readonly RichTextDocumentNode[];
   };
 };
 
+/** A heading depth, one through six. */
 export type RichTextHeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
+/** A heading HTML tag name, `h1` through `h6`. */
 export type RichTextHeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+/** Whether table-of-contents entries carry a numeric prefix (`decimal`) or none. */
 export type RichTextTocNumbering = "none" | "decimal";
+/** The visual treatment of a rendered table of contents. */
 export type RichTextTocStyle = "panel" | "plain" | "compact";
 /** `inline` renders the TOC as a block in the flow; `aside` pins it to a sticky side rail. */
 export type RichTextTocPlacement = "inline" | "aside";
 /** Which side a `placement: "aside"` rail docks to. */
 export type RichTextTocSide = "left" | "right";
 
+/** Fully resolved table-of-contents settings: title, the heading level range to include, numbering, style, and placement. */
 export type RichTextTocSettings = {
   readonly title: string;
   readonly minLevel: RichTextHeadingLevel;
@@ -37,6 +51,7 @@ export type RichTextTocSettings = {
   readonly side: RichTextTocSide;
 };
 
+/** Loosely typed, possibly partial table-of-contents settings as read from stored node data, before normalization fills in defaults. */
 export type RichTextTocSettingsInput = {
   readonly title?: unknown;
   readonly minLevel?: unknown;
@@ -47,6 +62,7 @@ export type RichTextTocSettingsInput = {
   readonly side?: unknown;
 };
 
+/** One resolved table-of-contents entry: a heading's anchor id, href, text, tag/level, outline depth, and ordinal numbering. */
 export type RichTextTocEntry = {
   readonly id: string;
   readonly href: string;
@@ -77,6 +93,7 @@ const DEFAULT_TOC_SETTINGS: RichTextTocSettings = {
   title: "Table of contents",
 };
 
+/** Map a heading tag (`h1`–`h6`) to its numeric level, defaulting to 2 for anything unrecognized. */
 export function headingLevelFromTag(value: unknown): RichTextHeadingLevel {
   return value === "h1"
     ? 1
@@ -93,12 +110,14 @@ export function headingLevelFromTag(value: unknown): RichTextHeadingLevel {
               : 2;
 }
 
+/** Map a numeric heading level (1–6) to its tag name (`h1`–`h6`). */
 export function headingTagFromLevel(
   level: RichTextHeadingLevel,
 ): RichTextHeadingTag {
   return HEADING_TAGS[level - 1] ?? "h2";
 }
 
+/** Flatten a node (or list of nodes) to its concatenated plain text, recursing through children. */
 export function richTextNodeText(
   node: RichTextDocumentNode | readonly RichTextDocumentNode[] | undefined,
 ): string {
@@ -114,6 +133,7 @@ export function richTextNodeText(
   return richTextNodeText(current.children);
 }
 
+/** Slugify a string into a URL-safe heading anchor, falling back to a default when nothing usable remains. */
 export function slugifyHeadingAnchor(value: string, fallback = "section") {
   const slug = value
     .normalize("NFKD")
@@ -125,6 +145,7 @@ export function slugifyHeadingAnchor(value: string, fallback = "section") {
   return slug || fallback;
 }
 
+/** Slugify a preferred anchor and de-duplicate it against an in-use set by appending a numeric suffix, recording the chosen id. */
 export function allocateHeadingAnchorId(preferred: string, used: Set<string>) {
   const base = slugifyHeadingAnchor(preferred);
   let candidate = base;
@@ -137,6 +158,7 @@ export function allocateHeadingAnchorId(preferred: string, used: Set<string>) {
   return candidate;
 }
 
+/** Return a copy of the document with every heading assigned a unique, stable anchor id. */
 export function ensureRichTextHeadingAnchors<T extends RichTextDocument>(
   document: T,
 ): T {
@@ -150,6 +172,7 @@ export function ensureRichTextHeadingAnchors<T extends RichTextDocument>(
   };
 }
 
+/** Coerce loosely typed, possibly partial TOC settings into a fully resolved {@link RichTextTocSettings}, filling defaults and ordering the level range. */
 export function normalizeTocSettings(
   node: RichTextTocSettingsInput | undefined,
 ): RichTextTocSettings {
@@ -183,6 +206,7 @@ export function normalizeTocSettings(
   return { maxLevel, minLevel, numbering, placement, side, style, title };
 }
 
+/** Build the ordered, nested table-of-contents entries for a document, deriving anchors, outline depth, and numbering from its headings within the configured level range. */
 export function collectRichTextTocEntries(
   document: RichTextDocument,
   settingsInput?: RichTextTocSettingsInput,

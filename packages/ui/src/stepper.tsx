@@ -1,9 +1,16 @@
 // DaisyUI 5: https://daisyui.com/components/steps/
 "use client";
 
+/**
+ * A multi-step wizard that pairs DaisyUI step styling with controlled navigation between numbered steps.
+ *
+ * @categoryDefault Navigation
+ */
+
 import { useState, type ReactNode } from "react";
 import { Button } from "./button";
 
+/** A single wizard step with its label, body content, and optional validity gate. */
 export type Step = {
   readonly id: string;
   readonly label: string;
@@ -11,12 +18,18 @@ export type Step = {
   readonly isValid?: boolean;
 };
 
+/** Props for {@link Stepper}. */
 type StepperProps = {
   readonly steps: ReadonlyArray<Step>;
+  /** Zero-based index of the currently displayed step. */
   readonly activeStep: number;
+  /** Called with the target index when the user navigates to another step. */
   readonly onStepChange: (step: number) => void;
+  /** Called when the final step's complete button is pressed; awaited to show a submitting state. */
   readonly onComplete: () => void | Promise<void>;
+  /** Label for the final-step action button (defaults to "Complete"). */
   readonly completeLabel?: string;
+  /** Visual scale of the steps row and footer buttons (defaults to "md"). */
   readonly size?: "sm" | "md";
 };
 
@@ -25,6 +38,7 @@ const stepsSizeClass: Record<NonNullable<StepperProps["size"]>, string> = {
   md: "text-sm [&_.step]:grid-rows-[30px_1fr] [&_.step]:min-w-14 [&_.step:before]:h-1 [&_.step:after]:h-6 [&_.step:after]:w-6",
 };
 
+/** A controlled multi-step wizard that renders the active step's content with Back/Next/Complete navigation. */
 export function Stepper({
   steps,
   activeStep,

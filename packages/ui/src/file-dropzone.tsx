@@ -5,12 +5,18 @@ import { useState } from "react";
 import { DropZone, FileTrigger, Text } from "react-aria-components";
 import { Button } from "./button";
 
+/** Props for {@link FileDropzone}. */
 type FileDropzoneProps = {
   readonly label: string;
+  /** File types to accept, as extensions (`.png`), MIME types (`image/png`), or wildcards (`image/*`). */
   readonly accept?: ReadonlyArray<string>;
+  /** Called with the accepted files after size and type validation passes. */
   readonly onFiles: (files: File[]) => void;
+  /** Allow selecting and dropping more than one file; when false only the first is kept. */
   readonly multiple?: boolean;
+  /** Reject any file larger than this byte count. */
   readonly maxSizeBytes?: number;
+  /** Helper text shown below the browse button. */
   readonly hint?: string;
 };
 
@@ -24,6 +30,13 @@ function matchesAccept(file: File, accept?: ReadonlyArray<string>): boolean {
   });
 }
 
+/**
+ * A drag-and-drop file upload field with a browse button, validation, and rejection messaging.
+ *
+ * @categoryDefault Forms
+ */
+
+/** A drag-and-drop file upload field with a browse button, type/size validation, and rejection messaging, built on React Aria with DaisyUI styling. */
 export function FileDropzone({
   label,
   accept,

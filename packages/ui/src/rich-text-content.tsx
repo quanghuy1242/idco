@@ -4,6 +4,12 @@
 // DaisyUI 5: https://daisyui.com/components/menu/
 "use client";
 
+/**
+ * Product-neutral presentational components for rendering saved rich-text/editor content — headings, paragraphs, lists, callouts, inline marks, media figures, embeds, code blocks, tables, and a table of contents.
+ *
+ * @categoryDefault Editor Bridge
+ */
+
 import { readableTextColor, verticalAlignClass } from "@quanghuy1242/idco-lib";
 import type { ReactNode } from "react";
 import { Link as AriaLink } from "react-aria-components";
@@ -13,20 +19,31 @@ import { CodeEditor, type CodeEditorLanguage } from "./code-editor";
 import { NavIcon } from "./nav-icons";
 import { Text } from "./typography";
 
+/** Heading rank from `h1` through `h6`. */
 export type RichTextHeadingLevel = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+/** Whether a list renders as unordered bullets or an ordered numbered list. */
 export type RichTextListKind = "bullet" | "number";
+/** Horizontal text alignment of a block. */
 export type RichTextAlign = "left" | "center" | "right" | "justify";
+/** Visual treatment of a rendered table of contents (bordered panel, plain inline, or dense compact). */
 export type RichTextTableOfContentsStyle = "panel" | "plain" | "compact";
 
+/** A single heading entry in a table of contents, with its link target, label, and nesting depth. */
 export type RichTextTableOfContentsEntry = {
   readonly id: string;
+  /** Link fragment (e.g. `#anchor`) the entry scrolls to. */
   readonly href: string;
+  /** Visible heading label. */
   readonly text: string;
+  /** Source heading rank (1–6). */
   readonly level: number;
+  /** Visual nesting depth used for indentation, distinct from the raw heading level. */
   readonly depth?: number;
+  /** Optional outline number (e.g. `2.1`) shown in a reserved column. */
   readonly number?: string;
 };
 
+/** Shared props for content components that render nested rich-text children. */
 type RichTextChildrenProps = {
   readonly children?: ReactNode;
 };
@@ -38,6 +55,15 @@ const alignClass: Record<RichTextAlign, string> = {
   right: "text-right",
 };
 
+/**
+ * Renders the root article container that lays out a saved document's rich-text blocks with consistent spacing.
+ *
+ * @example
+ * <RichTextArticle>
+ *   <RichTextHeading level="h1">Title</RichTextHeading>
+ *   <RichTextParagraph>Body text.</RichTextParagraph>
+ * </RichTextArticle>
+ */
 export function RichTextArticle({ children }: RichTextChildrenProps) {
   return (
     <article className="flex flex-col gap-3 text-base leading-6 text-base-content [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>h1:not(:first-child)]:mt-3 [&>h2:not(:first-child)]:mt-3 [&>h3:not(:first-child)]:mt-2 [&>h4:not(:first-child)]:mt-2 [&>h5:not(:first-child)]:mt-2 [&>h6:not(:first-child)]:mt-2">
@@ -46,10 +72,14 @@ export function RichTextArticle({ children }: RichTextChildrenProps) {
   );
 }
 
+/**
+ * Renders a body paragraph with optional horizontal alignment.
+ */
 export function RichTextParagraph({
   align,
   children,
 }: RichTextChildrenProps & {
+  /** Horizontal text alignment of the paragraph. */
   readonly align?: RichTextAlign;
 }) {
   return (
@@ -61,6 +91,9 @@ export function RichTextParagraph({
   );
 }
 
+/**
+ * Renders a section heading at the given level, with an optional hover-revealed anchor link.
+ */
 export function RichTextHeading({
   level,
   align,
@@ -68,9 +101,13 @@ export function RichTextHeading({
   anchorLabel,
   children,
 }: RichTextChildrenProps & {
+  /** Heading rank (`h1`–`h6`) controlling both the element tag and typography. */
   readonly level: RichTextHeadingLevel;
+  /** Horizontal text alignment of the heading. */
   readonly align?: RichTextAlign;
+  /** Element `id` and link fragment target that enables the anchor link affordance. */
   readonly anchorId?: string;
+  /** Accessible label fragment used in the anchor link's `aria-label`. */
   readonly anchorLabel?: string;
 }) {
   const className = [
@@ -100,15 +137,22 @@ export function RichTextHeading({
   );
 }
 
+/**
+ * Renders a callout block (DaisyUI alert) carrying an emphasis tone such as info or warning.
+ */
 export function RichTextCallout({
   tone = "info",
   children,
 }: RichTextChildrenProps & {
+  /** Emphasis tone of the callout (info, success, warning, error, etc.). */
   readonly tone?: AlertTone;
 }) {
   return <Alert tone={tone}>{children}</Alert>;
 }
 
+/**
+ * Renders a quoted passage with a left border and italic styling.
+ */
 export function RichTextBlockquote({ children }: RichTextChildrenProps) {
   return (
     <blockquote className="m-0 border-l-4 border-base-300 py-1 pl-4 leading-6 italic text-base-content/80">
@@ -117,12 +161,17 @@ export function RichTextBlockquote({ children }: RichTextChildrenProps) {
   );
 }
 
+/**
+ * Renders an ordered or unordered list wrapping {@link RichTextListItem} children.
+ */
 export function RichTextList({
   kind,
   start,
   children,
 }: RichTextChildrenProps & {
+  /** Whether the list is bulleted (unordered) or numbered (ordered). */
   readonly kind: RichTextListKind;
+  /** Starting number for an ordered list. */
   readonly start?: number;
 }) {
   if (kind === "number") {
@@ -142,14 +191,21 @@ export function RichTextList({
   );
 }
 
+/**
+ * Renders a single list item inside a {@link RichTextList}.
+ */
 export function RichTextListItem({ children }: RichTextChildrenProps) {
   return <li>{children}</li>;
 }
 
+/**
+ * Renders an inline hyperlink within rich-text content.
+ */
 export function RichTextInlineLink({
   href,
   children,
 }: RichTextChildrenProps & {
+  /** Destination URL the link navigates to. */
   readonly href: string;
 }) {
   return (
@@ -159,6 +215,7 @@ export function RichTextInlineLink({
   );
 }
 
+/** Renders inline monospace code with a subtle background. */
 export function RichTextInlineCode({ children }: RichTextChildrenProps) {
   return (
     <code className="rounded bg-base-200 px-1 py-0.5 font-mono text-[0.9em] text-base-content">
@@ -167,33 +224,43 @@ export function RichTextInlineCode({ children }: RichTextChildrenProps) {
   );
 }
 
+/** Renders bold/strong inline text. */
 export function RichTextStrong({ children }: RichTextChildrenProps) {
   return <strong className="font-bold">{children}</strong>;
 }
 
+/** Renders italic/emphasized inline text. */
 export function RichTextEmphasis({ children }: RichTextChildrenProps) {
   return <em className="italic">{children}</em>;
 }
 
+/** Renders underlined inline text. */
 export function RichTextUnderline({ children }: RichTextChildrenProps) {
   return <u className="underline">{children}</u>;
 }
 
+/** Renders struck-through inline text. */
 export function RichTextStrikethrough({ children }: RichTextChildrenProps) {
   return <s className="line-through">{children}</s>;
 }
 
+/** Renders highlighted inline text. */
 export function RichTextHighlight({ children }: RichTextChildrenProps) {
   return <mark className="rounded px-1">{children}</mark>;
 }
 
+/**
+ * Renders an image figure with an optional caption inside a bordered frame.
+ */
 export function RichTextMediaFigure({
   alt,
   caption,
   src,
 }: {
   readonly alt?: string;
+  /** Optional caption shown beneath the image. */
   readonly caption?: string;
+  /** Image source URL. */
   readonly src: string;
 }) {
   return (
@@ -212,11 +279,16 @@ export function RichTextMediaFigure({
   );
 }
 
+/**
+ * Renders an embedded third-party iframe (e.g. a video player) in a responsive bordered frame.
+ */
 export function RichTextEmbed({
   title,
   url,
 }: {
+  /** Accessible title for the embedded iframe. */
   readonly title?: string;
+  /** Embed source URL loaded into the iframe. */
   readonly url: string;
 }) {
   return (
@@ -241,13 +313,19 @@ export function RichTextEmbed({
   );
 }
 
+/**
+ * Renders a reference to another post as a "Read next" card link, or a plain badge when no link target is available.
+ */
 export function RichTextPostReference({
   href,
   label,
   postId,
 }: {
+  /** Destination URL; when omitted the reference renders as a non-navigating badge. */
   readonly href?: string;
+  /** Display text for the referenced post. */
   readonly label: string;
+  /** Identifier of the referenced post, exposed as a `data-post-id` attribute. */
   readonly postId?: string;
 }) {
   if (!href) {
@@ -273,11 +351,16 @@ export function RichTextPostReference({
   );
 }
 
+/**
+ * Renders a read-only syntax-highlighted code block.
+ */
 export function RichTextCodeBlock({
   language = "text",
   value,
 }: {
+  /** Source language used for syntax highlighting. */
   readonly language?: CodeEditorLanguage;
+  /** Code text rendered in the block. */
   readonly value: string;
 }) {
   return (
@@ -292,6 +375,7 @@ export function RichTextCodeBlock({
   );
 }
 
+/** Renders a warning-toned highlighted inline mark. */
 export function RichTextMark({ children }: RichTextChildrenProps) {
   return (
     <mark className="rounded bg-warning/30 px-0.5 text-base-content">
@@ -300,11 +384,16 @@ export function RichTextMark({ children }: RichTextChildrenProps) {
   );
 }
 
+/**
+ * Renders a glossary term as an abbreviation whose definition surfaces on hover.
+ */
 export function RichTextGlossary({
   term,
   definition,
 }: {
+  /** The glossary term displayed inline. */
   readonly term: string;
+  /** Definition shown in the term's native tooltip. */
   readonly definition: string;
 }) {
   return (
@@ -317,6 +406,9 @@ export function RichTextGlossary({
   );
 }
 
+/**
+ * Renders a task list wrapping {@link RichTextCheckListItem} children with checkboxes instead of bullets.
+ */
 export function RichTextCheckList({ children }: RichTextChildrenProps) {
   return (
     <ul className="m-0 ml-1 list-none space-y-1 text-base leading-6 text-base-content">
@@ -325,10 +417,14 @@ export function RichTextCheckList({ children }: RichTextChildrenProps) {
   );
 }
 
+/**
+ * Renders a single task-list item with a read-only checkbox reflecting its completion state.
+ */
 export function RichTextCheckListItem({
   checked,
   children,
 }: RichTextChildrenProps & {
+  /** Whether the item is marked complete, which checks the box and strikes the text. */
   readonly checked?: boolean;
 }) {
   return (
@@ -358,14 +454,20 @@ const NUMBERED_TABLE_CSS = `
 .rt-table-numbered tr>*:first-child::before{content:counter(rt-row);position:absolute;left:0;top:0;bottom:0;width:2.25rem;display:grid;place-items:center;font-size:0.7rem;font-variant-numeric:tabular-nums;color:var(--color-base-content);opacity:0.45;background:var(--color-base-200);border-right:1px solid var(--color-base-300)}
 `;
 
+/**
+ * Renders a bordered, horizontally scrollable table with optional fixed/responsive column widths and a numbered-row gutter.
+ */
 export function RichTextTable({
   children,
   colWidths,
   layout = "fixed",
   numbered = false,
 }: RichTextChildrenProps & {
+  /** Per-column widths; emitted as `px` for fixed layouts and proportional `%` for responsive ones. */
   readonly colWidths?: readonly number[];
+  /** Sizing mode: `fixed` keeps authored pixel widths (scrolling when wide), `responsive`/`full-width` reflow to fit. */
   readonly layout?: string;
+  /** When true, renders an auto-incrementing row-number gutter. */
   readonly numbered?: boolean;
 }) {
   // The wrapper owns the rounded outer frame (matching the editor and the other
@@ -410,6 +512,9 @@ export function RichTextTable({
   );
 }
 
+/**
+ * Renders a table row wrapping {@link RichTextTableCell} children.
+ */
 export function RichTextTableRow({ children }: RichTextChildrenProps) {
   return <tr>{children}</tr>;
 }
@@ -420,6 +525,9 @@ export function RichTextTableRow({ children }: RichTextChildrenProps) {
 // here so this module's public surface is unchanged for consumers importing them from `@idco/ui`.
 export { readableTextColor, verticalAlignClass };
 
+/**
+ * Renders a table cell as either a header or data cell, supporting spans, a background fill, and vertical alignment.
+ */
 export function RichTextTableCell({
   header,
   children,
@@ -428,10 +536,15 @@ export function RichTextTableCell({
   backgroundColor,
   verticalAlign,
 }: RichTextChildrenProps & {
+  /** When true, renders a `<th>` header cell instead of a `<td>` data cell. */
   readonly header?: boolean;
+  /** Number of columns the cell spans. */
   readonly colSpan?: number;
+  /** Number of rows the cell spans. */
   readonly rowSpan?: number;
+  /** CSS color filling the cell; text color flips automatically to stay legible. */
   readonly backgroundColor?: string;
+  /** Vertical alignment of the cell content. */
   readonly verticalAlign?: string;
 }) {
   const className = `border-b border-r border-base-300 px-5 py-2.5 ${verticalAlignClass(
@@ -480,13 +593,19 @@ const tocDepthClass: Record<number, string> = {
   5: "ms-30",
 };
 
+/**
+ * Renders a navigable table of contents from heading entries, with depth-based indentation and optional numbering.
+ */
 export function RichTextTableOfContents({
   entries,
   style = "plain",
   title = "Table of contents",
 }: {
+  /** Heading entries to list, each with link target, label, and nesting depth. */
   readonly entries: readonly RichTextTableOfContentsEntry[];
+  /** Visual treatment: bordered `panel`, inline `plain`, or dense `compact`. */
   readonly style?: RichTextTableOfContentsStyle;
+  /** Heading shown above the list and used as the nav's accessible label. */
   readonly title?: string;
 }) {
   const hasNumbers = entries.some((entry) => Boolean(entry.number));
@@ -583,6 +702,7 @@ export function RichTextTableOfContents({
   );
 }
 
+/** Which side of the content a table-of-contents rail occupies. */
 export type RichTextTocSide = "left" | "right";
 
 /**
@@ -599,6 +719,7 @@ export function RichTextTocRail({
 }: {
   readonly entries: readonly RichTextTableOfContentsEntry[];
   readonly title?: string;
+  /** Visual treatment passed through to the underlying table of contents. */
   readonly style?: RichTextTableOfContentsStyle;
   /** CSS length used for the sticky offset from the top of the scroll container. */
   readonly top?: string;
@@ -632,7 +753,9 @@ export function RichTextTocLayout({
   side = "left",
 }: {
   readonly children: ReactNode;
+  /** The TOC rail node; when omitted the children render single-column with no reserved track. */
   readonly rail?: ReactNode;
+  /** Which side the reserved rail column sits on. */
   readonly side?: RichTextTocSide;
 }) {
   if (!rail) return <>{children}</>;

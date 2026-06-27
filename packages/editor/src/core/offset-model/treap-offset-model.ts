@@ -111,6 +111,11 @@ function split(
   return [node, r];
 }
 
+/**
+ * @categoryDefault Virtual Geometry
+ */
+
+/** The O(log n) terminal `OffsetModel`: an implicit treap augmented with subtree height sums. */
 export class TreapOffsetModel implements OffsetModel {
   private root: TreapNode | null = null;
   private readonly rng: () => number;

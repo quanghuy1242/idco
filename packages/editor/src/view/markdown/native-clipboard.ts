@@ -19,7 +19,11 @@
 import { isRecord } from "@quanghuy1242/idco-lib";
 import type { EditorNode, EditorStore, NodeId } from "../../core";
 
-/** The custom clipboard MIME for the lossless native fragment. */
+/**
+ * @categoryDefault Markdown I/O
+ */
+
+/** The custom clipboard MIME for the lossless native snapshot fragment (`application/x-idco-snapshot`). */
 export const IDCO_SNAPSHOT_MIME = "application/x-idco-snapshot";
 
 const FRAGMENT_VERSION = 1;

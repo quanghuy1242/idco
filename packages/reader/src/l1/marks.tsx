@@ -5,12 +5,15 @@
  * appearance from the `.rt-*` stylesheet. The link is a plain `<a>` — a reader link needs
  * no client behavior — replacing the `react-aria-components` `Link` that tainted the
  * previous client primitive.
+ *
+ * @categoryDefault L1 Marks
  */
 import type { ReactNode } from "react";
 import { RT_MARK_CLASS } from "./typography";
 
 type RichTextChildrenProps = { readonly children?: ReactNode };
 
+/** Renders an inline link mark as a plain `<a>` carrying the `.rt-link` class. */
 export function RichTextInlineLink({
   href,
   children,
@@ -22,26 +25,32 @@ export function RichTextInlineLink({
   );
 }
 
+/** Renders an inline code mark as a `<code>` carrying the `.rt-code` class. */
 export function RichTextInlineCode({ children }: RichTextChildrenProps) {
   return <code className={RT_MARK_CLASS.code}>{children}</code>;
 }
 
+/** Renders a strong (bold) mark as a `<strong>` carrying the `.rt-strong` class. */
 export function RichTextStrong({ children }: RichTextChildrenProps) {
   return <strong className={RT_MARK_CLASS.strong}>{children}</strong>;
 }
 
+/** Renders an emphasis (italic) mark as an `<em>` carrying the `.rt-em` class. */
 export function RichTextEmphasis({ children }: RichTextChildrenProps) {
   return <em className={RT_MARK_CLASS.em}>{children}</em>;
 }
 
+/** Renders an underline mark as a `<u>` carrying the `.rt-underline` class. */
 export function RichTextUnderline({ children }: RichTextChildrenProps) {
   return <u className={RT_MARK_CLASS.underline}>{children}</u>;
 }
 
+/** Renders a strikethrough mark as an `<s>` carrying the `.rt-strike` class. */
 export function RichTextStrikethrough({ children }: RichTextChildrenProps) {
   return <s className={RT_MARK_CLASS.strikethrough}>{children}</s>;
 }
 
+/** Renders a highlight mark as a `<mark>` carrying the `.rt-highlight` class. */
 export function RichTextHighlight({ children }: RichTextChildrenProps) {
   return <mark className={RT_MARK_CLASS.highlight}>{children}</mark>;
 }

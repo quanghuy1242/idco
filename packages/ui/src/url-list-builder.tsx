@@ -4,18 +4,34 @@
 import { Input, TextField } from "react-aria-components";
 import { Button } from "./button";
 
+/** Props for {@link UrlListBuilder}. */
 type UrlListBuilderProps = {
+  /** Visible label above the rows. */
   readonly label: string;
+  /** Current list of URLs (controlled). */
   readonly value: ReadonlyArray<string>;
+  /** Called with the next list when a row is edited, added, or removed. */
   readonly onChange: (next: string[]) => void;
+  /** Validate a single URL; return an error message to flag the row. */
   readonly validate?: (value: string) => string | undefined;
   readonly placeholder?: string;
+  /** Field name to submit the newline-joined URLs under. */
   readonly name?: string;
+  /** Minimum number of rows kept (the remove button disables at this count). Defaults to 1. */
   readonly minRows?: number;
+  /** Label for the add-row button; defaults to "Add URL". */
   readonly addLabel?: string;
+  /** Control size; defaults to `md`. */
   readonly size?: "sm" | "md";
 };
 
+/**
+ * Repeatable URL input: React Aria TextField rows with add/remove and per-row validation.
+ *
+ * @categoryDefault Pickers
+ */
+
+/** The default URL validator: requires an absolute https (or localhost) URL with no fragment. */
 export function defaultUrlValidate(value: string): string | undefined {
   if (value.trim() === "") return undefined;
   let url: URL;
@@ -32,6 +48,12 @@ export function defaultUrlValidate(value: string): string | undefined {
   return undefined;
 }
 
+/**
+ * A repeatable list of URL inputs with add/remove controls and per-row validation.
+ *
+ * @example
+ * <UrlListBuilder label="Redirect URIs" value={uris} onChange={setUris} name="redirectUris" />
+ */
 export function UrlListBuilder({
   label,
   value,

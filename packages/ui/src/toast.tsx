@@ -13,11 +13,22 @@ import {
 } from "react-aria-components";
 import { Check, CircleAlert, Info, TriangleAlert, X } from "lucide-react";
 
+/**
+ * Global toast queue, region, and helper built on React Aria with DaisyUI alert styling.
+ *
+ * @categoryDefault Feedback
+ */
+
+/** Visual intent of a toast, mapped to a DaisyUI alert color and icon. */
 export type ToastTone = "success" | "error" | "info" | "warning";
 
+/** Content of a single toast notification. */
 export type ToastSpec = {
+  /** Primary heading line of the toast. */
   readonly title: string;
+  /** Optional secondary line shown beneath the title. */
   readonly description?: string;
+  /** Visual intent of the toast; defaults to `info`. */
   readonly tone?: ToastTone;
 };
 

@@ -4,19 +4,26 @@
 // `input` wrapper) — the `input` class sits on the container so a prefix label
 // and a clear affordance can live beside the field.
 // React Aria: https://react-spectrum.adobe.com/react-aria/SearchField.html
+
 import {
   SearchField,
   Input,
   Button as ClearButton,
 } from "react-aria-components";
 
+/** Control height of the filter. */
 type Size = "sm" | "md";
 
+/** Props for {@link InlineTextFilter}. */
 type InlineTextFilterProps = {
+  /** Prefix text shown as a muted `Label:` inside the control. */
   readonly label: string;
+  /** Controlled filter text. */
   readonly value: string;
+  /** Called with the new filter text on each edit or clear. */
   readonly onChange: (value: string) => void;
   readonly placeholder?: string;
+  /** Control height: `sm` for compact, `md` (default) for standard. */
   readonly size?: Size;
   readonly className?: string;
 };
@@ -25,6 +32,12 @@ const sizeClass: Record<Size, string> = {
   sm: "input-sm",
   md: "",
 };
+
+/**
+ * Compact inline free-text filter for list toolbars, built on React Aria `SearchField` with DaisyUI `input` styling.
+ *
+ * @categoryDefault Forms
+ */
 
 /**
  * A compact, auto-width free-text filter for list toolbars. It mirrors

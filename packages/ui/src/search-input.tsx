@@ -2,19 +2,26 @@
 
 // DaisyUI 5: https://daisyui.com/components/input/
 // React Aria: https://react-spectrum.adobe.com/react-aria/SearchField.html
+
 import {
   SearchField,
   Input,
   Button as ClearButton,
 } from "react-aria-components";
 
+/** Control height of the search field. */
 type Size = "sm" | "md";
 
+/** Props for {@link SearchInput}. */
 type SearchInputProps = {
+  /** Controlled query string. */
   readonly value: string;
+  /** Called with the new query on each edit or clear. */
   readonly onChange: (value: string) => void;
   readonly placeholder?: string;
+  /** When true, the field flexes to fill its row; otherwise it spans full width. */
   readonly grow?: boolean;
+  /** Control height: `sm` for compact, `md` (default) for standard. */
   readonly size?: Size;
 };
 
@@ -23,6 +30,15 @@ const sizeClass: Record<Size, string> = {
   md: "input input-bordered",
 };
 
+/**
+ * Controlled search box with a clear affordance, built on React Aria `SearchField`.
+ *
+ * @categoryDefault Forms
+ */
+
+/**
+ * A search field with a clear button that surfaces once text is entered.
+ */
 export function SearchInput({
   value,
   onChange,

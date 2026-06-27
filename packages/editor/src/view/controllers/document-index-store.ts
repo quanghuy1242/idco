@@ -17,6 +17,10 @@
  */
 import type { DocumentIndex } from "../../core";
 
+/**
+ * @categoryDefault Document Index
+ */
+
 /** The read side a node view subscribes to via `useSyncExternalStore`. */
 export type DocumentIndexStore = {
   subscribe(listener: () => void): () => void;

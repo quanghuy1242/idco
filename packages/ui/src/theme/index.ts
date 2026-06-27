@@ -1,5 +1,13 @@
+/**
+ * Theme helpers for reading, applying, and persisting the active DaisyUI theme.
+ *
+ * @categoryDefault Theme
+ */
+
+/** The DaisyUI theme family name (`idco`), the base for the `idco-light`/`idco-dark` variants. */
 export const themeName = "idco";
 
+/** The user's theme choice: follow the OS (`system`) or force `light`/`dark`. */
 export type ThemeMode = "system" | "light" | "dark";
 
 const storageKey = "idco-theme";
@@ -10,6 +18,7 @@ function systemPrefersDark(): boolean {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
+/** Reads the persisted theme choice from local storage, defaulting to `system`. */
 export function getStoredTheme(): ThemeMode {
   if (typeof window === "undefined") return "system";
   const stored = localStorage.getItem(storageKey);
@@ -17,6 +26,7 @@ export function getStoredTheme(): ThemeMode {
   return "system";
 }
 
+/** Applies a theme to the document and persists it via `data-theme`, a cookie, and local storage. */
 export function applyTheme(mode: ThemeMode): void {
   if (typeof document === "undefined") return;
   if (mode === "system") {
@@ -32,6 +42,7 @@ export function applyTheme(mode: ThemeMode): void {
   localStorage.setItem(storageKey, mode);
 }
 
+/** Resolves the concrete theme name currently in effect (`idco-light` or `idco-dark`), accounting for the system preference. */
 export function getActiveThemeName(): string {
   if (typeof document === "undefined") return "idco-light";
   const bodyTheme = document.body.getAttribute("data-theme");

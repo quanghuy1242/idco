@@ -17,32 +17,68 @@ import { Button } from "./button";
 import { SearchInput } from "./search-input";
 import { getActiveThemeName } from "./theme";
 
+/**
+ * A searchable command palette modal that groups selectable actions, built on
+ * React Aria overlays and DaisyUI modal/menu styling.
+ *
+ * @categoryDefault Overlays
+ */
+
+/** A single selectable command row, keyed by `id` and rendered as `label`. */
 export type CommandPaletteItem = {
   readonly id: string;
   readonly label: string;
+  /** Trailing hint shown right-aligned, e.g. a keyboard shortcut. */
   readonly meta?: string;
+  /** When true, the row is shown but cannot be activated. */
   readonly disabled?: boolean;
 };
 
+/** A labeled section of related command items within the palette. */
 export type CommandPaletteGroup = {
   readonly id: string;
+  /** Optional section heading; omit to render the items without a title. */
   readonly label?: string;
   readonly items: readonly CommandPaletteItem[];
 };
 
+/** Props for {@link CommandPalette}. */
 type CommandPaletteProps = {
+  /** Whether the palette modal is currently open (controlled). */
   readonly open: boolean;
+  /** Called when the palette requests to open or close (e.g. dismissal). */
   readonly onOpenChange: (open: boolean) => void;
   readonly title?: string;
+  /** Current search query (controlled). */
   readonly searchValue: string;
+  /** Called when the user edits the search query. */
   readonly onSearchChange: (value: string) => void;
   readonly searchPlaceholder?: string;
+  /** Grouped command items to display; filtering is owned by the consumer. */
   readonly groups: readonly CommandPaletteGroup[];
+  /** Text shown when no groups contain items. */
   readonly emptyMessage?: string;
   readonly closeLabel?: string;
+  /** Called with the `id` of the item the user activated. */
   readonly onAction: (id: string) => void;
 };
 
+/**
+ * A searchable, grouped command launcher modal that calls `onAction` with the
+ * selected item id. Search and filtering are controlled by the consumer.
+ *
+ * @example
+ * ```tsx
+ * <CommandPalette
+ *   open={open}
+ *   onOpenChange={setOpen}
+ *   searchValue={query}
+ *   onSearchChange={setQuery}
+ *   groups={[{ id: "nav", label: "Navigate", items: [{ id: "home", label: "Go home" }] }]}
+ *   onAction={(id) => run(id)}
+ * />
+ * ```
+ */
 export function CommandPalette({
   open,
   onOpenChange,

@@ -16,6 +16,8 @@
  * and island-eligible nodes (code highlighting, TOC scroll-spy) gain a hydration boundary;
  * omit it and the page is fully static. The typography contract ships once as a
  * server-rendered `<style>`, so the reader brings its own `.rt-*` appearance.
+ *
+ * @categoryDefault Server Reader
  */
 import type { CSSProperties, ReactNode } from "react";
 import { normalizeTocSettings } from "@quanghuy1242/idco-lib";
@@ -94,6 +96,18 @@ function asideToc(snapshot: ReaderSnapshot): ReaderObjectNode | undefined {
   return undefined;
 }
 
+/**
+ * The server entry that paints a whole native snapshot as RSC-safe DOM, with no client JS.
+ *
+ * Wraps each top-level render unit in a `content-visibility: auto` container (so the browser
+ * skips offscreen layout while every block stays in the DOM) and ships the typography
+ * contract once as a server-rendered `<style>`. An `aside`-placed TOC becomes a sticky side
+ * rail at `lg+`. Interactivity is opt-in via `renderIsland`.
+ *
+ * @param value  The native `EditorDocumentSnapshot` to render (baked objects).
+ * @example
+ * <Reader value={snapshot} renderIsland={createIslandRenderer()} />
+ */
 export function Reader({
   value,
   ...options

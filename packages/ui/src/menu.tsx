@@ -2,6 +2,12 @@
 // React Aria: https://react-spectrum.adobe.com/react-aria/Menu.html
 "use client";
 
+/**
+ * Dropdown menu: React Aria Menu/MenuTrigger behavior with DaisyUI 5 menu styling.
+ *
+ * @categoryDefault Overlays
+ */
+
 import { type ReactNode, Children } from "react";
 import {
   composeRenderProps,
@@ -14,6 +20,15 @@ import {
   type PopoverProps,
 } from "react-aria-components";
 
+/**
+ * Pairs a trigger element with its menu, opening the menu in an anchored popover on press.
+ *
+ * @example
+ * <MenuTrigger>
+ *   <Button iconName="more">Actions</Button>
+ *   <Menu onAction={run}><MenuItem id="edit">Edit</MenuItem></Menu>
+ * </MenuTrigger>
+ */
 export function MenuTrigger({
   children,
   placement = "bottom end",
@@ -59,6 +74,7 @@ export function MenuTrigger({
   );
 }
 
+/** The menu surface holding `MenuItem`s; styled as a DaisyUI menu panel with React Aria keyboard/selection. */
 export function Menu<T extends object>(props: MenuProps<T>) {
   const { className, ...menuProps } = props;
   const panelClassName =
@@ -77,12 +93,17 @@ export function Menu<T extends object>(props: MenuProps<T>) {
   );
 }
 
+/** Extra fields a `MenuItem` accepts beyond React Aria's `MenuItemProps`. */
 type MenuItemHref = {
+  /** Render the item as a link to this destination. */
   readonly href: string;
+  /** Trailing badge text (e.g. a count or shortcut). */
   readonly badge?: string;
+  /** Item label; also seeds the type-ahead text value. */
   readonly label: string;
 };
 
+/** A single menu row supporting an optional trailing badge and link (`href`) behavior. */
 export function MenuItem(props: MenuItemProps & Partial<MenuItemHref>) {
   const { badge, children, className, label, ...itemProps } = props;
   const textValue =

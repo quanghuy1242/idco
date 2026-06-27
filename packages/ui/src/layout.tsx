@@ -1,18 +1,31 @@
 // DaisyUI 5: https://daisyui.com/components/card/
 "use client";
+/**
+ * Page-frame and surface layout primitives that map typed spacing and alignment props onto flex/grid with DaisyUI surface tones.
+ *
+ * @categoryDefault Layout
+ */
 import type { ReactNode } from "react";
 
+/** Spacing scale token for gaps between children. */
 type Gap = "xs" | "sm" | "md" | "lg";
+/** Cross-axis alignment token for laid-out children. */
 type Align = "start" | "center" | "end" | "stretch";
+/** Max-width scale token that constrains a container's content. */
 type Width = "narrow" | "content" | "wide" | "full";
+/** Inner padding scale token for surfaces. */
 type Padding = "none" | "sm" | "md" | "lg";
+/** Surface background tone token, neutral base or muted. */
 type SurfaceTone = "base" | "muted";
 
+/** Common base props shared by surface primitives, carrying only their children. */
 type SurfaceProps = {
   readonly children?: ReactNode;
 };
 
+/** Props for {@link Page}. */
 type PageProps = SurfaceProps & {
+  /** Page frame mode: `centered` for a single narrow card, `dashboard` for a full-height column. */
   readonly layout?: "centered" | "dashboard";
 };
 
@@ -51,6 +64,7 @@ const paddingClass: Record<Padding, string> = {
   lg: "p-8",
 };
 
+/** Full-screen page frame that either centers a narrow card or stacks a full-height dashboard column. */
 export function Page({ layout = "centered", children }: PageProps) {
   if (layout === "centered") {
     return (
@@ -69,20 +83,26 @@ export function Page({ layout = "centered", children }: PageProps) {
   );
 }
 
+/** Props for {@link Container}. */
 type ContainerProps = SurfaceProps & {
+  /** Max-width constraint applied to the centered content. */
   readonly width?: Width;
 };
 
+/** Horizontally centered wrapper that constrains content to a chosen max-width. */
 export function Container({ width = "wide", children }: ContainerProps) {
   return (
     <div className={`w-full ${widthClass[width]} mx-auto`}>{children}</div>
   );
 }
 
+/** Props for {@link PageSection}. */
 type PageSectionProps = SurfaceProps & {
+  /** Vertical and horizontal padding applied around the section's contained content. */
   readonly padding?: Padding;
 };
 
+/** Full-width page section that pads its area and centers its content in a container. */
 export function PageSection({ padding = "md", children }: PageSectionProps) {
   return (
     <section className={`w-full ${paddingClass[padding]}`}>
@@ -91,6 +111,7 @@ export function PageSection({ padding = "md", children }: PageSectionProps) {
   );
 }
 
+/** Bordered top header bar that centers its content and spaces children apart in a row. */
 export function PageHeader({ children }: SurfaceProps) {
   return (
     <header className="border-b border-base-300 bg-base-100 px-6 py-4 w-full">
@@ -101,6 +122,7 @@ export function PageHeader({ children }: SurfaceProps) {
   );
 }
 
+/** Flexible-height main content area that pads and centers its content below a page header. */
 export function PageBody({ children }: SurfaceProps) {
   return (
     <div className="flex-1 p-6 w-full">
@@ -109,11 +131,15 @@ export function PageBody({ children }: SurfaceProps) {
   );
 }
 
+/** Props for {@link Panel}. */
 type PanelProps = SurfaceProps & {
+  /** Surface background tone, `base` for the default card or `muted` for a recessed shade. */
   readonly tone?: SurfaceTone;
+  /** Inner padding around the panel's content. */
   readonly padding?: Padding;
 };
 
+/** A bordered DaisyUI card surface with a selectable tone and inner padding. */
 export function Panel({ tone = "base", padding = "md", children }: PanelProps) {
   const toneClass = tone === "muted" ? "bg-base-200" : "bg-base-100";
   return (
@@ -125,10 +151,15 @@ export function Panel({ tone = "base", padding = "md", children }: PanelProps) {
   );
 }
 
+/** Props for {@link Stack}. */
 type StackProps = SurfaceProps & {
+  /** Vertical spacing between stacked children. */
   readonly gap?: Gap;
+  /** Cross-axis (horizontal) alignment of stacked children. */
   readonly align?: Align;
+  /** Main-axis (vertical) distribution of stacked children. */
   readonly justify?: "start" | "between" | "end";
+  /** When set, stretches the stack to fill its parent's height. */
   readonly fill?: boolean;
 };
 
@@ -138,6 +169,7 @@ const justifyClass: Record<NonNullable<StackProps["justify"]>, string> = {
   end: "justify-end",
 };
 
+/** A vertical flex column that spaces, aligns, and distributes its children. */
 export function Stack({
   gap = "md",
   align = "stretch",
@@ -154,11 +186,15 @@ export function Stack({
   );
 }
 
+/** Props for {@link Toolbar}. */
 type ToolbarProps = SurfaceProps & {
+  /** Spacing between toolbar children. */
   readonly gap?: Gap;
+  /** Cross-axis alignment applied at the medium breakpoint and up. */
   readonly align?: Align;
 };
 
+/** A responsive action row that stacks on small screens and becomes a horizontal row at the medium breakpoint. */
 export function Toolbar({
   gap = "sm",
   align = "center",
@@ -173,10 +209,13 @@ export function Toolbar({
   );
 }
 
+/** Props for {@link PanelFooter}. */
 type PanelFooterProps = SurfaceProps & {
+  /** Horizontal distribution of footer children, spread apart or pushed to the end. */
   readonly justify?: "between" | "end";
 };
 
+/** A top-bordered footer row for panel actions, distributing its children horizontally. */
 export function PanelFooter({
   justify = "between",
   children,
@@ -190,11 +229,15 @@ export function PanelFooter({
   );
 }
 
+/** Props for {@link Grid}. */
 type GridProps = SurfaceProps & {
+  /** Number of equal columns at the medium breakpoint and up; collapses to a single column below it. */
   readonly columns?: "one" | "two" | "three";
+  /** Spacing between grid cells. */
   readonly gap?: Gap;
 };
 
+/** A responsive equal-column grid that collapses to one column on small screens. */
 export function Grid({ columns = "one", gap = "md", children }: GridProps) {
   const columnsClass = {
     one: "grid-cols-1",
@@ -206,10 +249,13 @@ export function Grid({ columns = "one", gap = "md", children }: GridProps) {
   );
 }
 
+/** Props for {@link Columns}. */
 type ColumnsProps = SurfaceProps & {
+  /** Spacing between the main column and the sidebar. */
   readonly gap?: Gap;
 };
 
+/** A two-track main-and-sidebar layout that collapses to a single column on small screens. */
 export function Columns({ gap = "md", children }: ColumnsProps) {
   return (
     <div
@@ -220,10 +266,13 @@ export function Columns({ gap = "md", children }: ColumnsProps) {
   );
 }
 
+/** Props for {@link Spacer}. */
 type SpacerProps = {
+  /** Height of the empty gap, drawn from the spacing scale. */
   readonly size?: Gap;
 };
 
+/** A fixed-height, aria-hidden vertical gap inserted between elements. */
 export function Spacer({ size = "md" }: SpacerProps) {
   const sizeClass = {
     xs: "h-1",

@@ -12,6 +12,13 @@ import "prismjs/components/prism-python";
 /* eslint-enable import/no-unassigned-import */
 import { useMemo, useRef, type KeyboardEvent } from "react";
 
+/**
+ * A controlled, Prism-highlighted code input with a line-number gutter, tab handling, and error messaging.
+ *
+ * @categoryDefault Forms
+ */
+
+/** Syntax-highlighting language selector for {@link CodeEditor}. */
 export type CodeEditorLanguage =
   | "json"
   | "ts"
@@ -20,14 +27,21 @@ export type CodeEditorLanguage =
   | "python"
   | "text";
 
+/** Props for {@link CodeEditor}. */
 type CodeEditorProps = {
+  /** Current editor text; the editor is controlled by this value. */
   readonly value: string;
+  /** Called with the full text on every edit. */
   readonly onChange: (value: string) => void;
+  /** Form field name applied to the underlying textarea. */
   readonly name?: string;
+  /** Grammar used to tokenize and highlight the text. Default `json`. */
   readonly language?: CodeEditorLanguage;
   /** Highlight engine. `prism` (default) tokenizes with Prism; `plain` renders escaped monospace. */
   readonly engine?: "plain" | "prism";
+  /** Error message shown below the editor; also marks the field invalid. */
   readonly error?: string;
+  /** Visible field label and accessible name. */
   readonly label?: string;
   /** Keep `label` as the field's accessible name but hide it visually. */
   readonly srOnlyLabel?: boolean;
@@ -49,6 +63,7 @@ const TAB = "  ";
 
 // Controlled Prism editor: a transparent textarea overlaid on a highlighted <pre>, single-sourced on `value`.
 // CodeMirror 6 engine swap deferred to the `id` repo (docs/029 §18.6); the prop surface stays engine-pluggable.
+/** A controlled code input with Prism syntax highlighting, an optional line-number gutter, tab insertion, and DaisyUI error styling. */
 export function CodeEditor(props: CodeEditorProps) {
   const {
     value,

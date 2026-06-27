@@ -12,24 +12,44 @@ import {
 import { Button } from "./button";
 import { Menu, MenuItem, MenuTrigger } from "./menu";
 
+/** Visual style applied to an action button (defaults to "secondary"). */
 type ActionVariant = "primary" | "secondary" | "danger" | "ghost";
+/** Size scale of the action buttons. */
 type ActionSize = "sm" | "md";
 
+/**
+ * An action bar that measures available width and overflows lower-priority buttons into a React Aria menu.
+ *
+ * @categoryDefault Navigation
+ */
+
+/** A single action in a {@link ResponsiveActions} bar. */
 export type ResponsiveAction = {
+  /** Stable identifier used as the React key and overflow-menu item key. */
   readonly id: string;
   readonly label: string;
+  /** Visual style of the rendered button (defaults to "secondary"). */
   readonly variant?: ActionVariant;
+  /** Registered icon name shown before the label. */
   readonly iconName?: string;
+  /** Accessible name when the button shows only an icon. */
   readonly ariaLabel?: string;
+  /** Hover/focus tooltip text for the direct (non-collapsed) button. */
   readonly tooltip?: string;
   readonly disabled?: boolean;
+  /** When true the action is removed entirely from both the bar and the overflow menu. */
   readonly isHidden?: boolean;
+  /** Invoked when the action is pressed, whether shown directly or from the overflow menu. */
   readonly onAction: () => void;
 };
 
+/** Props for {@link ResponsiveActions}. */
 type ResponsiveActionsProps = {
+  /** Actions in priority order; trailing actions collapse into the overflow menu first as width shrinks. */
   readonly actions: readonly ResponsiveAction[];
+  /** Accessible name for the action group and its overflow menu (defaults to "Actions"). */
   readonly ariaLabel?: string;
+  /** Size scale applied to every action button (defaults to "md"). */
   readonly size?: ActionSize;
 };
 
@@ -79,6 +99,7 @@ function nextCollapseCount(
   return actionWidths.length;
 }
 
+/** A width-aware action bar that shows buttons until they no longer fit, then folds the rest into an ellipsis menu. */
 export function ResponsiveActions({
   actions,
   ariaLabel = "Actions",

@@ -41,6 +41,10 @@ function detectDefault(): boolean {
 let devInvariantsEnabled = detectDefault();
 
 /**
+ * @categoryDefault Snapshot & Performance
+ */
+
+/**
  * Whether the dev-only invariants (`freezeNode` deep-walk, `assertParentInvariant`
  * tree walk) should run. False in a production build, so the load and structural-edit
  * paths skip the O(n) tripwires (docs/030 SLP-2).

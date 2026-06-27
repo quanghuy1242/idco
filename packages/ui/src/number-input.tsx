@@ -12,19 +12,34 @@ import {
 } from "react-aria-components";
 import { Minus, Plus } from "lucide-react";
 
+/**
+ * Stepper-backed numeric field built on React Aria `NumberField` with DaisyUI `input` styling.
+ *
+ * @categoryDefault Forms
+ */
+
+/** Props for {@link NumberInput}. */
 type NumberInputProps = {
   readonly label: string;
   readonly name?: string;
+  /** Controlled numeric value; `null` clears the field. Pair with {@link NumberInputProps.onChange}. */
   readonly value?: number | null;
+  /** Initial value when uncontrolled. */
   readonly defaultValue?: number | null;
+  /** Called with the new value, or `null` when the field is emptied. */
   readonly onChange?: (value: number | null) => void;
+  /** Lower bound; the stepper and typing clamp to this. */
   readonly minValue?: number;
+  /** Upper bound; the stepper and typing clamp to this. */
   readonly maxValue?: number;
+  /** Increment/decrement amount per stepper press (default 1). */
   readonly step?: number;
   readonly required?: boolean;
+  /** Control height: `sm` for compact, `md` (default) for standard. */
   readonly size?: "sm" | "md";
   readonly description?: string;
   readonly placeholder?: string;
+  /** Locale formatting passed to React Aria (e.g. currency, fraction digits, grouping). */
   readonly formatOptions?: Intl.NumberFormatOptions;
 };
 
@@ -34,6 +49,9 @@ function toFieldValue(value: number | null | undefined): number {
 
 // DaisyUI `input` styled around React Aria `NumberField` so the field stays a real
 // number control (steppers, min/max, locale formatting) instead of a free-text box.
+/**
+ * A numeric field with increment/decrement steppers, min/max clamping, and locale-aware formatting.
+ */
 export function NumberInput({
   label,
   name,

@@ -18,6 +18,8 @@
  * prefixes `-`/`*`) and the heading TOC level (`bake`, worker-safe) cannot import a
  * view registry. This is the same core/view boundary the mark registry draws for
  * the bake annotation index (W4).
+ *
+ * @categoryDefault Block Types
  */
 import type { TextLeafType } from "../../core";
 

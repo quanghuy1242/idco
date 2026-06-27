@@ -22,6 +22,8 @@
  * The unit is the **group**, not the type, so a family of node types toggles coherently:
  * `table`/`table-row`/`table-cell` all declare group `"table"`, so "tables off" can never
  * leave a profile in the incoherent state of "table allowed, table-cell disallowed".
+ *
+ * @categoryDefault Schema Profile
  */
 import type { SchemaProfile } from "../../core";
 import { getNodeView } from "./node-view";

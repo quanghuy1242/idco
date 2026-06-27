@@ -1,11 +1,22 @@
 // DaisyUI 5: https://daisyui.com/components/alert/
+
 import { Button } from "./button";
 
+/** Props for {@link ErrorAlert}. */
 type ErrorAlertProps = {
+  /** Error text to display; defaults to a generic message. */
   readonly message?: string;
+  /** Invoked when the retry button is pressed; the button only renders when provided. */
   readonly onRetry?: () => void;
 };
 
+/**
+ * Error alert banner with an optional retry action.
+ *
+ * @categoryDefault Feedback
+ */
+
+/** An error alert with a message and an optional retry button. */
 export function ErrorAlert({
   message = "Something went wrong.",
   onRetry,

@@ -18,6 +18,10 @@ const SAFE_HREF = /^(?:https?:|mailto:|tel:|#|\/)/i;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/g;
 
+/**
+ * @categoryDefault Editing Helpers
+ */
+
 /** A safe href, or `""` when the input is unsafe/empty (renders inert). */
 export function safeHref(raw: unknown): string {
   if (typeof raw !== "string") return "";

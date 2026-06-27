@@ -1,6 +1,12 @@
 // DaisyUI 5: https://daisyui.com/components/collapse/
 "use client";
 
+/**
+ * A collapsible section pairing React Aria disclosure behavior with DaisyUI collapse styling, plus a group to coordinate several.
+ *
+ * @categoryDefault Navigation
+ */
+
 import type { ReactNode } from "react";
 import {
   Button as AriaButton,
@@ -12,18 +18,28 @@ import {
 } from "react-aria-components";
 import { NavIcon } from "./nav-icons";
 
+/** Indicator glyph shown in the disclosure trigger: a rotating chevron or a plus/minus toggle. */
 export type DisclosureIcon = "chevron" | "plus";
+/** How the disclosure sizes itself: natural content width or constrained to its container. */
 export type DisclosureWidth = "auto" | "contained";
 
+/** Props for {@link Disclosure}. */
 type DisclosureProps = {
+  /** Heading content rendered in the always-visible trigger row. */
   readonly title: ReactNode;
   readonly children: ReactNode;
+  /** Stable key used when nested inside a {@link DisclosureGroup}. */
   readonly id?: Key;
+  /** Initial expanded state when used uncontrolled. */
   readonly defaultExpanded?: boolean;
+  /** Controlled expanded state; pair with `onExpandedChange`. */
   readonly expanded?: boolean;
+  /** Called with the next expanded state whenever the user toggles the section. */
   readonly onExpandedChange?: (isExpanded: boolean) => void;
+  /** Indicator glyph to display (defaults to "chevron"). */
   readonly icon?: DisclosureIcon;
   readonly disabled?: boolean;
+  /** Width behavior of the collapse surface (defaults to "auto"). */
   readonly width?: DisclosureWidth;
 };
 
@@ -37,6 +53,7 @@ function iconName(icon: DisclosureIcon, isExpanded: boolean): string {
   return isExpanded ? "ChevronDown" : "ChevronRight";
 }
 
+/** A single expandable section with a heading trigger and a collapsible panel, controlled or uncontrolled. */
 // RAC `Disclosure` owns the expanded state; DaisyUI `collapse-open`/`collapse-close`
 // force the visual state to match (we don't rely on DaisyUI's peer-checkbox toggle).
 export function Disclosure({
@@ -95,12 +112,16 @@ export function Disclosure({
   );
 }
 
+/** Props for {@link DisclosureGroup}. */
 type DisclosureGroupProps = {
   readonly children: ReactNode;
+  /** When true, multiple sections may be expanded at once; otherwise expanding one collapses the others. */
   readonly allowsMultiple?: boolean;
+  /** Keys of the sections that start expanded, matched against each {@link Disclosure}'s `id`. */
   readonly defaultExpandedKeys?: Iterable<Key>;
 };
 
+/** A container that coordinates several {@link Disclosure} sections, optionally allowing only one open at a time. */
 export function DisclosureGroup({
   children,
   allowsMultiple,

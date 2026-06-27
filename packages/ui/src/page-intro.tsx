@@ -1,10 +1,17 @@
 // DaisyUI 5: https://daisyui.com/components/hero/
 "use client";
 
+/**
+ * Renders the standard top-of-page header with title, description, info popover, and actions.
+ *
+ * @categoryDefault Data Display
+ */
+
 import type { ReactNode } from "react";
 import { Heading, Text } from "./typography";
 import { InfoPopover } from "./info-popover";
 
+/** Props for {@link PageIntro}. */
 type PageIntroProps = {
   /** The screen title. */
   readonly title: string;

@@ -1,3 +1,10 @@
+/**
+ * Typed `fetch` helpers for the Better Auth API, with normalized, secret-redacted errors.
+ *
+ * @module
+ * @categoryDefault Auth Fetch
+ */
+
 import { AuthApiError } from "./shared/errors";
 import { isRecord } from "./guards";
 export { AuthApiError } from "./shared/errors";

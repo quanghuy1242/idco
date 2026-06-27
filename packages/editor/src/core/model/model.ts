@@ -26,13 +26,20 @@
  */
 import { isDevInvariantsEnabled } from "../dev-flags";
 
+/**
+ * @categoryDefault Engine Core — Model
+ */
+
+/** A JSON primitive: a string, number, boolean, or null. */
 export type JsonPrimitive = string | number | boolean | null;
 
+/** Any JSON-serializable value: a primitive, an array of values, or an object. */
 export type JsonValue =
   | JsonPrimitive
   | readonly JsonValue[]
   | { readonly [key: string]: JsonValue };
 
+/** A JSON object: a readonly string-keyed map of JSON values. */
 export type JsonObject = { readonly [key: string]: JsonValue };
 
 /**
@@ -64,11 +71,13 @@ export type CharacterRun = {
   readonly length: number;
 };
 
+/** A text leaf's content: the UTF-16 string paired with the run-encoded character ids that anchor it. */
 export type TextSlice = {
   readonly text: string;
   readonly runs: readonly CharacterRun[];
 };
 
+/** A text leaf's content, an alias of `TextSlice`. */
 export type TextContent = TextSlice;
 
 /**
@@ -81,6 +90,7 @@ export type TextAnchor =
   | { readonly kind: "char"; readonly id: CharacterId }
   | { readonly kind: "edge"; readonly edge: "start" | "end" };
 
+/** A caret position in a text leaf: the node, its durable anchor, the working UTF-16 offset, and the caret affinity. */
 export type TextPoint = {
   readonly node: NodeId;
   readonly anchor: TextAnchor;
@@ -88,17 +98,20 @@ export type TextPoint = {
   readonly assoc?: -1 | 1;
 };
 
+/** A range selection inside text, from `anchor` to `focus`. */
 export type TextSelection = {
   readonly type: "text";
   readonly anchor: TextPoint;
   readonly focus: TextPoint;
 };
 
+/** An atomic selection of one whole node (an object or structural block). */
 export type NodeSelection = {
   readonly type: "node";
   readonly node: NodeId;
 };
 
+/** A collapsed caret between two children of a scope, rather than inside any one of them. */
 export type GapSelection = {
   readonly type: "gap";
   /**
@@ -113,6 +126,7 @@ export type GapSelection = {
   readonly index: number;
 };
 
+/** The editor's selection: a text range, a node selection, or a gap caret. */
 export type EditorSelection = TextSelection | NodeSelection | GapSelection;
 
 /**
@@ -191,6 +205,7 @@ export type MarkBoundary = {
   readonly stickiness: "before" | "after";
 };
 
+/** One mark over a half-open character range of a text leaf: its kind, boundaries, and optional attrs. */
 export type TextMark = {
   readonly id: string;
   readonly kind: TextMarkKind;
@@ -199,6 +214,7 @@ export type TextMark = {
   readonly attrs?: JsonObject;
 };
 
+/** The persisted block-type set for a text leaf: paragraph, heading, list item, or quote. */
 export type TextLeafType = "paragraph" | "heading" | "listitem" | "quote";
 
 /**
@@ -217,19 +233,23 @@ export type StructuralNodeType =
   | "callout"
   | (string & {});
 
+/** An object node's lifecycle status: baked and `ready`, `dirty`, `invalid`, or `unresolved`. */
 export type ObjectNodeStatus = "ready" | "dirty" | "invalid" | "unresolved";
 
+/** An object's static baked snapshot: a discriminating `kind` and its JSON payload. */
 export type BakedSnapshot = {
   readonly kind: string;
   readonly payload: JsonValue;
 };
 
+/** Fields common to every editor node: its id, type, and optional attrs bag. */
 export type BaseEditorNode = {
   readonly id: NodeId;
   readonly type: string;
   readonly attrs?: JsonObject;
 };
 
+/** A structural container node that owns an ordered list of child node ids. */
 export type StructuralNode = BaseEditorNode & {
   readonly kind: "structural";
   readonly type: StructuralNodeType;
@@ -250,6 +270,7 @@ export type TextLeafNode = BaseEditorNode & {
   readonly marks: readonly TextMark[];
 };
 
+/** A heavy/object node holding opaque `data`, its baked snapshot, and a lifecycle status. */
 export type ObjectNode = BaseEditorNode & {
   readonly kind: "object";
   readonly data: JsonValue;
@@ -257,13 +278,16 @@ export type ObjectNode = BaseEditorNode & {
   readonly status: ObjectNodeStatus;
 };
 
+/** Any node in the model: a structural container, a text leaf, or an object. */
 export type EditorNode = StructuralNode | TextLeafNode | ObjectNode;
 
+/** A node's place in the tree: its parent id and index among that parent's children. */
 export type ParentEntry = {
   readonly parent: NodeId;
   readonly index: number;
 };
 
+/** Document-level settings, an opaque JSON bag carried on the snapshot. */
 export type DocumentSettings = JsonObject;
 
 export type EditorSnapshotNode = EditorNode;
@@ -295,6 +319,11 @@ export type EditorDocumentSnapshot = {
   readonly collections?: Readonly<Record<string, readonly CollectionItem[]>>;
 };
 
+/**
+ * One node of the legacy rich-text compat JSON shape — the import-only boundary format the compat layer reads, never a persistence target.
+ *
+ * @category Compat (import-only)
+ */
 export type RichTextCompatNode = {
   readonly id?: string;
   readonly type: string;
@@ -326,6 +355,11 @@ export type RichTextCompatNode = {
   readonly [key: string]: unknown;
 };
 
+/**
+ * The legacy rich-text compat document shape (a `root` of compat nodes) — the import-only boundary format, never a persistence target.
+ *
+ * @category Compat (import-only)
+ */
 export type RichTextCompatDocument = {
   readonly root: {
     readonly children: readonly RichTextCompatNode[];
@@ -340,6 +374,7 @@ export type IdAllocator = {
   createTextSlice(text: string): TextSlice;
 };
 
+/** Create an id allocator for a client: it mints node ids and run-encoded text slices with monotonic clocks. */
 export function createIdAllocator(
   clientId: ClientId = randomClientId(),
 ): IdAllocator {
@@ -413,6 +448,7 @@ export function replaceTextContent(
   return createTextSliceFromIds(text, nextIds);
 }
 
+/** Build a text point at a UTF-16 offset, choosing the durable character/edge anchor and caret affinity. */
 export function pointAtOffset(
   node: NodeId,
   content: TextContent,
@@ -454,6 +490,7 @@ export function pointAtOffset(
   };
 }
 
+/** Build a mark boundary at a UTF-16 offset, anchoring it for the given before/after stickiness of a half-open range. */
 export function boundaryAtOffset(
   content: TextContent,
   offset: number,
@@ -490,6 +527,7 @@ export function resolveBoundaryOffset(
   );
 }
 
+/** Construct a frozen text leaf node (paragraph by default) from content, marks, and attrs. */
 export function makeTextNode(args: {
   readonly id: NodeId;
   readonly type?: TextLeafType;
@@ -507,6 +545,7 @@ export function makeTextNode(args: {
   });
 }
 
+/** Construct a frozen structural container node from its type, children, and attrs. */
 export function makeStructuralNode(args: {
   readonly id: NodeId;
   readonly type: StructuralNodeType;
@@ -522,6 +561,7 @@ export function makeStructuralNode(args: {
   });
 }
 
+/** Construct a frozen object node from its type, opaque data, optional baked snapshot, and status (`dirty` by default). */
 export function makeObjectNode(args: {
   readonly id: NodeId;
   readonly type: string;

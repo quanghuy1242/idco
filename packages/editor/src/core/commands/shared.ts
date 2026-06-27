@@ -22,6 +22,10 @@ import {
 import type { Step } from "../model";
 import type { EditorStore, PendingFormat, TransactionBuilder } from "../store";
 
+/**
+ * @categoryDefault Engine Core — Commands
+ */
+
 export const EMPTY_SLICE: TextSlice = { runs: [], text: "" };
 
 /** A high-level editing intent. Never a raw `Step` (docs/011 §12.2). */
@@ -106,6 +110,7 @@ export function coveredTextLeaves(
   return leaves.slice(startIndex, endIndex + 1);
 }
 
+/** Where an insert lands: at an index in a scope, replacing a placeholder, or splitting a leaf. */
 export type InsertionPoint =
   | { readonly kind: "at"; readonly scope: NodeId; readonly index: number }
   | { readonly kind: "replace"; readonly node: NodeId }

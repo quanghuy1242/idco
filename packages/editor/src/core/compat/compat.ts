@@ -103,6 +103,10 @@ import { createEditorStore, type EditorStore } from "../store";
 import { safeHref } from "../url-safety";
 
 /**
+ * @categoryDefault Compat (import-only)
+ */
+
+/**
  * Lexical-compatible text-format bitmask.
  *
  * The owned model stores inline formatting as range marks anchored to character

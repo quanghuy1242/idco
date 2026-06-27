@@ -2,6 +2,12 @@
 // React Aria: https://react-spectrum.adobe.com/react-aria/Tooltip.html
 "use client";
 
+/**
+ * A hover/focus tooltip overlay built on React Aria with DaisyUI styling.
+ *
+ * @categoryDefault Overlays
+ */
+
 import type { ReactNode } from "react";
 import {
   Tooltip as AriaTooltip,
@@ -9,8 +15,10 @@ import {
   OverlayArrow,
 } from "react-aria-components";
 
+/** Side of the trigger the tooltip points to. */
 type Placement = "top" | "bottom" | "left" | "right";
 
+/** Props for {@link Tooltip}. */
 type TooltipProps = {
   /** The text shown inside the tooltip. When empty, the trigger renders without a tooltip. */
   readonly content?: ReactNode;
@@ -30,6 +38,13 @@ const tooltipPanelClass =
  * Hover/focus tooltip for icon buttons and terse controls. Tooltips do not
  * appear on touch — never put load-bearing information here; use `InfoPopover`
  * for teaching content the user must be able to read.
+ *
+ * @example
+ * ```tsx
+ * <Tooltip content="Delete" placement="bottom">
+ *   <Button variant="ghost" iconName="trash" aria-label="Delete" />
+ * </Tooltip>
+ * ```
  */
 export function Tooltip({
   content,

@@ -1,9 +1,18 @@
 // DaisyUI 5: https://daisyui.com/components/skeleton/
+/**
+ * Placeholder loading rows rendered with the DaisyUI skeleton shimmer.
+ *
+ * @categoryDefault Feedback
+ */
 
+/** Row height of a skeleton placeholder. */
 type SkeletonHeight = "xs" | "sm" | "md";
 
+/** Props for {@link Skeleton}. */
 type SkeletonProps = {
+  /** Number of placeholder rows to render; defaults to `1`. */
   readonly rows?: number;
+  /** Height of each placeholder row; defaults to `sm`. */
   readonly height?: SkeletonHeight;
 };
 
@@ -13,6 +22,7 @@ const heightClass: Record<SkeletonHeight, string> = {
   md: "h-6",
 };
 
+/** Placeholder loading rows with the DaisyUI skeleton shimmer. */
 export function Skeleton({ rows = 1, height = "sm" }: SkeletonProps) {
   return (
     <div className="flex flex-col gap-2 w-full">

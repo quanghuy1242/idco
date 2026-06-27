@@ -14,6 +14,10 @@ import { useCallback, useMemo, useState } from "react";
 import { Button, Input } from "@quanghuy1242/idco-ui";
 import { pointAtOffset, type EditorStore, type NodeId } from "../../core";
 
+/**
+ * @categoryDefault Editor Components
+ */
+
 /** One find match: a text-leaf range, or a whole object block. */
 export type FindMatch =
   | {
@@ -24,6 +28,7 @@ export type FindMatch =
     }
   | { readonly kind: "object"; readonly node: NodeId };
 
+/** The find state and navigation surface: the query, the resolved matches, the current index, and open/close/next/previous controls. */
 export type FindController = {
   readonly isOpen: boolean;
   readonly query: string;

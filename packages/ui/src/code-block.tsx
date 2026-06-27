@@ -1,10 +1,20 @@
 // DaisyUI 5: https://daisyui.com/components/mockup-code/
+/**
+ * Renders preformatted source text in a scrollable, line-by-line code surface.
+ *
+ * @categoryDefault Data Display
+ */
 import type { ReactNode } from "react";
 
+/** Props for {@link CodeBlock}. */
 type CodeBlockProps = {
+  /** Optional heading shown in the toolbar above the code. */
   readonly label?: string;
+  /** The raw code text, split into lines for display. */
   readonly value: string;
+  /** Optional toolbar slot, e.g. a copy button, aligned to the right of the label. */
   readonly action?: ReactNode;
+  /** Caps the scroll height of the code area; defaults to `md`. */
   readonly maxHeight?: "sm" | "md" | "lg";
 };
 
@@ -17,6 +27,7 @@ const maxHeightClass: Record<
   lg: "max-h-96",
 };
 
+/** A scrollable, line-numbered code panel with an optional label and action slot. */
 export function CodeBlock({
   label,
   value,

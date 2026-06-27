@@ -23,6 +23,10 @@ import {
   type TextMarkKind,
 } from "./model";
 
+/**
+ * @categoryDefault Text Segmentation
+ */
+
 /** A mark resolved to concrete `[from, to)` offsets in the leaf's text. */
 export type ResolvedMark = {
   readonly id: string;

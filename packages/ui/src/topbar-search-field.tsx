@@ -4,10 +4,18 @@
 
 import { Button, Input, SearchField } from "react-aria-components";
 
+/** Props for {@link TopbarSearchField}. */
 type TopbarSearchFieldProps = {
   readonly placeholder?: string;
 };
 
+/**
+ * Compact search field sized for the app topbar, on React Aria SearchField with DaisyUI input styling.
+ *
+ * @categoryDefault Theme
+ */
+
+/** A topbar-sized search input with a clear button, built on React Aria's SearchField. */
 export function TopbarSearchField({
   placeholder = "Search",
 }: TopbarSearchFieldProps) {

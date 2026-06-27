@@ -6,9 +6,11 @@
  * `interaction` — there is nothing to do until the reader actually clicks an item — and
  * the static list is fully readable before that. State is reader-local: toggling a box is
  * a UI affordance for the reader, never a write back to the document.
+ *
+ * @categoryDefault Islands
  */
-import { isRecord } from "@quanghuy1242/idco-lib";
 import { useState, type ReactNode } from "react";
+import { isRecord } from "@quanghuy1242/idco-lib";
 import { registerReaderIsland } from "./registry";
 
 export type ChecklistItemData = {
@@ -64,6 +66,11 @@ function ChecklistInteractive({
   );
 }
 
+/**
+ * The checklist island: enhances static read-only checkboxes into a togglable, reader-local list.
+ *
+ * @category Islands
+ */
 export const checklistIsland = {
   Interactive: ChecklistInteractive,
   hydrate: "interaction" as const,

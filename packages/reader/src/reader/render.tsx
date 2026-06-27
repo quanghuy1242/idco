@@ -17,6 +17,8 @@
  * Objects render from their **baked** snapshot (`node.baked.payload`); the caller hands a
  * baked snapshot (the editor bakes before delegating; persisted snapshots are baked). An
  * object with no bake renders a visible, non-silent placeholder — never a dropped block.
+ *
+ * @categoryDefault Server Reader
  */
 import { Fragment, type ReactNode } from "react";
 import {
@@ -530,10 +532,11 @@ function listFlavour(
 }
 
 /**
- * Group a sibling sequence into render units, coalescing consecutive same-flavour
- * `listitem` leaves into one synthetic list run (docs/018 §2.10) so a flat list renders as
- * one real `<ul>`/`<ol>`. Shared by the body (for content-visibility wrapping in
- * `<Reader>`) and by every structural container, so nesting groups identically.
+ * One top-level render unit: either a synthetic list run (coalesced list items) or a single
+ * block.
+ *
+ * The grouping pass (`groupListRuns`) emits these so a flat run of `listitem` leaves renders
+ * as one real `<ul>`/`<ol>` and everything else renders one block at a time.
  */
 export type ReaderRenderUnit =
   | {
@@ -543,6 +546,12 @@ export type ReaderRenderUnit =
     }
   | { readonly kind: "single"; readonly node: ReaderBlockNode };
 
+/**
+ * Group a sibling sequence into render units, coalescing consecutive same-flavour
+ * `listitem` leaves into one synthetic list run (docs/018 §2.10) so a flat list renders as
+ * one real `<ul>`/`<ol>`. Shared by the body (for content-visibility wrapping in
+ * `<Reader>`) and by every structural container, so nesting groups identically.
+ */
 export function groupListRuns(
   nodes: readonly ReaderBlockNode[],
   snapshot?: ReaderSnapshot,

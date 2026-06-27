@@ -22,6 +22,8 @@
  * buried the SPI; splitting them makes `object-registry.ts` the mirror of
  * `structural-registry.ts`. `compatObjectFromValue` is exported only so the
  * runtime registry's `toCompatObject` fallback can share the one default shape.
+ *
+ * @categoryDefault Node SPI
  */
 import { isRecord } from "@quanghuy1242/idco-lib";
 import type {
@@ -31,9 +33,14 @@ import type {
   RichTextCompatNode,
 } from "../model";
 
+/**
+ * @categoryDefault Node SPI
+ */
+
 /** Explicit policy for object kinds the registry does not understand. */
 export type UnknownObjectPolicy = "reject" | "drop";
 
+/** The normalized data, optional baked snapshot, and status a definition's `normalize` hook returns for incoming object data. */
 export type ObjectNormalizationResult = {
   readonly data: JsonValue;
   readonly baked?: BakedSnapshot;
@@ -119,17 +126,29 @@ export type BlockDefinition = NodeDefinition;
  */
 const GLOBAL_NODE_DEFINITIONS = new Map<string, NodeDefinition>();
 
-/** Register a custom node's definition globally (docs/016 §7). Idempotent by type. */
+/**
+ * Register a custom node's definition globally (docs/016 §7). Idempotent by type.
+ *
+ * @category Engine Core — Model
+ */
 export function registerGlobalNodeDefinition(definition: NodeDefinition): void {
   GLOBAL_NODE_DEFINITIONS.set(definition.type, definition);
 }
 
-/** Remove a globally-registered node definition by type (the register twin). */
+/**
+ * Remove a globally-registered node definition by type (the register twin).
+ *
+ * @category Engine Core — Model
+ */
 export function unregisterGlobalNodeDefinition(type: string): void {
   GLOBAL_NODE_DEFINITIONS.delete(type);
 }
 
-/** The custom node definitions registered so far (docs/016 §7). */
+/**
+ * The custom node definitions registered so far (docs/016 §7).
+ *
+ * @category Engine Core — Model
+ */
 export function globalNodeDefinitions(): readonly NodeDefinition[] {
   return [...GLOBAL_NODE_DEFINITIONS.values()];
 }
@@ -139,6 +158,8 @@ export function globalNodeDefinitions(): readonly NodeDefinition[] {
  *
  * They preserve data, baked snapshots, and status fields without implementing
  * real bake pipelines. Phase 6 can replace these with richer definitions.
+ *
+ * @category Engine Core — Model
  */
 export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
   codeBlockDefinition(),

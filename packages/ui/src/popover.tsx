@@ -1,6 +1,12 @@
 // DaisyUI 5 + React Aria: https://react-spectrum.adobe.com/react-aria/Popover.html
 "use client";
 
+/**
+ * Anchored popover surfaces: React Aria Popover/Dialog behavior with the shared DaisyUI surface chrome.
+ *
+ * @categoryDefault Overlays
+ */
+
 import type { ReactNode, RefObject } from "react";
 import {
   Dialog,

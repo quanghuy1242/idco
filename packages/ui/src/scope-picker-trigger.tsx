@@ -4,11 +4,16 @@
 import { Button as AriaButton } from "react-aria-components";
 import { NavIcon } from "./nav-icons";
 
+/** Color tone applied to the scope trigger's outline and hover states. */
 type ScopePickerTriggerTone = "accent" | "info";
 
+/** Props for {@link ScopePickerTrigger}. */
 type ScopePickerTriggerProps = {
+  /** Current scope name shown on the button. */
   readonly label: string;
+  /** Color tone applied to the outline and hover/press states. */
   readonly tone: ScopePickerTriggerTone;
+  /** Override for the button's accessible name; defaults to a label-derived description. */
   readonly ariaLabel?: string;
 };
 
@@ -18,6 +23,13 @@ const toneClass: Record<ScopePickerTriggerTone, string> = {
   info: "btn-info border-info text-info hover:border-info hover:bg-info/5 hover:text-info data-[hovered]:bg-info/5 data-[pressed]:bg-info/10 focus-visible:outline-info",
 };
 
+/**
+ * An outlined trigger button that displays the active console scope and opens its picker.
+ *
+ * @categoryDefault Pickers
+ */
+
+/** An outlined React Aria button that displays the active console scope and opens its picker, styled with DaisyUI tones. */
 export function ScopePickerTrigger({
   label,
   tone,

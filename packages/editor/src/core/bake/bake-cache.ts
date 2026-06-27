@@ -27,6 +27,11 @@
 import type { BakedSnapshot } from "../model";
 import type { MemoryPool } from "../memory/pool";
 
+/**
+ * @categoryDefault Snapshot & Performance
+ */
+
+/** Construction options for a bake cache: its hard byte ceiling. */
 export type BakeCacheOptions = {
   /**
    * The cache's own hard byte ceiling (default `Infinity`). Eviction to this floor runs on
@@ -35,6 +40,7 @@ export type BakeCacheOptions = {
   readonly maxBytes?: number;
 };
 
+/** A recency-ordered, byte-bounded cache of baked snapshots that also serves as a `MemoryPool`. */
 export type BakeCache = MemoryPool & {
   /** The baked snapshot for `key`, marking it most-recently-used; undefined on a miss. */
   get(key: string): BakedSnapshot | undefined;

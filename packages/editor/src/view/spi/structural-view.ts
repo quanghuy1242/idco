@@ -20,6 +20,8 @@
  * per-type `isScope`). `StructuralNodeType` (`model.ts`) is the registry-driven
  * open set (docs/021 §8.1), so a registered type need not be a built-in literal.
  * `quote`/`list`/`listitem` keep hardcoded compat branches until migrated.
+ *
+ * @categoryDefault Node SPI
  */
 import type { ReactNode, RefObject } from "react";
 import type {

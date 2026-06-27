@@ -20,6 +20,13 @@ import {
   useState,
 } from "react";
 
+/**
+ * Priority-ordered overflow-collapse engine for heterogeneous toolbars (measurement + decision).
+ *
+ * @categoryDefault Theme
+ */
+
+/** One toolbar item the collapse engine reasons about, carrying its overflow priority and collapsibility. */
 export type CollapseItem = {
   readonly id: string;
   /** Lower collapses into the overflow menu first; ties break by later position. */

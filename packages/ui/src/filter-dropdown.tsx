@@ -2,6 +2,7 @@
 
 // DaisyUI 5: https://daisyui.com/components/select/
 // React Aria: https://react-spectrum.adobe.com/react-aria/Select.html
+
 import {
   Select,
   SelectValue,
@@ -12,6 +13,7 @@ import {
 } from "react-aria-components";
 import { ChevronDown } from "lucide-react";
 
+/** A selectable option with a stored `value` and its human-readable `label`. */
 type FilterOption = {
   readonly value: string;
   readonly label: string;
@@ -19,13 +21,19 @@ type FilterOption = {
 
 type Size = "sm" | "md";
 
+/** Props for {@link FilterDropdown}. */
 type FilterDropdownProps = {
   readonly label: string;
+  /** Selectable options shown in the dropdown. */
   readonly options: ReadonlyArray<FilterOption>;
+  /** Currently selected option value; the control is controlled by this. */
   readonly value: string;
+  /** Called with the newly selected option value. */
   readonly onChange: (value: string) => void;
+  /** Trigger size; `md` (default) or compact `sm`. */
   readonly size?: Size;
   readonly className?: string;
+  /** Render the `label` as a separate field label above the trigger instead of inline as a prefix. */
   readonly showLabel?: boolean;
 };
 
@@ -34,6 +42,13 @@ const sizeClass: Record<Size, string> = {
   md: "select select-bordered",
 };
 
+/**
+ * A compact single-select filter control built on React Aria Select with DaisyUI select styling.
+ *
+ * @categoryDefault Pickers
+ */
+
+/** A compact single-select filter control with a controlled value, built on React Aria Select with DaisyUI select styling. */
 export function FilterDropdown({
   label,
   options,

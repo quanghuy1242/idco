@@ -155,6 +155,10 @@ function walkBlocks(root: Node, out: RichTextCompatNode[]): void {
 }
 
 /**
+ * @categoryDefault Editor Components
+ */
+
+/**
  * Parse and sanitize pasted HTML into compat block nodes. Returns an empty array
  * when there is no usable content. This is the only path paste-HTML takes into
  * the model (the single sanitization boundary, §10.5).

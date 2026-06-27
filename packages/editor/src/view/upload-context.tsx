@@ -10,6 +10,10 @@
  */
 import { createContext, useContext } from "react";
 
+/**
+ * @categoryDefault Editor Components
+ */
+
 /** Resolve a dropped/selected file to a media source. Host-provided. */
 export type UploadImage = (
   file: File,
@@ -17,6 +21,7 @@ export type UploadImage = (
 
 const UploadContext = createContext<UploadImage | null>(null);
 
+/** Context provider that supplies the host upload binding to the editor subtree. */
 export const UploadProvider = UploadContext.Provider;
 
 /** The host upload binding, or null when the host did not provide one. */

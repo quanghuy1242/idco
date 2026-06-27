@@ -41,6 +41,10 @@ import {
 
 type Blocks = Readonly<Record<NodeId, EditorNode>>;
 
+/**
+ * @categoryDefault Markdown I/O
+ */
+
 export type SnapshotToMarkdownOptions = {
   /**
    * Registry used to bake any object whose `baked` snapshot is missing (default built-ins).

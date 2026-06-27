@@ -15,6 +15,8 @@
  * here. Scope: this is the VIEW half (rendering + chrome). The core bake annotation
  * index (`bake.ts`, which classifies `comment`/`glossary` marks for search) is a
  * core concern that cannot import this view registry, so it stays in core.
+ *
+ * @categoryDefault Mark SPI
  */
 import type { ReactNode } from "react";
 import {

@@ -24,11 +24,17 @@ import type {
 import type { BlockRegistry } from "./registry";
 import type { EditorStore } from "./store";
 
+/**
+ * @categoryDefault Engine Core — Store
+ */
+
+/** The handle events a host can subscribe to: selection, dirty-state, and content change. */
 export type OwnedEditorHandleEvent =
   | "selectionchange"
   | "dirtychange"
   | "change";
 
+/** The host-facing control surface for an editor: command dispatch, history, selection, and serialization. */
 export type OwnedEditorHandle = {
   /** Current compat projection (the persisted JSON shape). */
   getDocument(): RichTextCompatDocument;
@@ -61,12 +67,14 @@ export type OwnedEditorHandle = {
   on(event: OwnedEditorHandleEvent, callback: () => void): () => void;
 };
 
+/** Construction options for an owned editor handle. */
 export type OwnedEditorHandleOptions = {
   readonly registry?: BlockRegistry;
   /** The view's DOM focuser; omitted in headless use. */
   readonly focus?: () => void;
 };
 
+/** Build the host-facing handle that drives an `EditorStore` through commands and events. */
 export function createOwnedEditorHandle(
   store: EditorStore,
   options: OwnedEditorHandleOptions = {},

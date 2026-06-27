@@ -2,6 +2,12 @@
 // React Aria: https://react-spectrum.adobe.com/react-aria/ComboBox.html
 "use client";
 
+/**
+ * Async resource picker: a React Aria ComboBox over a sync/async/paginated source with DaisyUI styling.
+ *
+ * @categoryDefault Pickers
+ */
+
 import {
   useCallback,
   useEffect,
@@ -28,6 +34,7 @@ import { useAsyncList } from "react-stately";
 import { ChevronDown } from "lucide-react";
 import { Avatar } from "./avatar";
 
+/** The kind of resource being picked; selects a default avatar and search label, and any string is accepted. */
 export type ResourceKind =
   | "user"
   | "organization"
@@ -44,20 +51,29 @@ export type ResourceKind =
   // string is safe; `& {}` keeps autocomplete for the named kinds.
   | (string & {});
 
+/** A single selectable resource shown in the listbox and as a selected chip. */
 export type ResourceOption = {
+  /** Stable resource id (the committed value). */
   readonly id: string;
+  /** Primary display name. */
   readonly label: string;
+  /** Secondary line under the label. */
   readonly sublabel?: string;
+  /** Avatar/thumbnail URL; falls back to a kind-based default. */
   readonly image?: string | null;
+  /** Trailing badge text. */
   readonly badge?: string;
 };
 
+/** A page of results plus the cursor for fetching the next page. */
 export type ResourcePage = {
+  /** Resources in this page. */
   readonly items: ResourceOption[];
   /** Opaque cursor for the next page; omit/undefined when there are no more pages. */
   readonly cursor?: string;
 };
 
+/** How the selector loads options: a static list, a one-shot async search, or a cursor-paginated search. */
 export type ResourceSource =
   | {
       readonly mode: "async";
@@ -76,16 +92,26 @@ export type ResourceSource =
     }
   | { readonly mode: "sync"; readonly items: ReadonlyArray<ResourceOption> };
 
+/** Props for {@link ResourceSelector}. */
 type ResourceSelectorProps = {
+  /** Resource kind; sets default avatar and search labelling. */
   readonly kind: ResourceKind;
+  /** Single value or multi-select chips; defaults to `single`. */
   readonly selectionMode?: "single" | "multiple";
+  /** Selected id (single) or ids (multiple); controlled. */
   readonly value: string | ReadonlyArray<string>;
+  /** Called with the next selection (string for single, array for multiple). */
   readonly onChange: (next: string | string[]) => void;
+  /** Where options come from: sync list, async search, or paginated search. */
   readonly source: ResourceSource;
   readonly placeholder?: string;
+  /** Accessible / visible label. */
   readonly label?: string;
+  /** Render the label visibly; otherwise it stays accessible-only. */
   readonly showLabel?: boolean;
+  /** Field name to submit the selection under. */
   readonly name?: string;
+  /** Ids to hide from results (e.g. already-related resources). */
   readonly excludeIds?: ReadonlyArray<string>;
   /** Options to seed the id-to-label cache up front for selected async values. */
   readonly initialOptions?: ReadonlyArray<ResourceOption>;
@@ -93,8 +119,11 @@ type ResourceSelectorProps = {
   readonly minQueryLength?: number;
   /** Debounce in ms for async search input. Default 250. */
   readonly searchDebounceMs?: number;
+  /** Custom renderer for an option row. */
   readonly renderOption?: (option: ResourceOption) => ReactNode;
+  /** Side effect when an option is chosen (full option, not just id). */
   readonly onSelectOption?: (option: ResourceOption) => void;
+  /** Control size; defaults to `md`. */
   readonly size?: "sm" | "md";
   /**
    * Retained for API compatibility. All variants now render the same React Aria
@@ -102,6 +131,7 @@ type ResourceSelectorProps = {
    * structure.
    */
   readonly variant?: "inline" | "menu";
+  /** Trigger width; `full` stretches, `compact` hugs content. */
   readonly width?: "full" | "compact";
 };
 
@@ -177,6 +207,13 @@ function useDebouncedCallback<T extends readonly unknown[]>(
   );
 }
 
+/**
+ * A single- or multi-select resource picker with avatars, debounced async search, and infinite scroll.
+ *
+ * @example
+ * <ResourceSelector kind="user" value={authorId} onChange={setAuthorId}
+ *   source={{ mode: "async", load: searchUsers }} />
+ */
 export function ResourceSelector({
   kind,
   selectionMode = "single",

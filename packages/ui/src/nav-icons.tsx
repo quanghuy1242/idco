@@ -1,5 +1,6 @@
 // DaisyUI 5 dock icon sizing: https://daisyui.com/components/dock/
 // DaisyUI 5 menu: https://daisyui.com/components/menu/
+
 import {
   Activity,
   AlignCenter,
@@ -193,6 +194,7 @@ const iconMap: Record<string, LucideIcon> = {
   X,
 };
 
+/** Size preset for a rendered icon: `sidebar`, `dock`, or `timeline`. */
 type NavIconVariant = "sidebar" | "dock" | "timeline";
 
 const sizeMap: Record<NavIconVariant, string> = {
@@ -201,6 +203,20 @@ const sizeMap: Record<NavIconVariant, string> = {
   timeline: "size-2.5",
 };
 
+/**
+ * Icon registry and renderer: maps a registered `iconName` string to a Lucide icon at a variant size.
+ *
+ * Register an icon in the internal `iconMap` here before passing its name to any `iconName` prop.
+ *
+ * @categoryDefault Icons
+ */
+
+/**
+ * Renders a registered icon by name at the variant's size, or nothing when the name is missing/unregistered.
+ *
+ * @example
+ * <NavIcon name="Settings" variant="sidebar" />
+ */
 export function NavIcon({
   name,
   variant = "sidebar",

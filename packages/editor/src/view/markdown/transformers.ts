@@ -25,6 +25,10 @@
 import type { TextMarkKind } from "../../core";
 
 /**
+ * @categoryDefault Markdown I/O
+ */
+
+/**
  * Inline format marks that map to a symmetric markdown wrapper. Ordered so the export
  * serializer opens/closes them deterministically (outer→inner) and the order matches the
  * typing detector's `MARK_PAIRS` precedence so import and the live affordance agree. `code`
@@ -50,8 +54,10 @@ export const DIRECTIVE_FENCE = ":::";
 /** Callout tones the `:::tone` directive accepts; an unknown tone falls back to `info`. */
 export const CALLOUT_TONES = ["info", "success", "warning", "error"] as const;
 
+/** One of the callout tones the `:::tone` directive accepts (`info`, `success`, `warning`, `error`). */
 export type CalloutTone = (typeof CALLOUT_TONES)[number];
 
+/** Coerce an arbitrary value to a valid {@link CalloutTone}, defaulting to `info`. */
 export function normalizeCalloutTone(value: unknown): CalloutTone {
   return typeof value === "string" &&
     (CALLOUT_TONES as readonly string[]).includes(value)

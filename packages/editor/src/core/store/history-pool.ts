@@ -42,6 +42,11 @@ import {
 import type { CommittedTransaction } from "../model";
 import type { MemoryPool } from "../memory/pool";
 
+/**
+ * @categoryDefault Snapshot & Performance
+ */
+
+/** What to do with undo states evicted past the budget: discard them or page them cold. */
 export type HistoryOverflow = "drop" | "cold-store";
 
 /**

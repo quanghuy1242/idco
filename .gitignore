@@ -1,5 +1,9 @@
 node_modules
 dist
+# Generated API map (docs/032). Built into each package dir at build time and shipped in
+# the tarball (it sits inside the package dir, so publish includes it even when ignored
+# from git). Not committed: a stale committed map is worse than a freshly generated one.
+packages/*/api
 coverage
 test-results
 .ladle/build
