@@ -581,6 +581,35 @@ export function makeObjectNode(args: {
   });
 }
 
+/**
+ * A fresh, editable single-paragraph document (note.md §5.6, D3).
+ *
+ * `createEditorStore` does not seed a block, and an empty `body.order: []` has no
+ * caret target — the surface accepts no keyboard input because there is nowhere to
+ * place a caret. A consumer opening a brand-new document (no stored snapshot) uses
+ * this instead of hand-building the seed paragraph through `makeTextNode` /
+ * `createIdAllocator`. The seed id is minted from a fresh allocator with a random
+ * client id, a separate id space from the store's own allocator, so
+ * `createEditorStore({ allocator: createIdAllocator(), snapshot: emptyDocument() })`
+ * never collides.
+ */
+export function emptyDocument(): EditorDocumentSnapshot {
+  const allocator = createIdAllocator();
+  const paragraph = makeTextNode({
+    content: allocator.createTextSlice(""),
+    id: allocator.createNodeId(),
+    type: "paragraph",
+  });
+  return {
+    body: {
+      blocks: { [paragraph.id]: paragraph },
+      order: [paragraph.id],
+    },
+    settings: {},
+    version: 1,
+  };
+}
+
 export function freezeNode<T extends EditorNode>(node: T): T {
   /*
    * Store mutation happens by replacing node objects in a mutable Map. Freezing

@@ -71,6 +71,7 @@ await import("./editor/engine-markdown-paste.test");
 await import("./editor/engine-markdown-clipboard.test");
 await import("./editor/engine-list-nesting.test");
 await import("./editor/engine-commands.test");
+await import("./editor/engine-empty-document.test");
 await import("./editor/engine-style-invariants.test");
 await import("./editor/engine-objects.test");
 await import("./editor/engine-toc.test");

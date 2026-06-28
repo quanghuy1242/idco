@@ -44,6 +44,7 @@ export {
   characterIdsForSlice,
   createIdAllocator,
   createTextSliceFromIds,
+  emptyDocument,
   makeObjectNode,
   makeStructuralNode,
   makeTextNode,

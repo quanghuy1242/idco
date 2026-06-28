@@ -1,7 +1,10 @@
 // DaisyUI 5: https://daisyui.com/components/mockup-code/
 "use client";
 
-import Prism from "prismjs";
+// `./prism-core` imports prismjs AND pins `globalThis.Prism` first, so the grammar
+// packs below register onto the same instance even on runtimes (workerd) where
+// prismjs's own global detection fails (note.md §5.5, D2). It MUST precede the packs.
+import Prism from "./prism-core";
 // Load grammars beyond Prism's core (markup/css/clike/javascript) so json/ts/python tokenize.
 /* eslint-disable import/no-unassigned-import -- Prism grammar packs register onto the Prism singleton via import side effect; there is no functional API. */
 import "prismjs/components/prism-json";

@@ -30,3 +30,22 @@ test("idco barrels import in a DOM-less (SSR) module graph without throwing", as
   expect(ui).toBeDefined();
   expect(lib).toBeDefined();
 });
+
+/**
+ * D2 (note.md §5.5): `CodeEditor` pins `globalThis.Prism` and registers the extra
+ * grammar packs onto it. The bug content-api hit is workerd-specific (prismjs's own
+ * global detection fails there, so the packs throw `ReferenceError: Prism is not
+ * defined`); it does not reproduce in this node env (prismjs resolves `_self` to
+ * `globalThis` here). This guards the contract the fix makes runtime-independent:
+ * importing the package pins the global and the extra grammars are registered on it.
+ */
+test("CodeEditor pins globalThis.Prism with the extra grammar packs registered", async () => {
+  await import("@quanghuy1242/idco-ui/code-editor");
+  const prism = (
+    globalThis as { Prism?: { languages?: Record<string, unknown> } }
+  ).Prism;
+  expect(prism).toBeDefined();
+  expect(prism?.languages?.json).toBeDefined();
+  expect(prism?.languages?.typescript).toBeDefined();
+  expect(prism?.languages?.python).toBeDefined();
+});

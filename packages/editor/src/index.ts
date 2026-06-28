@@ -347,6 +347,7 @@ export {
   type EnginePerformanceSnapshot,
 } from "./core";
 export {
+  emptyDocument,
   makeObjectNode,
   makeStructuralNode,
   makeTextNode,
