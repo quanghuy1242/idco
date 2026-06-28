@@ -222,6 +222,61 @@ export const Phase8ToolbarSpiDemo: Story = () => {
   return <OwnedModelEditor forcePolyfill store={store} virtualize={false} />;
 };
 
+// --- B3 repro: virtualized caret persistence (note.md §5.3) ------------------
+// The virtualized path is the one content-api exercised, and no other story
+// combines `virtualize` with a small/empty doc + the toolbar — so these two are
+// the dedicated repro surfaces for the B3 caret-loss isolation, driven by
+// tests/e2e/engine-b3-virtualized-caret.spec.ts. A short viewport so the window
+// genuinely virtualizes a small doc (the bug lives in the virtualized path).
+const B3_VIEWPORT = 320;
+
+export const B3VirtualizedSmallDoc: Story = () => {
+  const store = useMemo(() => createEditingStore(), []);
+  return (
+    <OwnedModelEditor
+      diagnosticsKey={ENGINE_VIEW_API_KEY}
+      forcePolyfill
+      store={store}
+      viewportHeight={B3_VIEWPORT}
+      virtualize
+    />
+  );
+};
+
+// A brand-new document: a single empty paragraph (the shape content-api seeds via
+// `makeTextNode` for D3). Symptom #1 — "empty doc shows no caret when focused" —
+// is checked here, separately from the structural-edit symptom #2.
+function createEmptyDocStore() {
+  const allocator = createIdAllocator("idco_client_b3_empty");
+  const paragraph = makeTextNode({
+    content: allocator.createTextSlice(""),
+    id: allocator.createNodeId(),
+    type: "paragraph",
+  });
+  const snapshot: EditorDocumentSnapshot = {
+    body: {
+      blocks: { [paragraph.id]: paragraph } as Record<NodeId, EditorNode>,
+      order: [paragraph.id],
+    },
+    settings: { story: "b3-empty" },
+    version: 1,
+  };
+  return createEditorStore({ allocator, snapshot });
+}
+
+export const B3VirtualizedEmptyDoc: Story = () => {
+  const store = useMemo(() => createEmptyDocStore(), []);
+  return (
+    <OwnedModelEditor
+      diagnosticsKey={ENGINE_VIEW_API_KEY}
+      forcePolyfill
+      store={store}
+      viewportHeight={B3_VIEWPORT}
+      virtualize
+    />
+  );
+};
+
 export const Phase6MixedBook: Story = () => {
   const store = useMemo(() => createMixedBookStore(), []);
   const viewRef = useRef<OwnedModelEditorViewHandle | null>(null);

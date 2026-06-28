@@ -48,7 +48,7 @@ import { useEditorOrder } from "./store-hooks";
 import { TouchPasteAction, TouchSelectionLayer } from "./overlays";
 import { ObjectEditorRegistryProvider } from "./render/object-editor-registry";
 import { baseViewStyle, computeWindowListMeta } from "./styles";
-import { cancelFrame } from "./raf";
+import { cancelFrame, requestFrame } from "./raf";
 import { EngineBlock } from "./render";
 import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
@@ -361,6 +361,49 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     update();
     return store.subscribeSelection(update);
   }, [store, rootRef]);
+
+  // Focus reclaim after an edit unmounts the focused host (note.md §5.3, B3).
+  //
+  // A structural edit can remove the very DOM host that held focus: deleting the
+  // table the caret sat in, merging the focused block into its predecessor, etc.
+  // Removing a focused element drops browser focus to <body> (confirmed: the cell
+  // host fires a capture-phase `blur` mid-dispatch with `document.activeElement`
+  // already `body`, and no `focusout` reaches the document). The model meanwhile
+  // remapped the selection onto a surviving block (commit pipeline apply→
+  // mapSelection), so it still names a text caret — but the painted caret is gated
+  // on focus being inside the surface (selection-overlay `useEditorFocusWithin`),
+  // so an orphaned focus hides the caret and kills typing until a re-click. The
+  // toolbar returns focus via `focusEditor`, but a bare `store.command` delete (a
+  // host button, a programmatic edit) does not, so the engine must re-home it.
+  //
+  // The trigger is the commit, not a focus event: only a *local structural* commit
+  // can orphan the user's own focus (a remote/collaborative edit must never grab
+  // focus; a pure text edit never unmounts the host). We re-check on the next frame
+  // — the same "let focus settle" deferral the focus-within gate uses, here across
+  // the view's structural re-render — and reclaim only when focus actually fell to
+  // body, the selection's block is mounted, and a focus-taking overlay is not
+  // deliberately holding focus (the docs/029 §7.1 reclaim seam). Virtualization
+  // scroll-away is excluded for free: the focus block is then unmounted, so the
+  // `blockRefs.has` guard fails and nothing is reclaimed.
+  useEffect(() => {
+    return store.subscribeCommit((committed) => {
+      if (committed.origin !== "local" || !committed.structureChanged) return;
+      requestFrame(() => {
+        if (store.isReclaimSuspended()) return;
+        const sel = store.selection;
+        if (sel?.type !== "text") return;
+        const root = rootRef.current;
+        if (!root) return;
+        const doc = root.ownerDocument;
+        const active = doc.activeElement;
+        const orphaned =
+          !active || active === doc.body || active === doc.documentElement;
+        if (!orphaned) return;
+        if (!registryRef.current.blockRefs.has(sel.focus.node)) return;
+        syncFocusToSelection();
+      });
+    });
+  }, [store, syncFocusToSelection, rootRef, registryRef]);
 
   useImperativeHandle(ref, () => api, [api]);
 
