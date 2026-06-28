@@ -8,7 +8,13 @@
  * (Phase 7 AC3). It reads the store and geometry by parameter; only the two
  * components hold React state.
  */
-import { useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import {
   childrenOf,
   pointAtOffset,
@@ -484,6 +490,16 @@ export function SelectionOverlay(props: {
     props;
   const version = useSelectionFrameVersion(store, scheduler);
   void version;
+  // The block refs register during commit — AFTER this overlay's first render read
+  // an empty registry — so the empty-document placeholder (which needs the slot
+  // block's mounted rect) cannot compute on the first paint, and nothing else
+  // re-renders the overlay until the first interaction. Bump once post-mount to
+  // re-render with the registry populated, so the hint shows on load rather than
+  // only after a click (note.md §5.8 second follow-up). The selection frame version
+  // covers every change after that; pre-paint (layout effect) so the hint does not
+  // flash in.
+  const [, setMountTick] = useState(0);
+  useLayoutEffect(() => setMountTick(1), []);
   // The caret/gap is an *insertion* affordance: it must only show while the
   // editor actually holds focus. Painting it on a blurred surface (the previous
   // behavior) is misleading — it implies typing lands there when it does not,

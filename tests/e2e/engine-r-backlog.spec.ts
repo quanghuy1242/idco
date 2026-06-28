@@ -13,6 +13,7 @@ import { expect, test, type Page } from "@playwright/test";
  */
 const PLACEHOLDER = "engine--owned-model--r2-empty-doc-placeholder";
 const FILL = "engine--owned-model--r3-chromeless-fill-height";
+const BARE_EMPTY = "engine--owned-model--r3-chromeless-empty-bare-view";
 const API = "__IDCO_ENGINE_VIEW_API__";
 
 async function open(page: Page, story: string): Promise<void> {
@@ -23,6 +24,28 @@ async function open(page: Page, story: string): Promise<void> {
     .first()
     .waitFor({ state: "visible" });
 }
+
+test("R2: the placeholder paints on load, before any interaction", async ({
+  page,
+}) => {
+  // The hint is overlay-painted from the block rects, which register after the
+  // first render — so the overlay re-renders once post-mount to show it on load
+  // rather than only after the first click (note.md §5.8 second follow-up).
+  await open(page, BARE_EMPTY);
+  await expect(page.locator("[data-engine-placeholder]")).toHaveCount(1);
+});
+
+test("R3: the surface shows a text cursor across the whole fill area", async ({
+  page,
+}) => {
+  // The empty area below the text (a fillHeight surface's blank lower half) reads
+  // as a click-to-type target — the I-beam, not the default arrow.
+  await open(page, BARE_EMPTY);
+  const cursor = await page
+    .locator("[data-engine-view-root]")
+    .evaluate((el) => getComputedStyle(el).cursor);
+  expect(cursor).toBe("text");
+});
 
 test("R2: placeholder shows on an empty doc and clears on first input", async ({
   page,

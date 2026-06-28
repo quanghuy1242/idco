@@ -64,6 +64,12 @@ export const baseViewStyle: CSSProperties = {
   border: "1px solid color-mix(in srgb, CanvasText 18%, transparent)",
   borderRadius: 8,
   color: "CanvasText",
+  // The whole surface reads as a text-editing target, so the empty area below the
+  // text (most visibly a `fillHeight` surface's blank lower half) shows the I-beam,
+  // not the default arrow — clicking it lands a caret (R3 click-empty→caret-at-end).
+  // Text blocks already carry `cursor: text`; object blocks re-assert `default`
+  // (objectBlockStyle) so an image/divider does not read as editable text.
+  cursor: "text",
   fontFamily:
     'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   lineHeight: 1.55,
@@ -114,6 +120,7 @@ export function resolveViewStyle(opts: {
   const base: CSSProperties = chromeless
     ? {
         color: baseViewStyle.color,
+        cursor: baseViewStyle.cursor,
         fontFamily: baseViewStyle.fontFamily,
         lineHeight: baseViewStyle.lineHeight,
         position: baseViewStyle.position,
@@ -291,6 +298,9 @@ export const objectBlockStyle: CSSProperties = {
   // ENGINE_OBJECT_CHROME_CSS), which does not change layout, so activation never
   // shifts the box (AC3).
   borderRadius: 6,
+  // Override the surface-wide `cursor: text` (baseViewStyle): an object is not
+  // editable text, so it reads with the default arrow, not the I-beam.
+  cursor: "default",
   margin: "4px 0",
   position: "relative",
 };
