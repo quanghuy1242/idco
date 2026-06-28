@@ -1,0 +1,194 @@
+/*
+ * @idco/editor published CSS contract (note.md §5.2, B2).
+ *
+ * These are the hand-written, non-Tailwind-utility rules the editor's and reader's
+ * *rendered content* needs but that the package cannot otherwise deliver to a
+ * consumer:
+ *
+ *   - `.rt-checklist*` — check-list rendering (the box, the tick, the strike).
+ *   - `.rt-table*`      — table frame, cell borders/padding, numbered-row gutter.
+ *   - `.token.*`        — the theme-aware Prism palette for code blocks / CodeEditor.
+ *
+ * They are NOT Tailwind utilities (those the consumer generates by adding this
+ * package to their `@source` scan — see docs/033) and they are NOT among the rules
+ * the editor injects at runtime via `SelectionOverlay` (caret blink, selection
+ * suppression, `.rt-*` prose typography, object chrome). Without this file a
+ * consumer's tables render unframed, check-lists show no box, and code blocks have
+ * no syntax colour — the exact gap content-api hit. Import it once:
+ *
+ *   import "@quanghuy1242/idco-editor/styles.css";
+ *
+ * It is theme-driven: every colour resolves to a DaisyUI `--color-*` custom
+ * property, so it inherits the host's active theme with no further configuration.
+ * This file is the single source of these rules; `.ladle/preview.css` imports it
+ * rather than re-declaring them, so the Ladle stories and a real consumer render
+ * identically.
+ */
+
+/* --- Check lists --------------------------------------------------------------
+   The `rt-checklist` theme class neutralises the shared `ul` bullet/indent so a
+   check list reads distinctly from a bullet list. The 1rem box is centred on the
+   first line (line-height 1.5rem) at top = (1.5rem - 1rem) / 2 = 0.25rem. */
+.rt-checklist {
+  margin-left: 0;
+  list-style: none;
+  padding-left: 0;
+}
+.rt-checklist-item {
+  position: relative;
+  list-style: none;
+  margin-left: 0;
+  padding-left: 1.75rem;
+  outline: none;
+}
+.rt-checklist-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.25rem;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--color-base-300);
+  border-radius: 0.25rem;
+  background: var(--color-base-100);
+  cursor: pointer;
+}
+.rt-checklist-checked::before {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.rt-checklist-checked::after {
+  content: "";
+  position: absolute;
+  left: 0.36rem;
+  top: 0.45rem;
+  width: 0.3rem;
+  height: 0.55rem;
+  border: solid var(--color-primary-content);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  cursor: pointer;
+}
+.rt-checklist-checked {
+  text-decoration: line-through;
+  color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+}
+
+/* --- Tables ------------------------------------------------------------------
+   The scroll wrapper owns the outer rounded frame (clipping the table's square
+   corners) and the horizontal scroll for wide tables. */
+.rt-table-wrap {
+  margin-block: 0.75rem;
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-box);
+  overflow: auto hidden;
+}
+/* Fixed layout so resize-handle column widths are honoured; the table sizes to
+   the sum of its column widths so dragging a boundary is WYSIWYG both ways. */
+.rt-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+/* Interior grid only: each cell draws its right/bottom edge; the wrapper draws
+   the outer frame. Padding lives here so every cell — seeded from JSON or freshly
+   inserted — has the same breathing room regardless of utility generation. */
+.rt-table td,
+.rt-table th {
+  position: relative;
+  padding: 0.625rem 1.25rem;
+  border-right: 1px solid var(--color-base-300);
+  border-bottom: 1px solid var(--color-base-300);
+}
+.rt-table tr > *:last-child {
+  border-right: none;
+}
+.rt-table tr:last-child > * {
+  border-bottom: none;
+}
+/* Responsive / full-width tables fill their container; fixed tables size to the
+   sum of their column widths and scroll when wider. */
+.rt-table[data-table-layout="responsive"],
+.rt-table[data-table-layout="full-width"] {
+  width: 100%;
+}
+/* Numbered-column gutter: a CSS counter painted into the first cell of each row
+   (presentational — never a real data column, so import/export and header axes
+   stay untouched). The first cell reserves space on the left. */
+.rt-table-numbered {
+  counter-reset: rt-row;
+}
+.rt-table-numbered tr {
+  counter-increment: rt-row;
+}
+.rt-table-numbered tr > *:first-child {
+  padding-left: 3rem;
+}
+.rt-table-numbered tr > *:first-child::before {
+  content: counter(rt-row);
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2.25rem;
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-base-content);
+  opacity: 0.45;
+  background: var(--color-base-200);
+  border-right: 1px solid var(--color-base-300);
+}
+
+/* --- Prism syntax highlighting ----------------------------------------------
+   Theme-aware token palette for the CodeEditor / code-block nodes. */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+  font-style: italic;
+}
+.token.punctuation {
+  color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}
+.token.keyword,
+.token.tag,
+.token.selector,
+.token.atrule,
+.token.important {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.token.string,
+.token.char,
+.token.attr-value,
+.token.regex,
+.token.url {
+  color: var(--color-success);
+}
+.token.number,
+.token.boolean,
+.token.constant {
+  color: var(--color-warning);
+}
+.token.function,
+.token.class-name,
+.token.builtin,
+.token.namespace {
+  color: var(--color-info);
+}
+.token.property,
+.token.attr-name,
+.token.symbol,
+.token.variable {
+  color: var(--color-secondary);
+}
+.token.operator,
+.token.entity {
+  color: var(--color-accent);
+}
+.token.deleted {
+  color: var(--color-error);
+}

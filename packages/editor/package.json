@@ -10,10 +10,11 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./styles.css": "./dist/styles.css"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && node ../../scripts/gen-api-map.mjs .",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node ../../scripts/fix-worker-specifier.mjs . && cp styles.css dist/styles.css && node ../../scripts/gen-api-map.mjs .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
