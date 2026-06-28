@@ -8,6 +8,7 @@ import {
   Form,
   HiddenInput,
   Inline,
+  Input,
   NumberInput,
   Panel,
   RadioGroup,
@@ -60,6 +61,56 @@ export const Inputs: Story = () => (
     </Stack>
   </Form>
 );
+
+// R4 (note.md §5.10): a borderless, label-less document-title input. `variant=
+// "ghost"` + a large `size` turns the bare `Input` into a Notion/Word-style hero
+// title that sits directly above the body — the one part of content-api's redesign
+// the labelled `TextInput` could not deliver. The bordered/size variants are shown
+// alongside so the ghost-vs-bordered and md→xl scale are visible at a glance.
+export const GhostTitleInput: Story = () => {
+  const [title, setTitle] = useState("");
+  const [bordered, setBordered] = useState("Bordered, size md");
+  return (
+    <Stack gap="lg">
+      <div className="border-b border-base-300 pb-4">
+        <Text variant="caption">
+          Document title (ghost, xl) — sits above the body:
+        </Text>
+        <Input
+          ariaLabel="Title"
+          onChange={setTitle}
+          placeholder="Untitled document"
+          size="xl"
+          value={title}
+          variant="ghost"
+        />
+        <Input
+          ariaLabel="Subtitle"
+          onChange={() => {}}
+          placeholder="Add a subtitle…"
+          size="lg"
+          value=""
+          variant="ghost"
+        />
+      </div>
+      <Stack gap="sm">
+        <Text variant="caption">Bordered (default), for comparison:</Text>
+        <Input
+          ariaLabel="Bordered md"
+          onChange={setBordered}
+          value={bordered}
+        />
+        <Input
+          ariaLabel="Bordered lg"
+          onChange={() => {}}
+          placeholder="size lg"
+          size="lg"
+          value=""
+        />
+      </Stack>
+    </Stack>
+  );
+};
 
 export const ChoiceControls: Story = () => (
   <Stack>

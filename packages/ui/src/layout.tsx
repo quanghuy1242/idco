@@ -12,7 +12,7 @@ type Gap = "xs" | "sm" | "md" | "lg";
 /** Cross-axis alignment token for laid-out children. */
 type Align = "start" | "center" | "end" | "stretch";
 /** Max-width scale token that constrains a container's content. */
-type Width = "narrow" | "content" | "wide" | "full";
+type Width = "narrow" | "content" | "wide" | "xwide" | "full";
 /** Inner padding scale token for surfaces. */
 type Padding = "none" | "sm" | "md" | "lg";
 /** Surface background tone token, neutral base or muted. */
@@ -54,6 +54,11 @@ const widthClass: Record<Width, string> = {
   narrow: "max-w-md",
   content: "max-w-3xl",
   wide: "max-w-7xl",
+  // The step between `wide` (1280px) and edge-to-edge `full` (R1, note.md §5.7):
+  // a CMS edit screen is an editor column plus a Publish/SEO sidebar, which is
+  // cramped at `wide` and unbounded at `full`. Tailwind v4 dropped the
+  // `max-w-screen-2xl` token, so this is the explicit 1536px arbitrary value.
+  xwide: "max-w-[1536px]",
   full: "max-w-none",
 };
 
@@ -111,22 +116,35 @@ export function PageSection({ padding = "md", children }: PageSectionProps) {
   );
 }
 
+/** Props for {@link PageHeader} and {@link PageBody}. */
+type PageRegionProps = SurfaceProps & {
+  /** Max-width constraint forwarded to the inner container; defaults to `wide`. */
+  readonly width?: Width;
+};
+
 /** Bordered top header bar that centers its content and spaces children apart in a row. */
-export function PageHeader({ children }: SurfaceProps) {
+export function PageHeader({ width = "wide", children }: PageRegionProps) {
   return (
     <header className="border-b border-base-300 bg-base-100 px-6 py-4 w-full">
-      <Container>
+      <Container width={width}>
         <div className="flex items-center justify-between">{children}</div>
       </Container>
     </header>
   );
 }
 
-/** Flexible-height main content area that pads and centers its content below a page header. */
-export function PageBody({ children }: SurfaceProps) {
+/**
+ * Flexible-height main content area that pads and centers its content below a page header.
+ *
+ * `width` is forwarded to the inner container so a content-CMS edit screen (an
+ * editor column plus a sidebar) can widen past `wide` without dropping `PageBody`
+ * and losing its padding/centering (R1, note.md §5.7). Keep it equal to the
+ * `PageHeader` width so the header stays aligned with the body column.
+ */
+export function PageBody({ width = "wide", children }: PageRegionProps) {
   return (
     <div className="flex-1 p-6 w-full">
-      <Container>{children}</Container>
+      <Container width={width}>{children}</Container>
     </div>
   );
 }

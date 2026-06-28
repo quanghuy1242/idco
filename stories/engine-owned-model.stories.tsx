@@ -8,6 +8,7 @@ import {
   createEditorStore,
   createEditorStoreFromCompat,
   createIdAllocator,
+  emptyDocument,
   makeObjectNode,
   makeStructuralNode,
   makeTextNode,
@@ -274,6 +275,104 @@ export const B3VirtualizedEmptyDoc: Story = () => {
       viewportHeight={B3_VIEWPORT}
       virtualize
     />
+  );
+};
+
+// --- R-backlog stories (note.md §5.7–5.10) -----------------------------------
+// R2 (empty-doc placeholder) and R3 (chromeless / fill-height / click-empty→
+// caret-at-end). Driven by tests/e2e/engine-r-backlog.spec.ts and captured by the
+// screenshot spec for visual evaluation. The fill-height stories wrap the editor
+// in a fixed-height flex column (the "give it a height" contract) so the surface
+// visibly stretches and the blank area below the text becomes a click target.
+const R_PLACEHOLDER = "Write something, or press '/' for commands…";
+
+// R2 (note.md §5.8): a brand-new document (D3's `emptyDocument()` seed) paints a
+// muted, non-interactive placeholder in its single empty block. It disappears on
+// the first character and respects the engine-painted caret.
+export const R2EmptyDocPlaceholder: Story = () => {
+  const store = useMemo(
+    () =>
+      createEditorStore({
+        allocator: createIdAllocator("idco_client_r2_placeholder"),
+        snapshot: emptyDocument(),
+      }),
+    [],
+  );
+  return (
+    <OwnedModelEditor
+      diagnosticsKey={ENGINE_VIEW_API_KEY}
+      forcePolyfill
+      placeholder={R_PLACEHOLDER}
+      store={store}
+      virtualize={false}
+    />
+  );
+};
+
+// R3 (note.md §5.9): chromeless (no card border/radius/max-width) + fillHeight on
+// the NON-virtualized path — the surface content-api uses. The editor fills the
+// 560px flex column; a click in the blank area below the last paragraph lands the
+// caret at the end of the document.
+export const R3ChromelessFillHeight: Story = () => {
+  const store = useMemo(() => createEditingStore(), []);
+  return (
+    <div className="flex h-[560px] flex-col bg-base-100">
+      <OwnedModelEditor
+        chromeless
+        diagnosticsKey={ENGINE_VIEW_API_KEY}
+        fillHeight
+        forcePolyfill
+        placeholder={R_PLACEHOLDER}
+        store={store}
+        virtualize={false}
+      />
+    </div>
+  );
+};
+
+// R3 (note.md §5.9): fillHeight on the VIRTUALIZED path. The scroller measures the
+// flex container's height (no fixed `viewportHeight`) and windows against it, so
+// the same typed prop drives both paths.
+export const R3FillHeightVirtualized: Story = () => {
+  const store = useMemo(() => createEditingStore(), []);
+  return (
+    <div className="flex h-[560px] flex-col bg-base-100">
+      <OwnedModelEditor
+        chromeless
+        diagnosticsKey={ENGINE_VIEW_API_KEY}
+        fillHeight
+        forcePolyfill
+        store={store}
+        virtualize
+      />
+    </div>
+  );
+};
+
+// R2 + R3 combined on the bare view (no toolbar/dock chrome): a chromeless,
+// fill-height empty surface with a placeholder — the leanest "the editor is the
+// page" shape, used by the screenshot capture for an unambiguous before/after.
+export const R3ChromelessEmptyBareView: Story = () => {
+  const store = useMemo(
+    () =>
+      createEditorStore({
+        allocator: createIdAllocator("idco_client_r3_bare"),
+        snapshot: emptyDocument(),
+      }),
+    [],
+  );
+  return (
+    <div className="flex h-[420px] flex-col bg-base-100">
+      <OwnedModelEditorView
+        chromeless
+        diagnosticsKey={ENGINE_VIEW_API_KEY}
+        fillHeight
+        forcePolyfill
+        placeholder={R_PLACEHOLDER}
+        store={store}
+        virtualize={false}
+      />
+    </div>
   );
 };
 

@@ -61,9 +61,18 @@ export function useVirtualWindow(args: {
   readonly order: readonly NodeId[];
   readonly virtualize: boolean;
   readonly viewportHeight: number;
+  readonly fillHeight: boolean;
   readonly overscan: number;
 }): VirtualWindowController {
-  const { refs, store, order, virtualize, viewportHeight, overscan } = args;
+  const {
+    refs,
+    store,
+    order,
+    virtualize,
+    viewportHeight,
+    fillHeight,
+    overscan,
+  } = args;
   const {
     heightCacheRef,
     estimateRef,
@@ -76,6 +85,15 @@ export function useVirtualWindow(args: {
   const [scrollTop, setScrollTop] = useState(0);
   const [measureVersion, setMeasureVersion] = useState(0);
   const [fling, setFling] = useState(false);
+  // The scroller's own measured height, used only when `fillHeight` stretches the
+  // surface to its flex container (R3, note.md §5.9). The windowing math needs a
+  // concrete pixel viewport; a CSS `height: 100%` scroller has no fixed number, so
+  // we measure the container and window against that. Until the first measurement
+  // we fall back to `viewportHeight`, so the very first frame still windows a
+  // sensible slice instead of nothing.
+  const [measuredViewport, setMeasuredViewport] = useState(0);
+  const effectiveViewportHeight =
+    fillHeight && measuredViewport > 0 ? measuredViewport : viewportHeight;
   // Bumped to force a bulk re-seed of unmounted blocks when a document-wide
   // reflow changes their geometry — a width change or a web-font load (docs/025
   // §5.3). Measured blocks keep their cached real height across the rebuild.
@@ -168,6 +186,36 @@ export function useVirtualWindow(args: {
   }, [virtualize, order, reseedVersion, store, heightCacheRef, estimateRef]);
 
   /*
+   * Measure the scroller's own height when `fillHeight` stretches it to its flex
+   * container (R3, note.md §5.9). A fixed `viewportHeight` needs no observer; a
+   * `height: 100%` scroller does, because the windowing slice is computed against
+   * the visible viewport size and there is no fixed number to read. The container's
+   * content-box block size IS the viewport (the virtualized path runs with
+   * `padding: 0`). Coalesced through state with a sub-pixel tolerance so a
+   * fractional-DPI jitter does not re-window every frame.
+   */
+  useEffect(() => {
+    if (!virtualize || !fillHeight) return;
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const box = entry.contentBoxSize?.[0];
+        const height = box
+          ? box.blockSize
+          : entry.target.getBoundingClientRect().height;
+        if (height > 0) {
+          setMeasuredViewport((prev) =>
+            Math.abs(prev - height) > 0.5 ? height : prev,
+          );
+        }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [virtualize, fillHeight, rootRef]);
+
+  /*
    * A web-font load is a document-wide reflow (docs/025 §5.3): text metrics
    * change everywhere, so re-seed unmounted blocks once fonts settle and unlock
    * estimator calibration. Until then text measurements reflect the fallback
@@ -216,7 +264,7 @@ export function useVirtualWindow(args: {
     const range = rangeFromModel(offsetModel, {
       overscan,
       scrollOffset: scrollTop,
-      viewportSize: viewportHeight,
+      viewportSize: effectiveViewportHeight,
     });
     return { ...range, ids: order.slice(range.startIndex, range.endIndex) };
     // measureVersion is a dep because the measure effect mutates the model in
@@ -228,7 +276,7 @@ export function useVirtualWindow(args: {
     order,
     scrollTop,
     overscan,
-    viewportHeight,
+    effectiveViewportHeight,
     measureVersion,
   ]);
 

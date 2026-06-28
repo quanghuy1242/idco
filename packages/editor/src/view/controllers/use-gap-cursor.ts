@@ -12,6 +12,7 @@ import type React from "react";
 import {
   childrenOf,
   makeTextNode,
+  orderedTextLeaves,
   pointAtOffset,
   type EditorSelection,
   type EditorStore,
@@ -299,6 +300,35 @@ export function useGapCursor(args: {
         focusRoot();
         return;
       }
+      // R3 (note.md §5.9): a click in the blank fill area *below the last block*
+      // lands the caret at the END of the document — the Word/Notion "click the
+      // empty page under the text and start typing where it ends" affordance, and
+      // the reason a tall `fillHeight`/`chromeless` surface's dead space is a live
+      // click-to-type target. Only fires when the click is below every mounted
+      // block (`docEndPointBelowContent` returns null otherwise), so a click
+      // between/over blocks still uses the nearest-text mapping below. Scope it to
+      // a body click (not inside a structural container) so a click below a table's
+      // last cell still resolves within the cell.
+      if (scope === store.bodyId) {
+        const end = docEndPointBelowContent(
+          store,
+          registryRef.current.blockRefs,
+          event.clientY,
+        );
+        if (end) {
+          const existing = store.selection;
+          const anchor =
+            event.shiftKey && existing?.type === "text" ? existing.anchor : end;
+          store.dispatch({
+            origin: "local",
+            selectionAfter: { anchor, focus: end, type: "text" },
+            steps: [],
+          });
+          focusBlock(end.node);
+          beginDrag(anchor);
+          return;
+        }
+      }
       const point = resolveTextPointAt(
         store,
         root,
@@ -323,8 +353,48 @@ export function useGapCursor(args: {
       focusBlock(point.node);
       beginDrag(anchor);
     },
-    [beginDrag, focusBlock, focusRoot, gapAtPointer, store, rootRef],
+    [
+      beginDrag,
+      focusBlock,
+      focusRoot,
+      gapAtPointer,
+      store,
+      rootRef,
+      registryRef,
+    ],
   );
 
   return { onRootKeyDown, onRootMouseDown };
+}
+
+/**
+ * The text point at the END of the document, but only when `clientY` is below
+ * every mounted block — i.e. the click landed in the blank fill area under the
+ * last paragraph (R3, note.md §5.9). Returns null when the click is level with or
+ * above any block (the caller then uses the nearest-text mapping) or when the last
+ * text leaf is not mounted (so we never focus a windowed-out block). The lowest
+ * block bottom is the threshold; the last text leaf in document order is the
+ * caret target, placed at its full text length.
+ */
+function docEndPointBelowContent(
+  store: EditorStore,
+  blockRefs: ReadonlyMap<NodeId, HTMLElement>,
+  clientY: number,
+): TextPoint | null {
+  let maxBottom = Number.NEGATIVE_INFINITY;
+  for (const element of blockRefs.values()) {
+    const bottom = element.getBoundingClientRect().bottom;
+    if (bottom > maxBottom) maxBottom = bottom;
+  }
+  if (maxBottom === Number.NEGATIVE_INFINITY || clientY <= maxBottom) {
+    return null;
+  }
+  const leaves = orderedTextLeaves(store);
+  const last = leaves.at(-1);
+  if (!last || !blockRefs.has(last.node.id)) return null;
+  return pointAtOffset(
+    last.node.id,
+    last.node.content,
+    last.node.content.text.length,
+  );
 }

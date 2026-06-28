@@ -115,6 +115,22 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     uploadImage,
     ...viewProps
   } = props;
+  // `fillHeight`/`chromeless` stay in `viewProps` (read but not destructured out)
+  // so they still reach the view; `fillHeight` is also read here to stretch the
+  // chrome's flex chain (wrapper → body → surface → prose) so the view's
+  // `height: 100%`/`minHeight: 100%` has a definite height to fill (R3, note.md
+  // §5.9). Needs the consuming page to give this root a height.
+  const fillHeight = props.fillHeight ?? false;
+  const wrapperClass = fillHeight ? "flex flex-col h-full" : "flex flex-col";
+  const bodyClass = fillHeight
+    ? "flex items-stretch gap-1 p-1 min-h-0 flex-1"
+    : "flex items-stretch gap-1 p-1";
+  const surfaceClass = fillHeight
+    ? "relative min-w-0 flex-1 min-h-0"
+    : "relative min-w-0 flex-1";
+  const proseFillClass = fillHeight
+    ? `${proseClassName} h-full`
+    : proseClassName;
   const viewRef = useRef<OwnedModelEditorViewHandle | null>(null);
   // The shared overlay-authority ref (docs/029 §7.4): created here (stable), populated by the
   // editing view's `SelectionSurfaceHost`, and provided to the whole editor subtree so the
@@ -409,7 +425,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     <OverlayAuthorityRefProvider value={overlayAuthorityRef}>
       <UploadProvider value={uploadImage ?? null}>
         <div
-          className="flex flex-col"
+          className={wrapperClass}
           data-engine-editor=""
           onDragOver={
             uploadImage ? (event) => event.preventDefault() : undefined
@@ -426,21 +442,18 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
           {/* `gap-1 p-1` puts one even 4px frame around the row and a single 4px gap
             between the editor and the dock — the margin lives on the row, not on both
             children, so the gap between them is not doubled. */}
-          <div
-            className="flex items-stretch gap-1 p-1"
-            data-engine-editor-body=""
-          >
+          <div className={bodyClass} data-engine-editor-body="">
             {/* `relative` so the find card floats over the surface's top-right corner
               instead of pushing it down when it opens (no layout shift). `min-w-0` lets
               the surface shrink when the dock takes its column. */}
             <div
-              className="relative min-w-0 flex-1"
+              className={surfaceClass}
               data-engine-surface=""
               onClick={onClick}
               onContextMenu={onContextMenu}
               ref={surfaceRef}
             >
-              <div className={proseClassName} data-engine-prose="">
+              <div className={proseFillClass} data-engine-prose="">
                 <OwnedModelEditorView
                   ref={viewRef}
                   store={store}

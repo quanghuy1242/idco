@@ -125,6 +125,36 @@ export const LayoutSurfaces: Story = () => (
   </Page>
 );
 
+// R1 (note.md §5.7): `PageBody`/`PageHeader` take a `width`, forwarded to the
+// inner container, plus the new `xwide` (1536px) step between `wide` (1280px) and
+// edge-to-edge `full`. A content-CMS edit screen (editor column + Publish/SEO
+// sidebar) is cramped at `wide` and unbounded at `full`; `xwide` is the in-between.
+// Each row keeps its header and body on the SAME width so they stay aligned. A
+// tinted body box visualizes the column extent at each step.
+export const PageBodyWidths: Story = () => {
+  const widths = ["wide", "xwide", "full"] as const;
+  return (
+    <Page layout="dashboard">
+      {widths.map((width) => (
+        <div key={width} className="border-b border-base-300">
+          <PageHeader width={width}>
+            <Heading level="h2">width=&quot;{width}&quot;</Heading>
+            <Text variant="caption">header + body share the width</Text>
+          </PageHeader>
+          <PageBody width={width}>
+            <Panel tone="muted">
+              <Text>
+                Main content column at <code>{width}</code>. The editor column
+                plus a Publish/SEO sidebar fits here without dropping PageBody.
+              </Text>
+            </Panel>
+          </PageBody>
+        </div>
+      ))}
+    </Page>
+  );
+};
+
 export const TypographyAndInline: Story = () => (
   <Stack>
     <Heading level="h1">Heading h1</Heading>

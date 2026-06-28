@@ -30,6 +30,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   type CSSProperties,
   type ReactNode,
@@ -47,9 +48,10 @@ import { registerBuiltInNodeViews } from "./nodes";
 import { useEditorOrder } from "./store-hooks";
 import { TouchPasteAction, TouchSelectionLayer } from "./overlays";
 import { ObjectEditorRegistryProvider } from "./render/object-editor-registry";
-import { baseViewStyle, computeWindowListMeta } from "./styles";
+import { computeWindowListMeta, resolveViewStyle } from "./styles";
 import { cancelFrame, requestFrame } from "./raf";
 import { EngineBlock } from "./render";
+import { PlaceholderProvider, type PlaceholderContextValue } from "./render";
 import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
 import { registerBuiltInMarks } from "./render";
@@ -128,8 +130,38 @@ export type OwnedModelEditorViewProps = {
    * non-virtualized render Phase 4 proves and docs/015's reader builds on.
    */
   readonly virtualize?: boolean;
-  /** Scroller height for the virtualized path; ignored when `virtualize` is false. */
+  /**
+   * Fixed scroller height in pixels for the virtualized path; ignored when
+   * `virtualize` is false or when `fillHeight` is set (then the surface measures
+   * its flex container instead). The windowing math needs a concrete height, so
+   * this is the fallback used until the container is measured.
+   */
   readonly viewportHeight?: number;
+  /**
+   * Stretch the surface to fill its container's height (R3, note.md §5.9) — for a
+   * document-centric CMS where the editor *is* the page and the whole tall area is
+   * a click-to-type target. On the virtualized path the scroller height is measured
+   * from the flex container (so windowing tracks the real height); on the
+   * non-virtualized path the surface takes `height: 100%`. Pair with a parent that
+   * has a height (a flex column, `h-screen`, etc.). A click in the blank area below
+   * the last block then places the caret at the end of the document.
+   */
+  readonly fillHeight?: boolean;
+  /**
+   * Drop the editor's default card chrome — no border, no rounded corners, no
+   * max-width cap (R3, note.md §5.9) — so the surface reads as the page itself.
+   * Replaces the previous `style={{ border: "none", ... }}` escape hatch with a
+   * typed prop; an explicit `style` still merges over the result.
+   */
+  readonly chromeless?: boolean;
+  /**
+   * Muted hint painted in an empty document's first/only block (R2, note.md §5.8),
+   * like a normal editor's empty state ("Type here…"). It paints as a
+   * non-interactive overlay that respects the engine's painted caret and disappears
+   * on the first character; it shows only while the document is a single empty
+   * block (use `emptyDocument()` to seed one).
+   */
+  readonly placeholder?: string;
   /** Overscan blocks kept mounted on each side of the viewport. */
   readonly overscan?: number;
   /**
@@ -175,6 +207,9 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     diagnosticsKey,
     virtualize = true,
     viewportHeight = DEFAULT_VIEWPORT_HEIGHT,
+    fillHeight = false,
+    chromeless = false,
+    placeholder,
     overscan = DEFAULT_OVERSCAN,
     createBakeWorker = defaultCreateBakeWorker,
     documentIndexStore,
@@ -240,6 +275,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
 
   const { windowRange, scrollTop, setScrollTop, onScroll, fling } =
     useVirtualWindow({
+      fillHeight,
       order,
       overscan,
       refs,
@@ -247,6 +283,22 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       viewportHeight,
       virtualize,
     });
+
+  // Empty-document placeholder slot (R2, note.md §5.8). The hint shows only while
+  // the document is a single text block; this names that block as the slot (the
+  // leaf paints the hint when it is the slot AND its own text is empty). Derived
+  // from `order` (a structural signal the view already re-renders on), so a split
+  // clears it; memoized so a scroll re-render does not churn the context value and
+  // re-render every mounted leaf.
+  const placeholderValue = useMemo<PlaceholderContextValue>(() => {
+    if (!placeholder) return null;
+    const firstId = order.length === 1 ? order[0]! : null;
+    const firstNode = firstId ? store.getNode(firstId) : null;
+    return {
+      targetId: firstId && firstNode?.kind === "text" ? firstId : null,
+      text: placeholder,
+    };
+  }, [order, placeholder, store]);
   const {
     focusBlock,
     focusRoot,
@@ -518,14 +570,22 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
         onMouseDown={onRootMouseDown}
         onPaste={onClipboardPaste}
         role="application"
-        style={{ ...baseViewStyle, padding: 16, ...style }}
+        style={resolveViewStyle({
+          chromeless,
+          fillHeight,
+          style,
+          viewportHeight,
+          virtualize,
+        })}
         tabIndex={-1}
       >
         <DocumentIndexProvider
           revealNode={scrollToBlock}
           store={refs.documentIndexStoreRef.current}
         >
-          {blocks}
+          <PlaceholderProvider value={placeholderValue}>
+            {blocks}
+          </PlaceholderProvider>
           <SelectionOverlay
             registry={registryRef.current}
             rootRef={rootRef}
@@ -571,17 +631,17 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       onScroll={onScroll}
       role="application"
       tabIndex={-1}
-      style={{
-        ...baseViewStyle,
-        height: viewportHeight,
-        // Take scroll anchoring away from the browser (docs/025 §5.4): the
-        // controller owns the anchor, so the browser's own overflow-anchor must
-        // not also adjust scrollTop or the two corrections fight and jitter.
-        overflowAnchor: "none",
-        overflowY: "auto",
-        padding: 0,
-        ...style,
-      }}
+      // `resolveViewStyle` keeps the docs/025 §5.4 `overflowAnchor: "none"` (the
+      // controller owns the scroll anchor) and applies `chromeless`/`fillHeight`;
+      // `fillHeight` here sets the scroller box to `100%` while `useVirtualWindow`
+      // measures the real container height for the windowing math.
+      style={resolveViewStyle({
+        chromeless,
+        fillHeight,
+        style,
+        viewportHeight,
+        virtualize,
+      })}
     >
       <div
         ref={contentRef}
@@ -596,7 +656,9 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           revealNode={scrollToBlock}
           store={refs.documentIndexStoreRef.current}
         >
-          {blocks}
+          <PlaceholderProvider value={placeholderValue}>
+            {blocks}
+          </PlaceholderProvider>
           <SelectionOverlay
             registry={registryRef.current}
             rootRef={contentRef}

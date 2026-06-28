@@ -77,8 +77,15 @@ type BareInputProps = {
   readonly ariaLabel: string;
   /** Input type; defaults to `text`. */
   readonly type?: "email" | "text" | "url";
-  /** Control height; defaults to `md`. */
-  readonly size?: "sm" | "md";
+  /** Control height; defaults to `md`. `lg`/`xl` suit a hero/title field. */
+  readonly size?: "sm" | "md" | "lg" | "xl";
+  /**
+   * Visual frame. `bordered` (default) is the standard boxed field; `ghost`
+   * drops the border for a borderless, label-less title input (DaisyUI
+   * `input-ghost`) — pair with `size="xl"` for a Notion/Word-style document title
+   * (R4, note.md §5.10).
+   */
+  readonly variant?: "bordered" | "ghost";
   readonly placeholder?: string;
   readonly autoFocus?: boolean;
   /** Apply the error style. */
@@ -86,11 +93,23 @@ type BareInputProps = {
   readonly className?: string;
 };
 
+// DaisyUI 5 input sizes (xs/sm/md/lg/xl); `md` is the default and needs no class.
+const INPUT_SIZE_CLASS: Record<NonNullable<BareInputProps["size"]>, string> = {
+  sm: "input-sm",
+  md: "",
+  lg: "input-lg",
+  xl: "input-xl",
+};
+
 /**
  * Bare text input — React Aria `TextField` + `Input` with DaisyUI `input`
  * styling and no label/error chrome. For inline editing surfaces (popovers,
  * block controls) that provide their own labels. Use `TextInput` for a full
  * labelled form field.
+ *
+ * `variant="ghost"` + a larger `size` is the borderless document-title input
+ * (R4, note.md §5.10): `<Input variant="ghost" size="xl" placeholder="Title"
+ * ariaLabel="Title" />` renders a label-less hero title above the body.
  */
 export function Input({
   value,
@@ -98,12 +117,16 @@ export function Input({
   ariaLabel,
   type = "text",
   size = "md",
+  variant = "bordered",
   placeholder,
   autoFocus,
   invalid,
   className,
 }: BareInputProps) {
-  const sizeClass = size === "sm" ? "input-sm" : "";
+  const sizeClass = INPUT_SIZE_CLASS[size];
+  // DaisyUI 5: border is the default, so `bordered` keeps `input-bordered` (the
+  // package convention) and `ghost` swaps to `input-ghost` for a borderless box.
+  const variantClass = variant === "ghost" ? "input-ghost" : "input-bordered";
   return (
     <TextField
       aria-label={ariaLabel}
@@ -116,7 +139,7 @@ export function Input({
       <AriaInput
         autoFocus={autoFocus}
         placeholder={placeholder}
-        className={`input input-bordered w-full ${sizeClass}${invalid ? " input-error" : ""}${className ? ` ${className}` : ""}`.trim()}
+        className={`input ${variantClass} w-full ${sizeClass}${invalid ? " input-error" : ""}${className ? ` ${className}` : ""}`.trim()}
       />
     </TextField>
   );

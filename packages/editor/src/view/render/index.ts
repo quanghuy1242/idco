@@ -24,3 +24,4 @@ export * from "./object-block";
 export * from "./object-config";
 export * from "./resting-document";
 export * from "./mark-render";
+export * from "./placeholder";

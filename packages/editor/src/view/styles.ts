@@ -71,6 +71,68 @@ export const baseViewStyle: CSSProperties = {
   position: "relative",
 };
 
+/**
+ * Resolve the editing surface's root style across both render paths (R3, note.md
+ * §5.9). It folds the two formerly-inline style objects in `react-view.tsx` into
+ * one typed result so `chromeless`/`fillHeight` are real props, not load-bearing
+ * `style={{...}}` consumer knowledge.
+ *
+ * - `chromeless` strips the card chrome (border, radius, max-width cap) so the
+ *   surface reads as the page itself — the typed form of the old
+ *   `style={{ border: "none", borderRadius: 0, maxWidth: "none" }}` override.
+ * - `fillHeight` stretches the surface: `height: "100%"` so it fills a parent that
+ *   has a height. On the virtualized path the *windowing* still needs a concrete
+ *   pixel height (measured from the container by `useVirtualWindow`); this only
+ *   sets the CSS so the scroller box actually fills its flex column.
+ * - The caller's explicit `style` is spread LAST so the inline escape hatch still
+ *   wins for anything a prop does not cover (back-compat with current consumers).
+ *
+ * The virtualized branch keeps `overflowAnchor: "none"` (docs/025 §5.4: the
+ * controller owns the scroll anchor, so the browser's own overflow-anchor must not
+ * also adjust scrollTop or the two corrections fight and jitter) and the auto
+ * vertical scroll the scroller needs.
+ */
+export function resolveViewStyle(opts: {
+  readonly virtualize: boolean;
+  readonly viewportHeight: number;
+  readonly chromeless: boolean;
+  readonly fillHeight: boolean;
+  readonly style?: CSSProperties;
+}): CSSProperties {
+  const { virtualize, viewportHeight, chromeless, fillHeight, style } = opts;
+  // Drop the three card-chrome keys when chromeless (no border, radius, or
+  // max-width cap); keep everything else (font/colour/line-height/position) so
+  // prose still renders identically.
+  const base: CSSProperties = chromeless
+    ? {
+        color: baseViewStyle.color,
+        fontFamily: baseViewStyle.fontFamily,
+        lineHeight: baseViewStyle.lineHeight,
+        position: baseViewStyle.position,
+      }
+    : baseViewStyle;
+  if (virtualize) {
+    return {
+      ...base,
+      height: fillHeight ? "100%" : viewportHeight,
+      overflowAnchor: "none",
+      overflowY: "auto",
+      padding: 0,
+      ...style,
+    };
+  }
+  // Non-virtualized: `minHeight: 100%` (not `height`) so the surface fills its
+  // container's height — making the blank area below the text a click-to-type
+  // target — while still growing past it when the content is taller (the page
+  // scrolls), instead of clipping. Needs a parent with a definite height.
+  return {
+    ...base,
+    padding: 16,
+    ...(fillHeight ? { minHeight: "100%" } : {}),
+    ...style,
+  };
+}
+
 export const visuallyHiddenStyle: CSSProperties = {
   border: 0,
   clip: "rect(0 0 0 0)",
@@ -187,7 +249,15 @@ export const ENGINE_TYPOGRAPHY_CSS =
   "[data-engine-view-root] [data-engine-mark='code']{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:color-mix(in srgb, currentColor 8%, transparent);padding:0.05em 0.3em;border-radius:3px;}" +
   "[data-engine-view-root] [data-engine-mark='highlight']{background:color-mix(in srgb, var(--color-warning, gold) 45%, transparent);color:inherit;border-radius:2px;}" +
   "[data-engine-view-root] [data-engine-mark='comment']{background:color-mix(in srgb, var(--color-info, #38bdf8) 22%, transparent);border-radius:2px;}" +
-  "[data-engine-view-root] [data-engine-mark='glossary']{border-bottom:1px dotted currentColor;}";
+  "[data-engine-view-root] [data-engine-mark='glossary']{border-bottom:1px dotted currentColor;}" +
+  // Empty-document placeholder (R2, note.md §5.8). A muted, non-interactive hint
+  // painted inside the empty first/only block. It is absolutely positioned at the
+  // block's text origin (the block's own 8px/5px content padding, blockStyle) so it
+  // sits exactly where the caret paints, and `pointer-events:none` + `user-select:
+  // none` keep it from intercepting the click that places the caret or from being
+  // selected. `right` constrains a long hint to the block width so it wraps instead
+  // of overflowing. Themed with the DaisyUI base-content token at reduced opacity.
+  "[data-engine-view-root] [data-engine-placeholder-text]{position:absolute;left:8px;right:8px;top:5px;pointer-events:none;user-select:none;-webkit-user-select:none;color:var(--color-base-content, CanvasText);opacity:0.4;}";
 
 // The self-sufficient resting typography (`ENGINE_RESTING_TYPOGRAPHY_CSS`) was retired
 // (docs/028 §4.5): it was a *third* source of block/mark appearance beside the live editor
