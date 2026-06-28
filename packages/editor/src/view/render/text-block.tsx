@@ -50,7 +50,6 @@ import {
 import { requestFrame } from "../raf";
 import { activateInsertedObject, listTabHandlers } from "../spi";
 import { leafHasMarks, renderLeafMarks } from "./mark-render";
-import { usePlaceholder } from "./placeholder";
 import { ariaLabelForLeaf } from "../overlays";
 import {
   blockStyleFor,
@@ -103,21 +102,6 @@ export function EngineTextBlock(props: {
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<TextBlockController | null>(null);
-
-  // Empty-document placeholder (R2, note.md §5.8). The view names the single empty
-  // block as the placeholder slot; this leaf paints the muted hint only when it is
-  // that slot AND its own live text is empty. The text check re-renders the hint
-  // away on the first keystroke and back on a delete-to-empty (this leaf is
-  // subscribed to its own node), while the slot check goes null structurally
-  // (a split makes the doc no longer a single block). The hint is painted as an
-  // aria-hidden, pointer-events:none, non-selectable layer so it never competes
-  // with the engine-painted caret/overlay or with text measurement.
-  const placeholder = usePlaceholder();
-  const showPlaceholder =
-    !!placeholder &&
-    placeholder.targetId === node.id &&
-    node.content.text.length === 0 &&
-    placeholder.text.length > 0;
 
   const syncSelectionIntoEditContext = useCallback(() => {
     const controller = controllerRef.current;
@@ -319,6 +303,24 @@ export function EngineTextBlock(props: {
         controller.editContext.text.length,
         current,
       );
+    }
+    // Re-assert the host DOM text from the model when this active leaf re-renders.
+    // The typing fast path patches the host out of band (`patchHostText`) and the
+    // store skip-notifies those keystrokes, so React's vdom never sees the typed
+    // text. When a later structural edit (delete-selection, paste) re-renders this
+    // leaf, React's reconciliation can be a no-op (e.g. empty→empty) and would
+    // leave the stale patched text in the DOM — the "select-all then Delete leaves
+    // the text behind" bug. React cannot detect the out-of-band mutation, so we fix
+    // it here, where the leaf actually re-rendered. Guarded two ways: only a
+    // no-marks leaf (a marked leaf renders React-owned mark spans that
+    // `patchHostText`'s flat `textContent` write would flatten), and only on a real
+    // mismatch (so the common, already-correct render does not churn the DOM node).
+    if (!leafHasMarks(node)) {
+      const host = hostRef.current;
+      const want = current.length > 0 ? current : "​";
+      if (host && host.textContent !== want) {
+        patchHostText(host, current);
+      }
     }
     syncSelectionIntoEditContext();
   }, [node, syncSelectionIntoEditContext]);
@@ -774,17 +776,6 @@ export function EngineTextBlock(props: {
       }
       tabIndex={0}
     >
-      {showPlaceholder ? (
-        // Painted alongside the leaf's own content (an empty leaf renders just a
-        // zero-width space), not in place of it: the ZWSP keeps caret geometry
-        // intact while this absolutely-positioned, non-interactive layer shows the
-        // hint. `data-engine-placeholder-text` carries the styling hook injected by
-        // `ENGINE_TYPOGRAPHY_CSS`; it sits at the block's text origin (the block's
-        // own left/top padding), so the hint lines up with where the caret paints.
-        <span aria-hidden="true" data-engine-placeholder-text="">
-          {placeholder!.text}
-        </span>
-      ) : null}
       {renderLeafMarks(node)}
     </div>
   );

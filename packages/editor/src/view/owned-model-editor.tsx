@@ -57,6 +57,7 @@ import {
 } from "./react-view";
 import { UploadProvider, type UploadImage } from "./upload-context";
 import { useAutosave, type AutosaveOptions } from "./use-autosave";
+import { requestFrame } from "./raf";
 
 /**
  * @categoryDefault Editor Components
@@ -197,6 +198,33 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     if (store.isReclaimSuspended()) return;
     viewRef.current?.getEditorHandle().focus();
   }, [store]);
+
+  // Sticky editor focus (note.md §5.8 follow-up — the author's "editor loses focus too
+  // easily" report). A mousedown that ORIGINATES inside the editor but lands on a
+  // non-focusable dead zone (the surface padding/margin, the gutter, a chrome gap)
+  // makes the browser blur the painted caret to <body>. Defer a frame and, only if
+  // focus actually fell to <body>/<html> and no focus-taking overlay is deliberately
+  // holding focus, return focus to the model selection. Deliberately scoped so it is
+  // safe: it is wired on the editor wrapper, so it never runs for clicks OUTSIDE the
+  // editor (clicking away still blurs normally — focus is not trapped); the body-only
+  // check means a click that legitimately focuses a control/modal input (which lands
+  // on that element, not <body>) is left alone; and `isReclaimSuspended` defers to an
+  // open link/find/comment surface. Primary button only.
+  const onEditorMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      const doc = (event.currentTarget as HTMLElement).ownerDocument;
+      requestFrame(() => {
+        if (store.isReclaimSuspended()) return;
+        const active = doc.activeElement;
+        const orphaned =
+          !active || active === doc.body || active === doc.documentElement;
+        if (!orphaned) return;
+        focusEditor();
+      });
+    },
+    [focusEditor, store],
+  );
 
   // Drag-drop an image file: route through the host upload binding and insert a
   // media node with the resolved src (AC10, §10.5). Inert without a binding.
@@ -432,6 +460,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
           }
           onDrop={onDrop}
           onKeyDown={onKeyDown}
+          onMouseDown={onEditorMouseDown}
         >
           {toolbar}
           {/* Surface + dock are a flex row so the dock is a *sibling* of the scroller,

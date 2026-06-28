@@ -55,7 +55,7 @@ import {
 } from "./styles";
 import { cancelFrame, requestFrame } from "./raf";
 import { EngineBlock } from "./render";
-import { PlaceholderProvider, type PlaceholderContextValue } from "./render";
+import type { EditorPlaceholder } from "./overlays";
 import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
 import { registerBuiltInMarks } from "./render";
@@ -293,13 +293,13 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       virtualize,
     });
 
-  // Empty-document placeholder slot (R2, note.md §5.8). The hint shows only while
-  // the document is a single text block; this names that block as the slot (the
-  // leaf paints the hint when it is the slot AND its own text is empty). Derived
-  // from `order` (a structural signal the view already re-renders on), so a split
-  // clears it; memoized so a scroll re-render does not churn the context value and
-  // re-render every mounted leaf.
-  const placeholderValue = useMemo<PlaceholderContextValue>(() => {
+  // Empty-document placeholder slot (R2, note.md §5.8 redo). Names the single text
+  // block of an empty document as the slot; the SelectionOverlay paints the hint
+  // there and decides visibility per frame from the live model (so the typing fast
+  // path cannot leave a stale hint). Derived from `order` (a structural signal the
+  // view re-renders on), so a split clears the slot; memoized so a scroll re-render
+  // does not churn the overlay prop.
+  const placeholderValue = useMemo<EditorPlaceholder | null>(() => {
     if (!placeholder) return null;
     const firstId = order.length === 1 ? order[0]! : null;
     const firstNode = firstId ? store.getNode(firstId) : null;
@@ -592,11 +592,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           revealNode={scrollToBlock}
           store={refs.documentIndexStoreRef.current}
         >
-          <PlaceholderProvider value={placeholderValue}>
-            {blocks}
-          </PlaceholderProvider>
+          {blocks}
           <SelectionOverlay
             focusRootRef={rootRef}
+            placeholder={placeholderValue}
             registry={registryRef.current}
             rootRef={rootRef}
             scheduler={scheduler}
@@ -666,11 +665,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
           revealNode={scrollToBlock}
           store={refs.documentIndexStoreRef.current}
         >
-          <PlaceholderProvider value={placeholderValue}>
-            {blocks}
-          </PlaceholderProvider>
+          {blocks}
           <SelectionOverlay
             focusRootRef={rootRef}
+            placeholder={placeholderValue}
             registry={registryRef.current}
             rootRef={contentRef}
             scheduler={scheduler}

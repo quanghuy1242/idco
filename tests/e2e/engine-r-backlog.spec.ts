@@ -29,7 +29,9 @@ test("R2: placeholder shows on an empty doc and clears on first input", async ({
 }) => {
   await open(page, PLACEHOLDER);
 
-  const hint = page.locator("[data-engine-placeholder-text]");
+  // The hint is painted in the overlay (not inside the leaf), so the typing fast
+  // path cannot wipe or stale it (note.md §5.8 redo).
+  const hint = page.locator("[data-engine-placeholder]");
   await expect(hint).toHaveCount(1);
   await expect(hint).toBeVisible();
 
@@ -38,7 +40,30 @@ test("R2: placeholder shows on an empty doc and clears on first input", async ({
   await page.keyboard.type("Hello");
   await page.waitForTimeout(80);
 
-  await expect(page.locator("[data-engine-placeholder-text]")).toHaveCount(0);
+  await expect(page.locator("[data-engine-placeholder]")).toHaveCount(0);
+});
+
+test("R2: select-all + Delete clears the text and restores the placeholder (no stale text)", async ({
+  page,
+}) => {
+  await open(page, PLACEHOLDER);
+  const block = page.locator("[data-engine-text-id]").first();
+  await block.click();
+  await page.keyboard.type("ddddddd");
+  await page.waitForTimeout(60);
+  await expect(page.locator("[data-engine-placeholder]")).toHaveCount(0);
+
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(120);
+
+  // The block DOM is actually cleared (only the zero-width space remains) — the
+  // pre-existing fast-path/React-reconciliation staleness that left "ddddddd"
+  // behind is fixed (note.md §5.8 redo, the host-text re-sync).
+  const domText = await block.evaluate((el) => el.textContent ?? "");
+  expect(domText.replace(/​/g, "")).toBe("");
+  // ...and the placeholder is back.
+  await expect(page.locator("[data-engine-placeholder]")).toHaveCount(1);
 });
 
 test("R3: chromeless fillHeight surface stretches and a blank-area click lands the caret at doc end", async ({

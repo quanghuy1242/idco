@@ -41,6 +41,19 @@ import {
 } from "../styles";
 import type { EditContextLike, RenderRegistry, SerializedRect } from "../types";
 
+/**
+ * The empty-document placeholder hint and the single block allowed to host it
+ * (R2, note.md §5.8). The view computes it from `order` (the slot is the sole text
+ * block of an empty doc); the overlay decides visibility per frame from the live
+ * model, so it is immune to the typing fast path that patches the leaf DOM out of
+ * band (the reason the hint is painted here, in the overlay, and NOT as a child of
+ * the EditContext host where `patchHostText` would wipe it — note.md §5.8 redo).
+ */
+export type EditorPlaceholder = {
+  readonly text: string;
+  readonly targetId: NodeId | null;
+};
+
 type OverlayRect = {
   readonly height: number;
   readonly kind: "caret" | "range" | "preedit" | "gap";
@@ -248,6 +261,42 @@ function gapOverlayRect(
   };
 }
 
+/**
+ * Where to paint the empty-document placeholder, or null (R2, note.md §5.8 redo).
+ * Shows only while the slot block is mounted AND its LIVE model text is empty — so
+ * it disappears the instant a character lands in the model (the typing fast path
+ * patches the DOM and skip-notifies the leaf, but it always updates the model, so
+ * reading the model here is correct where reading the leaf DOM would be stale). The
+ * position is the block's text origin (its own left/top padding), in `root`-
+ * relative coordinates so it lines up with where the caret paints. Returns the
+ * block's content width as `maxWidth` so a long hint wraps inside the column.
+ */
+function placeholderHintRect(
+  store: EditorStore,
+  placeholder: EditorPlaceholder | null,
+  root: HTMLElement | null,
+  blockRefs: ReadonlyMap<NodeId, HTMLElement>,
+): { left: number; top: number; maxWidth: number; text: string } | null {
+  if (!placeholder?.text || !placeholder.targetId || !root) return null;
+  const node = store.getNode(placeholder.targetId);
+  if (!node || node.kind !== "text" || node.content.text.length > 0)
+    return null;
+  const el = blockRefs.get(placeholder.targetId);
+  if (!el) return null;
+  const rootRect = root.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  const style = el.ownerDocument.defaultView?.getComputedStyle(el);
+  const padLeft = style ? parseFloat(style.paddingLeft) || 0 : 0;
+  const padRight = style ? parseFloat(style.paddingRight) || 0 : 0;
+  const padTop = style ? parseFloat(style.paddingTop) || 0 : 0;
+  return {
+    left: elRect.left - rootRect.left + padLeft,
+    maxWidth: Math.max(0, elRect.width - padLeft - padRight),
+    text: placeholder.text,
+    top: elRect.top - rootRect.top + padTop,
+  };
+}
+
 function preeditRectsFromText(
   element: HTMLElement,
   rootRect: DOMRect,
@@ -426,9 +475,13 @@ export function SelectionOverlay(props: {
    * scroller root and the geometry anchor are the same element.
    */
   readonly focusRootRef?: RefObject<HTMLElement | null>;
+  /** Empty-document placeholder hint, painted here (not in the leaf) so the typing
+   *  fast path cannot wipe it; visibility is decided per frame from the model. */
+  readonly placeholder?: EditorPlaceholder | null;
   readonly registry: RenderRegistry;
 }) {
-  const { store, scheduler, rootRef, focusRootRef, registry } = props;
+  const { store, scheduler, rootRef, focusRootRef, placeholder, registry } =
+    props;
   const version = useSelectionFrameVersion(store, scheduler);
   void version;
   // The caret/gap is an *insertion* affordance: it must only show while the
@@ -448,6 +501,16 @@ export function SelectionOverlay(props: {
   registry.selectionRectCount = rects.filter(
     (rect) => rect.kind !== "preedit",
   ).length;
+  // The empty-document placeholder, decided per frame from the live model (R2,
+  // note.md §5.8 redo): show only while the slot block exists and is empty. Reading
+  // the model — not the leaf DOM — is what makes it immune to the typing fast path
+  // (which patches the host out of band and skip-notifies the leaf).
+  const placeholderHint = placeholderHintRect(
+    store,
+    placeholder ?? null,
+    rootRef.current,
+    registry.blockRefs,
+  );
   // Feed IME bounds for the active leaf each frame (docs/010 §7.4, Phase 7 AC4),
   // so the OS candidate window follows the caret/selection after edits.
   feedImeBounds(rootRef.current, store, registry);
@@ -474,6 +537,28 @@ export function SelectionOverlay(props: {
           ENGINE_TYPOGRAPHY_CSS +
           ENGINE_OBJECT_CHROME_CSS}
       </style>
+      {placeholderHint ? (
+        // Painted in the overlay, at the slot block's text origin, in a NEUTRAL
+        // muted style — it deliberately does NOT wear the block's typography class,
+        // so an empty heading block shows a normal-weight hint rather than a huge
+        // bold one (note.md §5.8 redo, the author's "placeholder picks up the h1
+        // style" report). Non-interactive, so clicks fall through to the surface.
+        <div
+          data-engine-placeholder=""
+          style={{
+            color: "var(--color-base-content, CanvasText)",
+            left: placeholderHint.left,
+            maxWidth: placeholderHint.maxWidth,
+            opacity: 0.4,
+            position: "absolute",
+            top: placeholderHint.top,
+            userSelect: "none",
+            WebkitUserSelect: "none",
+          }}
+        >
+          {placeholderHint.text}
+        </div>
+      ) : null}
       {rects.map((rect, index) => {
         const isCaret = rect.kind === "caret";
         const isPreedit = rect.kind === "preedit";

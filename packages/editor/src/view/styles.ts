@@ -263,15 +263,7 @@ export const ENGINE_TYPOGRAPHY_CSS =
   "[data-engine-view-root] [data-engine-mark='code']{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:color-mix(in srgb, currentColor 8%, transparent);padding:0.05em 0.3em;border-radius:3px;}" +
   "[data-engine-view-root] [data-engine-mark='highlight']{background:color-mix(in srgb, var(--color-warning, gold) 45%, transparent);color:inherit;border-radius:2px;}" +
   "[data-engine-view-root] [data-engine-mark='comment']{background:color-mix(in srgb, var(--color-info, #38bdf8) 22%, transparent);border-radius:2px;}" +
-  "[data-engine-view-root] [data-engine-mark='glossary']{border-bottom:1px dotted currentColor;}" +
-  // Empty-document placeholder (R2, note.md §5.8). A muted, non-interactive hint
-  // painted inside the empty first/only block. It is absolutely positioned at the
-  // block's text origin (the block's own 8px/5px content padding, blockStyle) so it
-  // sits exactly where the caret paints, and `pointer-events:none` + `user-select:
-  // none` keep it from intercepting the click that places the caret or from being
-  // selected. `right` constrains a long hint to the block width so it wraps instead
-  // of overflowing. Themed with the DaisyUI base-content token at reduced opacity.
-  "[data-engine-view-root] [data-engine-placeholder-text]{position:absolute;left:8px;right:8px;top:5px;pointer-events:none;user-select:none;-webkit-user-select:none;color:var(--color-base-content, CanvasText);opacity:0.4;}";
+  "[data-engine-view-root] [data-engine-mark='glossary']{border-bottom:1px dotted currentColor;}";
 
 // The self-sufficient resting typography (`ENGINE_RESTING_TYPOGRAPHY_CSS`) was retired
 // (docs/028 §4.5): it was a *third* source of block/mark appearance beside the live editor
