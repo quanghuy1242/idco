@@ -63,6 +63,14 @@ export function useVirtualWindow(args: {
   readonly viewportHeight: number;
   readonly fillHeight: boolean;
   readonly overscan: number;
+  /**
+   * The scroller's top padding (content inset). The scroller's padding-top shifts
+   * the content origin down by this much, so a block at model-y `prefix(i)` sits at
+   * scroll-position `surfaceInset + prefix(i)`. The window + anchor math subtract it
+   * from `scrollTop` so the scroll geometry stays exact rather than drifting by the
+   * inset (note.md §5.9 follow-up).
+   */
+  readonly surfaceInset: number;
 }): VirtualWindowController {
   const {
     refs,
@@ -72,6 +80,7 @@ export function useVirtualWindow(args: {
     viewportHeight,
     fillHeight,
     overscan,
+    surfaceInset,
   } = args;
   const {
     heightCacheRef,
@@ -263,7 +272,9 @@ export function useVirtualWindow(args: {
     }
     const range = rangeFromModel(offsetModel, {
       overscan,
-      scrollOffset: scrollTop,
+      // The scroller's top padding shifts the content origin down, so the model-y
+      // visible at the viewport top is `scrollTop - surfaceInset` (clamped at 0).
+      scrollOffset: Math.max(0, scrollTop - surfaceInset),
       viewportSize: effectiveViewportHeight,
     });
     return { ...range, ids: order.slice(range.startIndex, range.endIndex) };
@@ -277,6 +288,7 @@ export function useVirtualWindow(args: {
     scrollTop,
     overscan,
     effectiveViewportHeight,
+    surfaceInset,
     measureVersion,
   ]);
 
@@ -457,7 +469,11 @@ export function useVirtualWindow(args: {
      * shifts its top edge.
      */
     const baseScrollTop = scroller ? scroller.scrollTop : scrollTop;
-    const anchorIndex = offsetModel ? offsetModel.findIndex(baseScrollTop) : 0;
+    // Subtract the scroller's top padding so the anchor index matches the block
+    // actually at the visible top (the padding shifts the content origin down).
+    const anchorIndex = offsetModel
+      ? offsetModel.findIndex(Math.max(0, baseScrollTop - surfaceInset))
+      : 0;
     const prevAnchorPrefix = offsetModel ? offsetModel.prefix(anchorIndex) : 0;
 
     // Measurement now happens in the ResizeObserver (onResize) off the scroll
@@ -540,6 +556,7 @@ export function useVirtualWindow(args: {
     windowRange.startIndex,
     windowRange.endIndex,
     measureVersion,
+    surfaceInset,
     heightCacheRef,
     estimatorRef,
     registryRef,

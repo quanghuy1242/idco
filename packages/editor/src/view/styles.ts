@@ -72,6 +72,14 @@ export const baseViewStyle: CSSProperties = {
 };
 
 /**
+ * The editing surface's content inset, in px. Applied as the scroller/root padding
+ * on both render paths so text never jams against the surface edge. On the
+ * virtualized path the windowing subtracts this from `scrollTop` so the scroll math
+ * stays exact (the scroller's top padding shifts the content origin by this much).
+ */
+export const SURFACE_PADDING = 16;
+
+/**
  * Resolve the editing surface's root style across both render paths (R3, note.md
  * §5.9). It folds the two formerly-inline style objects in `react-view.tsx` into
  * one typed result so `chromeless`/`fillHeight` are real props, not load-bearing
@@ -117,17 +125,23 @@ export function resolveViewStyle(opts: {
       height: fillHeight ? "100%" : viewportHeight,
       overflowAnchor: "none",
       overflowY: "auto",
-      padding: 0,
+      // Same content inset as the non-virtualized path (was `padding: 0`, which
+      // jammed the text against the surface edge — note.md §5.9 follow-up). The
+      // caret/selection overlay lives INSIDE the scrolled content div, so it moves
+      // with this padding and stays aligned; the windowing absorbs the constant
+      // vertical offset via `SURFACE_PADDING` (passed to `useVirtualWindow`) so the
+      // scroll math stays exact rather than drifting by the inset.
+      padding: SURFACE_PADDING,
       ...style,
     };
   }
   // Non-virtualized: `minHeight: 100%` (not `height`) so the surface fills its
-  // container's height — making the blank area below the text a click-to-type
-  // target — while still growing past it when the content is taller (the page
-  // scrolls), instead of clipping. Needs a parent with a definite height.
+  // container's height — making the blank area below the text a click-to-type target
+  // — while still growing past it when the content is taller (the page scrolls),
+  // instead of clipping. Needs a parent with a definite height.
   return {
     ...base,
-    padding: 16,
+    padding: SURFACE_PADDING,
     ...(fillHeight ? { minHeight: "100%" } : {}),
     ...style,
   };

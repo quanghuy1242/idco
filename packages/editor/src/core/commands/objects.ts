@@ -56,6 +56,31 @@ export function compileRemoveBlock(
   if (!target) return null;
   const tr = store.transaction();
   tr.removeNode(entry.parent, entry.index, target);
+  // The body must never be left empty (note.md §5.3, the empty-doc B3 repro). On an
+  // empty document, inserting a block-object (a table) REPLACES the only paragraph,
+  // so removing that object would leave `body.order: []` — no caret target at all.
+  // The selection then falls back to a root `gap`, which paints nothing once focus
+  // drops to <body> (the focus-within gate), so neither the text caret nor the
+  // horizontal gap cursor shows and typing is dead. Re-seed a fresh empty paragraph
+  // in the vacated body and land a real text caret in it (the "an editor always keeps
+  // one paragraph" invariant); the commit-driven focus reclaim in react-view then
+  // re-homes DOM focus onto it. Scoped to the body — emptying a nested container (the
+  // last cell of a table) is the structural command's own concern, not this rule.
+  const siblings = childrenOf(store, entry.parent);
+  if (
+    entry.parent === store.bodyId &&
+    siblings.length === 1 &&
+    siblings[0] === node
+  ) {
+    const paragraph = makeTextNode({
+      content: store.allocator.createTextSlice(""),
+      id: store.allocator.createNodeId(),
+      type: "paragraph",
+    });
+    tr.insertNode(entry.parent, 0, paragraph);
+    const caret = pointAtOffset(paragraph.id, paragraph.content, 0);
+    return tr.setSelection({ anchor: caret, focus: caret, type: "text" });
+  }
   return tr;
 }
 

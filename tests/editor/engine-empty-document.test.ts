@@ -13,6 +13,7 @@ import {
   createEditorStore,
   createIdAllocator,
   emptyDocument,
+  makeObjectNode,
   pointAtOffset,
 } from "../../packages/editor/src/core";
 
@@ -67,5 +68,70 @@ describe("emptyDocument", () => {
     expect(store.order.length).toBeGreaterThan(1);
     expect(store.order).toContain(seedId);
     expect(new Set(store.order).size).toBe(store.order.length);
+  });
+});
+
+describe("removing the body's last block never leaves an empty document", () => {
+  // note.md §5.3 follow-up (the empty-doc B3 repro): inserting an object into an
+  // empty doc replaces the only paragraph, so removing that object would empty the
+  // body — no caret target, the selection falls back to a root gap that paints
+  // nothing. `compileRemoveBlock` must re-seed a paragraph + land a text caret.
+  it("re-seeds an empty paragraph with a text caret when the only block is removed", () => {
+    const allocator = createIdAllocator("idco_client_reseed");
+    const table = makeObjectNode({
+      data: {},
+      id: allocator.createNodeId(),
+      type: "table",
+    });
+    const store = createEditorStore({
+      allocator,
+      snapshot: {
+        body: { blocks: { [table.id]: table }, order: [table.id] },
+        settings: {},
+        version: 1,
+      },
+    });
+    expect(store.order).toEqual([table.id]);
+
+    const ok = store.command({ node: table.id, type: "remove-block" });
+    expect(ok).toBeTruthy();
+
+    // The body is not empty: it holds exactly one fresh (non-table) paragraph.
+    expect(store.order).toHaveLength(1);
+    const seeded = store.requireTextNode(store.order[0]!);
+    expect(seeded.type).toBe("paragraph");
+    expect(seeded.content.text).toBe("");
+    // The selection is a real text caret in that paragraph (not a gap).
+    const sel = store.selection;
+    expect(sel?.type).toBe("text");
+    expect(sel?.type === "text" ? sel.focus.node : null).toBe(seeded.id);
+  });
+
+  it("does not re-seed when other blocks survive the removal", () => {
+    const allocator = createIdAllocator("idco_client_reseed2");
+    const keep = makeObjectNode({
+      data: {},
+      id: allocator.createNodeId(),
+      type: "divider",
+    });
+    const drop = makeObjectNode({
+      data: {},
+      id: allocator.createNodeId(),
+      type: "table",
+    });
+    const store = createEditorStore({
+      allocator,
+      snapshot: {
+        body: {
+          blocks: { [keep.id]: keep, [drop.id]: drop },
+          order: [keep.id, drop.id],
+        },
+        settings: {},
+        version: 1,
+      },
+    });
+    store.command({ node: drop.id, type: "remove-block" });
+    // Only the dropped block is gone; no spurious paragraph is inserted.
+    expect(store.order).toEqual([keep.id]);
   });
 });

@@ -48,7 +48,11 @@ import { registerBuiltInNodeViews } from "./nodes";
 import { useEditorOrder } from "./store-hooks";
 import { TouchPasteAction, TouchSelectionLayer } from "./overlays";
 import { ObjectEditorRegistryProvider } from "./render/object-editor-registry";
-import { computeWindowListMeta, resolveViewStyle } from "./styles";
+import {
+  computeWindowListMeta,
+  resolveViewStyle,
+  SURFACE_PADDING,
+} from "./styles";
 import { cancelFrame, requestFrame } from "./raf";
 import { EngineBlock } from "./render";
 import { PlaceholderProvider, type PlaceholderContextValue } from "./render";
@@ -280,6 +284,11 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       overscan,
       refs,
       store,
+      // The scroller's top padding (resolveViewStyle) shifts the content origin, so
+      // the windowing subtracts it from scrollTop. A consumer `style.padding`
+      // override is not reflected here, but the windowing only drifts by the
+      // difference and overscan absorbs it.
+      surfaceInset: SURFACE_PADDING,
       viewportHeight,
       virtualize,
     });
@@ -587,6 +596,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
             {blocks}
           </PlaceholderProvider>
           <SelectionOverlay
+            focusRootRef={rootRef}
             registry={registryRef.current}
             rootRef={rootRef}
             scheduler={scheduler}
@@ -660,6 +670,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
             {blocks}
           </PlaceholderProvider>
           <SelectionOverlay
+            focusRootRef={rootRef}
             registry={registryRef.current}
             rootRef={contentRef}
             scheduler={scheduler}

@@ -414,9 +414,21 @@ export function SelectionOverlay(props: {
   readonly store: EditorStore;
   readonly scheduler: EngineScheduler;
   readonly rootRef: RefObject<HTMLElement | null>;
+  /**
+   * The focusable surface container, for the focus-within gate. It differs from
+   * `rootRef` on the virtualized path: there the overlay is anchored to the inner
+   * *content* div (`rootRef`) for correct geometry, but focus lives on the OUTER
+   * scroller root — and a gap selection focuses that scroller root
+   * (`focusRoot`), which is the content div's PARENT, not a descendant. Checking
+   * `rootRef` (the content div) would then report "not focused" and filter the gap
+   * cursor out (the "horizontal caret invisible under virtualization" bug, note.md
+   * §5.3 follow-up). Defaults to `rootRef` for the non-virtualized path, where the
+   * scroller root and the geometry anchor are the same element.
+   */
+  readonly focusRootRef?: RefObject<HTMLElement | null>;
   readonly registry: RenderRegistry;
 }) {
-  const { store, scheduler, rootRef, registry } = props;
+  const { store, scheduler, rootRef, focusRootRef, registry } = props;
   const version = useSelectionFrameVersion(store, scheduler);
   void version;
   // The caret/gap is an *insertion* affordance: it must only show while the
@@ -424,7 +436,10 @@ export function SelectionOverlay(props: {
   // behavior) is misleading — it implies typing lands there when it does not,
   // and it hid focus-loss bugs. We hide the caret/gap (not the range highlight)
   // whenever focus leaves the editor subtree or the window itself (docs/019).
-  const focused = useEditorFocusWithin(rootRef);
+  // The gate checks the OUTER scroller root (`focusRootRef`), which contains both a
+  // focused text leaf AND the scroller root a gap selection focuses — so a gap
+  // cursor paints under virtualization where checking the content div would not.
+  const focused = useEditorFocusWithin(focusRootRef ?? rootRef);
   const allRects = selectionRects(store, rootRef.current, registry.blockRefs);
   const rects = focused
     ? allRects
