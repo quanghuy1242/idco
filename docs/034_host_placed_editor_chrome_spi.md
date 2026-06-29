@@ -1,8 +1,15 @@
 # 034 - Host-Placed Editor Chrome: A Placement SPI For The Rail, Toolbar, And Tabs
 
-Status: design-grade proposal, recommendation-only, not yet built. Greenlit through **Tier 1 (placement slot)**; **Tier 2 (headless)** is documented in full here for completeness and to constrain the Tier 1 shape, but it is explicitly **not** greenlit — do not build it. This doc is the chat-first exploration folded into a tracked design so nothing lives only in conversation. It is the design-grade companion to docs/027 (the Side Panel dock and its registry), docs/029 (the overlay authority, whose boundary this doc must not cross), docs/023 (the toolbar layout SPI), and docs/005 (the original TOC aside rail that was removed — the history this doc has to answer for).
+> Status: design-grade proposal, recommendation-only, not yet built. Greenlit through **Tier 1 (placement slot)**. **Tier 2 (headless)** is documented in full to constrain the Tier 1 shape but is explicitly **not** greenlit — do not build it. No code until the §11 API shape is locked.
+> Date: 2026-06-29
+> Scope: a placement seam for the persistent, layout-level editor chrome — the side rail / dock first, the formatting toolbar and tab strip as the generalization the seam is designed to reach. The anchored, transient overlays (selection flyout, slash menu, context menu, forms, the find bar, the painted caret) are out of scope by the §5 contract.
+> Source docs: docs/027 (Side Panel dock + pane registry + `PanelHost`), docs/029 (overlay authority — the boundary this doc must not cross), docs/023 (toolbar layout SPI), docs/026 (host data provider SPI — the `renderPicker` ownership precedent), docs/005 (the removed TOC aside rail — the history this doc answers for), docs/025 (virtual geometry — the invariant §9.5 protects).
+> Related docs: note.md (the owned-editor parity backlog); CLAUDE.md (the cross-repo release ritual a consumer-facing change follows).
+> Assumptions: react-aria-components ≥1.x as used today; the §3 facts (chrome is store-driven, the dock is a scroller sibling, `EditorToolbar`/`OwnedModelEditorView`/the pane registry are already exported, `SidePanelDock` is not) hold as of this writing; content-api remains the first real consumer driving the need. These are inspectable claims, re-verify before building.
 
-## Table of contents
+This doc is the chat-first exploration folded into a tracked design so nothing lives only in conversation.
+
+## Table Of Contents
 
 - [1. Purpose and scope](#1-purpose-and-scope)
 - [2. The question, stated precisely](#2-the-question-stated-precisely)
@@ -35,9 +42,15 @@ Status: design-grade proposal, recommendation-only, not yet built. Greenlit thro
   - [9.5 The virtualization invariant](#95-the-virtualization-invariant)
 - [10. Relationship to the existing SPIs](#10-relationship-to-the-existing-spis)
 - [11. Open decisions to lock before code](#11-open-decisions-to-lock-before-code)
-- [12. Definition of done for this design](#12-definition-of-done-for-this-design)
-- [13. Implementation phasing](#13-implementation-phasing)
-- [14. Out of scope](#14-out-of-scope)
+- [12. Verification and test plan](#12-verification-and-test-plan)
+- [13. Implementation backlog](#13-implementation-backlog)
+  - [HPC-0. Lock the contracts](#hpc-0-lock-the-contracts)
+  - [HPC-1. Dock placement seam](#hpc-1-dock-placement-seam)
+  - [HPC-2. Outline proof case](#hpc-2-outline-proof-case)
+- [14. Future backlog (not greenlit)](#14-future-backlog-not-greenlit)
+- [15. Definition of done](#15-definition-of-done)
+- [16. Out of scope](#16-out-of-scope)
+- [17. Final model](#17-final-model)
 
 ## 1. Purpose and scope
 
@@ -260,22 +273,120 @@ Lock the host-facing usage shape before any internals, because the call the cons
 - Whether the first surface is the dock alone (recommended, §8) or the dock and toolbar together. Recommendation: dock alone, prove it, then the toolbar follows the same signature.
 - The exact slot prop names and signatures (`renderDock(surface) => ReactNode`, `dockContainer?: RefObject`), so the toolbar and tab generalizations can mirror them verbatim.
 
-## 12. Definition of done for this design
+## 12. Verification and test plan
 
-This design is done when: the Tier 1 API shape is chosen and written as a host-facing usage example (the call content-api would write); the anchored-vs-layout line (§5) is ratified as the contract that decides eligibility, with the find button/bar split as the worked example; the overlay-authority-handle decision (§9.1) is made; the outline proof case (§8) is specified as the first and only surface for the first implementation; and the five costs (§9) are accepted with their mitigations. Tier 2 stays documented and parked. No code is written from this doc until the API shape in §11 is locked.
+The outline proof case (§8) is the gate that says the seam is real; HPC-2 below specifies it as a buildable workstream. This section states the invariants every test defends, so a reviewer reading a future PR knows what "the seam works" means concretely.
 
-## 13. Implementation phasing
+The invariants a placed dock must satisfy, each an assertable check:
 
-Recommendation-only; the design is not greenlit to code past locking §11. When it is, the phasing that matches the proof-first approach:
+- **Relocation.** The dock renders in the host's chosen layout region, not the editor's default right column, while the editing surface stays where it is. Assert the dock's DOM ancestor is the host slot, not `data-engine-editor-body`.
+- **Liveness.** The Outline pane lists headings from the shared `MutableDocumentIndexStore` and updates as the author edits, with no second worker round-trip. Assert a heading edit changes the pane's rows.
+- **Jump-to-anchor under virtualization.** Clicking a heading calls the engine `reveal`/`scrollToBlock` and scrolls a windowed-out heading into view — a plain `#hash` cannot. Assert a deep heading past the virtual window scrolls into view.
+- **No geometry corruption.** Opening and closing the placed dock does not corrupt offset measurement (docs/025). Assert a deep-scroll position and caret rect are unchanged across a dock open/close.
+- **Lifecycle routing.** A toolbar command's `panelHost.open(paneId)` routes to the relocated dock, opening the right pane. Assert a Review-tab command opens the placed dock on the right pane.
+- **Cross-seam overlays.** A host-placed find *button* opens the authority-owned find *bar* through the passable authority handle (§9.1). Assert the button (in host layout) opens the bar (authority-positioned), proving the §5.3 line holds across the seam.
+- **One wiring path.** The embedded dock (Tier 0) and the placed dock (Tier 1) are wired identically because `OwnedModelEditor` consumes the same seam internally (§9.4). Assert via a shared wiring helper used by both, covered by both render paths' tests.
 
-- Phase 0 — lock the contracts (§11): the Tier 1 API shape, the eligibility line, the authority-handle decision. No code.
-- Phase 1 — the placement seam for the dock: add the `renderDock` render-prop (and optional `dockContainer` portal target) to `OwnedModelEditor`, render the dock through it, and have `OwnedModelEditor` consume the same seam internally so there is one wiring path (§9.4). Expose the overlay-authority handle if Phase 0 chose to.
-- Phase 2 — the outline proof case (§8): a story and a consumer-shaped test that place the dock in a host sidebar, drive the Outline pane live, and assert the scroll-to-windowed-heading and the no-offset-corruption invariants. This is the gate that says the seam is real.
-- Phase 3 — generalize to the toolbar and tab strip with the identical slot signature, only if a consumer need pulls them (§7.4). Not speculative.
-- Tier 2 stays unbuilt until separately greenlit.
+Verification mechanics follow the house pattern (the R-series in note.md §5): a Ladle story per state, jsdom unit tests for wiring and rendering, and cross-browser Playwright e2e (`tests/e2e/`) for the scroll/geometry/overlay assertions that need real layout. The eligibility line (§5) is also a guard, not only prose: the placement seam exposes only the layout-class surfaces, and a test asserts the anchored surfaces (find bar, flyout, slash, context menu, forms) have no placement prop and stay authority-owned.
 
-Each consumer-facing change reaches content-api only after a republish, per the cross-repo release ritual in CLAUDE.md.
+## 13. Implementation backlog
 
-## 14. Out of scope
+Not greenlit to code past **HPC-0** until §11 locks the API shape. The IDs below are the shape the work takes once it is; they are sequenced proof-first so each is reviewable and testable on its own. Each consumer-facing change reaches content-api only after a republish, per the cross-repo release ritual in CLAUDE.md.
 
-Moving any anchored, transient overlay out of the editor (§5.3) — a hard boundary, not a later phase. The full headless path (Tier 2, §6.3) — documented to bound the design, not greenlit. Item-level toolbar slotting or interleaving editor chrome with host buttons in one widget (§9.3) — a Tier 2 ask. Any persistence, reader, model, or overlay-authority change. The legacy `RichTextEditor` aside rail (docs/005) — superseded by the dock; this doc does not revive it. Code — this pass is the design only.
+### HPC-0. Lock the contracts
+
+Scope:
+
+- `docs/034_host_placed_editor_chrome_spi.md` (this doc)
+
+Tasks:
+
+- [ ] Choose the Tier 1 API shape: render-prop slot primary (`renderDock(surface) => ReactNode`) plus an optional `dockContainer?: RefObject<HTMLElement>` portal escape hatch (§7.1 recommends this), versus render-prop only, versus portal only.
+- [ ] Ratify the anchored-vs-layout line (§5) as the eligibility contract, with the find button/bar split as the worked example.
+- [ ] Decide whether the overlay-authority handle is exposed now (§9.1) or only when a host-placed trigger needs it (recommendation: now).
+- [ ] Confirm the dock is the first and only surface (§8); the toolbar and tab strip follow the same signature later (HPC-F1).
+
+Acceptance criteria:
+
+- The §11 decisions are recorded with a host-facing usage example — the exact call content-api would write.
+
+Tests:
+
+- None; this is a design gate, signed off by review.
+
+### HPC-1. Dock placement seam
+
+Scope:
+
+- `packages/editor/src/view/owned-model-editor.tsx` (the composition root that owns the dock, `panelHost`, the authority ref, focus reclaim)
+- `packages/editor/src/index.ts` (public exports for any new prop types / authority handle)
+- a new placement-seam module under `packages/editor/src/view/` if the slot logic warrants its own file
+
+Tasks:
+
+- [ ] Add the `renderDock` render-prop (and the optional `dockContainer` portal target) to `OwnedModelEditor`.
+- [ ] Render the dock through the seam, and have `OwnedModelEditor` consume the same seam internally so there is one wiring path (§9.4), not a second composition root.
+- [ ] Expose the overlay-authority handle as a passable value if HPC-0 chose to (§9.1).
+- [ ] Document the surface geometry invariant the host must honor (§9.5): a transform-free, independently-sized scroller box.
+
+Acceptance criteria:
+
+- A host can place the dock in its own layout; the embedded (Tier 0) behavior is unchanged; the `PanelHost` lifecycle, focus reclaim, and shared index all stay intact across the seam.
+
+Tests:
+
+- `pnpm test` jsdom unit: the placed dock renders and is wired (store subscription, `panelHost`, index) identically to the embedded dock; a story exercising the placed state.
+
+### HPC-2. Outline proof case
+
+Scope:
+
+- `stories/` (a placed-dock story)
+- `tests/e2e/` and `tests/editor/` (the consumer-shaped specs)
+- `packages/editor/src/view/chrome/panes/outline-pane.tsx` (existing pane, exercised not rewritten)
+
+Tasks:
+
+- [ ] A story placing the dock in a host sidebar, driving the Outline pane against a virtualized document.
+- [ ] A consumer-shaped test asserting every §12 invariant: relocation, liveness, jump-to-windowed-heading, no offset corruption across open/close, relocated `panelHost.open` routing, and the find-button-opens-find-bar cross-seam check.
+
+Acceptance criteria:
+
+- The §8 success criteria hold end to end, cross-browser; this is the gate that promotes the seam from "implemented" to "proven."
+
+Tests:
+
+- Ladle story + Playwright e2e (chromium/webkit/firefox) per the note.md §5 R-series pattern; jsdom for the wiring assertions.
+
+## 14. Future backlog (not greenlit)
+
+Kept separate from the release work above on purpose; none of this is greenlit, and HPC-1's signature exists partly to not foreclose it.
+
+### HPC-F1. Toolbar and tab-strip placement
+
+Generalize the placement seam to the formatting toolbar and the tab strip with the identical render-prop signature from HPC-1, only when a real consumer need pulls it (§7.4) — not speculatively. Place whole widgets (§9.3); no item-level slotting or interleaving with host buttons.
+
+### HPC-F2. Tier 2 headless
+
+The standalone dock export, the hand-wired overlay-authority contract a host reproduces, and the headless reference composition (§6.3). Requires a separate greenlight. Documented to bound HPC-1's shape, explicitly not to be built in this line of work.
+
+## 15. Definition of done
+
+This design (not the code) is done when each is true and signed off by review:
+
+- The Tier 1 API shape is chosen and written as a host-facing usage example — the call content-api would write (HPC-0).
+- The anchored-vs-layout line (§5) is ratified as the eligibility contract, with the find button/bar split as the worked example.
+- The overlay-authority-handle decision (§9.1) is made.
+- The outline proof case (§8/HPC-2) is specified as the first and only surface for the first implementation.
+- The five costs (§9) are accepted with their mitigations recorded.
+- Tier 2 (§6.3/HPC-F2) stays documented and parked.
+
+The code DoD is deferred to the HPC-1 and HPC-2 acceptance criteria above; no code is written from this doc until the API shape in §11 is locked.
+
+## 16. Out of scope
+
+Moving any anchored, transient overlay out of the editor (§5.3) — a hard boundary, not a later phase. The full headless path (Tier 2, §6.3 / HPC-F2) — documented to bound the design, not greenlit. Item-level toolbar slotting or interleaving editor chrome with host buttons in one widget (§9.3) — a Tier 2 ask. Any persistence, reader, model, or overlay-authority change. The legacy `RichTextEditor` aside rail (docs/005) — superseded by the dock; this doc does not revive it. Code — this pass is the design only.
+
+## 17. Final model
+
+The editor owns what its chrome renders and how it behaves; the host owns where the persistent chrome sits. That split already exists in the code as registries (panes, toolbar tabs and slots) feeding an editor-rendered shell, with every coupling expressed as a value (`store`, `panelHost`, the authority handle, the shared index) rather than a DOM reach. Tier 1 adds one thing to that picture: a placement slot that hands the host a fully-wired chrome surface to position in its own layout, proven first against the outline rail because that surface sits exactly on the anchored-vs-layout line the whole design depends on. The line is the load-bearing decision — layout-anchored chrome crosses the seam, content-anchored overlays stay with the authority — and it is what makes this host-placed rail clean where the removed docs/005 rail was not.
