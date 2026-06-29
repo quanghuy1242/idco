@@ -97,6 +97,7 @@ await import("./editor/engine-compat-links.test");
 await import("./editor/engine-mark-render.test");
 await import("./editor/engine-commands-phase8.test");
 await import("./editor/engine-chrome.test");
+await import("./editor/engine-host-placed-chrome.test");
 await import("./editor/engine-toolbar-spi.test");
 await import("./editor/engine-command-surface.test");
 await import("./editor/engine-overlay-authority.test");

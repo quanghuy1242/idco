@@ -1,6 +1,6 @@
 # 034 - Host-Placed Editor Chrome: A Placement SPI For The Rail, Toolbar, And Tabs
 
-> Status: design-grade proposal, recommendation-only, not yet built. Greenlit through **Tier 1 (placement slot)**. **Tier 2 (headless)** is documented in full to constrain the Tier 1 shape but is explicitly **not** greenlit — do not build it. No code until the §11 API shape is locked.
+> Status: **Tier 1 implemented 2026-06-29** (HPC-0/HPC-1/HPC-2 — see §13 resolutions), unit-proven in jsdom + a story; the layout/scroll invariants are a deferred browser-e2e tail (§13 HPC-2). Greenlit through **Tier 1 (placement slot)** only. **Tier 2 (headless)** is documented in full to constrain the Tier 1 shape but is explicitly **not** greenlit — do not build it. The §11 contracts are now locked (§13 HPC-0).
 > Date: 2026-06-29
 > Scope: a placement seam for the persistent, layout-level editor chrome — the side rail / dock first, the formatting toolbar and tab strip as the generalization the seam is designed to reach. The anchored, transient overlays (selection flyout, slash menu, context menu, forms, the find bar, the painted caret) are out of scope by the §5 contract.
 > Source docs: docs/027 (Side Panel dock + pane registry + `PanelHost`), docs/029 (overlay authority — the boundary this doc must not cross), docs/023 (toolbar layout SPI), docs/026 (host data provider SPI — the `renderPicker` ownership precedent), docs/005 (the removed TOC aside rail — the history this doc answers for), docs/025 (virtual geometry — the invariant §9.5 protects).
@@ -58,7 +58,7 @@ A content-CMS consumer (content-api) mounts the owned-model editor as the whole 
 
 In scope: a placement seam for the persistent, layout-level chrome (the side rail/dock first, the toolbar and tab strip as the generalization the seam is designed to reach). The contract that decides which surfaces are eligible. The wiring a host-placed shell needs (the store, the panel-host seam, the overlay-authority handle, the focus reclaim, the shared document index). The proof case (the outline rail). The costs.
 
-Out of scope by deliberate decision: moving any anchored, transient overlay (the selection flyout, slash menu, context menu, link/glossary/comment forms, the find bar, the painted caret/selection layer) out of the editor — §5.3 explains why this is a hard boundary, not a phase-2. The full headless path (Tier 2) is described but parked. No persistence, reader, or model changes. No code in this pass; this is the design only.
+Out of scope by deliberate decision: moving any anchored, transient overlay (the selection flyout, slash menu, context menu, link/glossary/comment forms, the find bar, the painted caret/selection layer) out of the editor — §5.3 explains why this is a hard boundary, not a phase-2. The full headless path (Tier 2) is described but parked. No persistence, reader, or model changes. The design was written first and Tier 1 was then implemented from it (HPC-0/HPC-1/HPC-2, §13, 2026-06-29); Tier 2 stays parked.
 
 ## 2. The question, stated precisely
 
@@ -192,7 +192,7 @@ Three concrete shapes express "host places a wired surface." They are ordered by
 
 The first is a **render-prop slot** on the composed editor. `OwnedModelEditor` gains props like `renderDock` and `renderToolbar`, each `(surface: ReactNode) => ReactNode`. The editor builds the wired surface element and hands it to the host's function, which returns it wrapped in the host's layout. The editor still mounts the element inside its own React tree (the function's return value renders where `OwnedModelEditor` puts it), so the overlay-authority context and the focus wrapper still enclose the surface; the host controls the surrounding markup and CSS, not the tree position. This is the smallest, safest shape: the host styles and frames, the editor keeps every context boundary.
 
-The second is a **portal target**. `OwnedModelEditor` accepts `dockContainer?: RefObject<HTMLElement>` and `createPortal`s the wired dock into the host's node. The host gets true DOM relocation (the rail can live in a sibling column of the app shell, far from the editor in the DOM). React portals keep the React tree intact, so context still flows and events still bubble through the React parent, but the *DOM* parent is the host's. This is the shape closest to the literal request, and §7.2 explains why it is the second choice rather than the first.
+The second is a **portal target**. `OwnedModelEditor` accepts `dockContainer?: HTMLElement | null` (the host element itself, driven from host state via a callback ref) and `createPortal`s the wired dock into it. The host gets true DOM relocation (the rail can live in a sibling column of the app shell, far from the editor in the DOM). React portals keep the React tree intact, so context still flows and events still bubble through the React parent, but the *DOM* parent is the host's. (Implementation note: this shape was originally written as a `RefObject<HTMLElement>`, but the build review found that reading `ref.current` during render is impure and null on the first pass, forcing a re-render hack; a plain `HTMLElement | null` value driven from `useState`/a callback ref is render-pure and tracks the element mounting and unmounting for free, so that is what shipped — see §13 HPC-0/HPC-1.) This is the shape closest to the literal request, and §7.2 explains why it is the second choice rather than the first.
 
 The third is a **slot registry**, where the host registers named layout regions and the editor renders surfaces into them. This is over-built for the need; it reintroduces a registry where a prop suffices, and it is really Tier 2 with indirection. Rejected for Tier 1.
 
@@ -266,12 +266,14 @@ docs/025 (virtual geometry) is the invariant §9.5 protects.
 
 ## 11. Open decisions to lock before code
 
+**Resolved 2026-06-29 (§13 HPC-0):** all four decisions below are locked — render-prop primary (`renderDock`) + `dockContainer` portal hatch; dock-only this pass; the passable handle is the existing `OwnedModelEditorHandle` (raw `OverlayAuthority` deferred to Tier 2); prop names `renderDock` / `dockContainer`. The original framing is kept below for the record.
+
 Lock the host-facing usage shape before any internals, because the call the consumer writes dictates the plumbing underneath (the SPI-first rule the editor has followed throughout). The decisions:
 
 - The Tier 1 API shape: render-prop slot as primary with a portal target as the escape hatch (§7.1 recommends this), versus render-prop only, versus portal only. This is the one to settle first; everything else follows from it.
 - Whether the overlay-authority handle is exposed now (§9.1) or only when a host-placed *trigger* needs it. Recommendation: now, because the find button is the first realistic host-placed trigger and it needs the handle to open the find bar.
 - Whether the first surface is the dock alone (recommended, §8) or the dock and toolbar together. Recommendation: dock alone, prove it, then the toolbar follows the same signature.
-- The exact slot prop names and signatures (`renderDock(surface) => ReactNode`, `dockContainer?: RefObject`), so the toolbar and tab generalizations can mirror them verbatim.
+- The exact slot prop names and signatures (`renderDock(dock) => ReactNode`, `dockContainer?: HTMLElement | null`), so the toolbar and tab generalizations can mirror them verbatim.
 
 ## 12. Verification and test plan
 
@@ -283,17 +285,50 @@ The invariants a placed dock must satisfy, each an assertable check:
 - **Liveness.** The Outline pane lists headings from the shared `MutableDocumentIndexStore` and updates as the author edits, with no second worker round-trip. Assert a heading edit changes the pane's rows.
 - **Jump-to-anchor under virtualization.** Clicking a heading calls the engine `reveal`/`scrollToBlock` and scrolls a windowed-out heading into view — a plain `#hash` cannot. Assert a deep heading past the virtual window scrolls into view.
 - **No geometry corruption.** Opening and closing the placed dock does not corrupt offset measurement (docs/025). Assert a deep-scroll position and caret rect are unchanged across a dock open/close.
-- **Lifecycle routing.** A toolbar command's `panelHost.open(paneId)` routes to the relocated dock, opening the right pane. Assert a Review-tab command opens the placed dock on the right pane.
+- **Lifecycle routing.** `panelHost.open(paneId)` routes to the relocated dock, opening the right pane. Asserted by driving the editor handle's `openPanel`/`closePanel` (the imperative twin of a ribbon command's `ctx.panelHost.open`, sharing the one `panelHost`): an Outline → Insights switch lands in the host sidebar, proving it is the same wired dock, not a detached copy.
 - **Cross-seam overlays.** A host-placed find *button* opens the authority-owned find *bar* through the passable authority handle (§9.1). Assert the button (in host layout) opens the bar (authority-positioned), proving the §5.3 line holds across the seam.
-- **One wiring path.** The embedded dock (Tier 0) and the placed dock (Tier 1) are wired identically because `OwnedModelEditor` consumes the same seam internally (§9.4). Assert via a shared wiring helper used by both, covered by both render paths' tests.
+- **One wiring path.** The embedded dock (Tier 0) and the placed dock (Tier 1) are wired identically because there is one inline `dock` element placed through a single resolution — stronger than a shared helper, since there is literally one element, not two render paths (§9.4). Covered by the relocation tests exercising the default and placed paths against the same dock.
 
-Verification mechanics follow the house pattern (the R-series in note.md §5): a Ladle story per state, jsdom unit tests for wiring and rendering, and cross-browser Playwright e2e (`tests/e2e/`) for the scroll/geometry/overlay assertions that need real layout. The eligibility line (§5) is also a guard, not only prose: the placement seam exposes only the layout-class surfaces, and a test asserts the anchored surfaces (find bar, flyout, slash, context menu, forms) have no placement prop and stay authority-owned.
+Verification mechanics follow the house pattern (the R-series in note.md §5): a Ladle story per state, jsdom unit tests for wiring and rendering, and cross-browser Playwright e2e (`tests/e2e/`) for the scroll/geometry assertions that need real layout (the deferred tail, HPC-2). The eligibility line (§5) is also a guard, not only prose: the placement seam exposes a `renderDock`/`dockContainer` hook for the dock and for no anchored surface, and the cross-seam test asserts the find bar (opened from a host-placed trigger) renders inside the overlay authority's transform-free body portal (`[data-engine-overlay-layer]`), outside the editor subtree entirely — so it can never be relocated by a dock slot. The line is enforced structurally (no anchored surface has a placement prop) and demonstrated by that containment assertion.
 
 ## 13. Implementation backlog
 
 Not greenlit to code past **HPC-0** until §11 locks the API shape. The IDs below are the shape the work takes once it is; they are sequenced proof-first so each is reviewable and testable on its own. Each consumer-facing change reaches content-api only after a republish, per the cross-repo release ritual in CLAUDE.md.
 
+**Status (2026-06-29): Tier 1 implemented.** HPC-0 and HPC-1 are done; HPC-2 is implemented and unit-proven, with the layout/scroll invariants left as a deferred browser-e2e tail. Each carries a resolution below. HPC-F1/HPC-F2 stay parked (§14). The change is consumer-facing, so content-api gets the placement seam only after a republish.
+
 ### HPC-0. Lock the contracts
+
+**Resolution (2026-06-29) — locked.** The decisions: (1) **API shape** — render-prop slot primary (`renderDock?: (dock: ReactNode) => ReactNode`) plus an optional `dockContainer?: HTMLElement | null` portal escape hatch. The escape hatch was originally written as `RefObject<HTMLElement | null>`; the build review (B1) found the ref shape reads `.current` during render (impure, null on the first pass, needing a re-render hack), so it shipped as a plain element value driven from host state / a callback ref — render-pure and tracking mount/unmount for free. Both shapes apply to the **desktop dock column only**: on a narrow viewport the dock is a self-portaling `Drawer` (docs/027 §8.3), so placement is bypassed and the sheet stays editor-owned (A1). (2) **Eligibility** — the anchored-vs-layout line (§5) is the contract; the dock is the only surface this pass, the toolbar/tabs follow the same signature later (HPC-F1). (3) **Passable handle (§9.1)** — the passable handle for Tier 1 is the existing `OwnedModelEditorHandle`, which already exposes `openFind()`, `openPanel()`, and `closePanel()`; a host-placed trigger (a find button or pane toggle in the host's own chrome, outside the editor's React subtree) drives the authority-owned find bar and the dock through those methods, which is the §5.3 cross-seam case the proof needs. Exposing the *raw* `OverlayAuthority` object — for a host to open arbitrary link/glossary/comment forms from its own code — serves host-rendered arbitrary overlay triggers, which is a Tier 2 / HPC-F2 concern, and is deferred with the rest of Tier 2 (it would also leak the still-evolving docs/029 `OverlayAuthority` type into the consumer contract for no Tier 1 need). This keeps the new public surface to two props on `OwnedModelEditorProps`, matching the restraint principle (§7.4).
+
+The host-facing usage the criterion below requires — the exact calls content-api would write:
+
+```tsx
+// Tier 1 — render-prop slot (primary): frame/place the dock in the host's own markup.
+// The dock stays a sibling of the surface; the host owns the surrounding box and CSS.
+<OwnedModelEditor
+  store={store}
+  renderDock={(dock) => <div className="my-rail-frame">{dock}</div>}
+/>;
+
+// Tier 1 — portal escape hatch: relocate the dock into a structurally separate host region
+// (e.g. a global app sidebar). Drive the target element from state via a callback ref.
+function EditScreen() {
+  const [rail, setRail] = useState<HTMLElement | null>(null);
+  return (
+    <div className="app-grid">
+      <aside className="app-sidebar" ref={setRail} />
+      <OwnedModelEditor store={store} dockContainer={rail} fillHeight />
+    </div>
+  );
+}
+
+// A host-placed Find button (in the host's own top bar) reaches the authority-owned find
+// bar through the existing handle — the §5.3 button-placeable / bar-authority-owned split.
+const ref = useRef<OwnedModelEditorHandle>(null);
+<button onClick={() => ref.current?.openFind()}>Find</button>;
+<OwnedModelEditor ref={ref} store={store} />;
+```
 
 Scope:
 
@@ -301,10 +336,10 @@ Scope:
 
 Tasks:
 
-- [ ] Choose the Tier 1 API shape: render-prop slot primary (`renderDock(surface) => ReactNode`) plus an optional `dockContainer?: RefObject<HTMLElement>` portal escape hatch (§7.1 recommends this), versus render-prop only, versus portal only.
-- [ ] Ratify the anchored-vs-layout line (§5) as the eligibility contract, with the find button/bar split as the worked example.
-- [ ] Decide whether the overlay-authority handle is exposed now (§9.1) or only when a host-placed trigger needs it (recommendation: now).
-- [ ] Confirm the dock is the first and only surface (§8); the toolbar and tab strip follow the same signature later (HPC-F1).
+- [x] Choose the Tier 1 API shape: render-prop slot primary (`renderDock(dock) => ReactNode`) plus an optional `dockContainer?: HTMLElement | null` portal escape hatch (element value, not a `RefObject` — see the resolution), versus render-prop only, versus portal only.
+- [x] Ratify the anchored-vs-layout line (§5) as the eligibility contract, with the find button/bar split as the worked example.
+- [x] Decide whether the overlay-authority handle is exposed now (§9.1) or only when a host-placed trigger needs it — decided: not exposed for Tier 1; the existing handle's `openFind`/`openPanel`/`closePanel` suffice.
+- [x] Confirm the dock is the first and only surface (§8); the toolbar and tab strip follow the same signature later (HPC-F1).
 
 Acceptance criteria:
 
@@ -316,6 +351,8 @@ Tests:
 
 ### HPC-1. Dock placement seam
 
+**Resolution (2026-06-29) — shipped.** `OwnedModelEditor` ([packages/editor/src/view/owned-model-editor.tsx](../packages/editor/src/view/owned-model-editor.tsx)) gained `renderDock?: (dock: ReactNode) => ReactNode` and `dockContainer?: HTMLElement | null` props. The wired dock element is built once and placed through one resolution (`dockSlot`): on a desktop viewport, a provided `dockContainer` portals it into the host element (rendering nothing in the default slot, never both — `undefined` means no placement, `null` means "intended, target not mounted yet"); otherwise `renderDock` wraps it in place as a sibling of the surface; otherwise the default sibling dock (Tier 0, unchanged). Because the default and host-placed forms read the same single `dock` element, there is one wiring path, not a second composition root (§9.4). Two review-driven robustness fixes shipped with it: (A1) placement is gated on `!useIsMobile()` so the narrow-viewport `Drawer` (a self-portaling overlay sheet, docs/027 §8.3) is never wrapped into an empty host box or no-op-portaled — the mobile sheet stays editor-owned; (A2/B1) `dockContainer` is a render-pure element value (not a `RefObject`), so there is no first-render `.current === null` hack, and a dev-only `console.warn` (gated like the overlay-layer transform assert) fires if a pane is open while `dockContainer` is `null`, so a never-mounted target is diagnosable instead of a silent empty rail. The surface-geometry invariant (§9.5) is documented in the `dockContainer` prop JSDoc and the surface comment. No new public types beyond the two props (HPC-0 decision); `OwnedModelEditorHandle` is unchanged — `openFind`/`openPanel`/`closePanel` already serve host-placed triggers.
+
 Scope:
 
 - `packages/editor/src/view/owned-model-editor.tsx` (the composition root that owns the dock, `panelHost`, the authority ref, focus reclaim)
@@ -324,10 +361,11 @@ Scope:
 
 Tasks:
 
-- [ ] Add the `renderDock` render-prop (and the optional `dockContainer` portal target) to `OwnedModelEditor`.
-- [ ] Render the dock through the seam, and have `OwnedModelEditor` consume the same seam internally so there is one wiring path (§9.4), not a second composition root.
-- [ ] Expose the overlay-authority handle as a passable value if HPC-0 chose to (§9.1).
-- [ ] Document the surface geometry invariant the host must honor (§9.5): a transform-free, independently-sized scroller box.
+- [x] Add the `renderDock` render-prop (and the optional `dockContainer` portal target) to `OwnedModelEditor`.
+- [x] Render the dock through the seam, and have `OwnedModelEditor` consume the same seam internally so there is one wiring path (§9.4), not a second composition root.
+- [x] Decide the overlay-authority handle (HPC-0: not exposed for Tier 1 — the existing handle's `openFind`/`openPanel`/`closePanel` serve host-placed triggers).
+- [x] Document the surface geometry invariant the host must honor (§9.5): a transform-free, independently-sized scroller box.
+- [x] (review fixes) Gate placement to the desktop column (A1); render-pure `dockContainer` element value + dev warning for a never-mounted target (A2/B1).
 
 Acceptance criteria:
 
@@ -339,6 +377,8 @@ Tests:
 
 ### HPC-2. Outline proof case
 
+**Resolution (2026-06-29) — implemented and unit-proven in jsdom + a story; the layout/scroll invariants are the deferred browser tail.** "Proven" in the AC sense (the cross-browser gate) is not yet reached; what is covered is everything observable without real layout. [tests/editor/engine-host-placed-chrome.test.tsx](../tests/editor/engine-host-placed-chrome.test.tsx) (7 specs, registered in `tests/all.test.ts`) asserts: the default dock stays a sibling of the surface inside the editor body; `renderDock` wraps it in host markup in-tree; `dockContainer` portals it into a host element outside the editor body with exactly one dock in the tree (no double-mount); `panelHost.open`/`closePanel` from the editor handle route to the *relocated* dock (Outline → Insights switch lands in the host sidebar), proving it is the same wired dock; a host-placed Find button reaches the authority-owned find bar through `handle.openFind()`, and that bar renders inside `[data-engine-overlay-layer]` outside the editor subtree (the §5.3 eligibility line — button placeable, bar authority-owned — enforced and asserted); host placement is bypassed on a narrow viewport so the mobile `Drawer` stays editor-owned (A1, via a stubbed `matchMedia`); and the in-tree wrapper renders no dock box until a pane opens. The story [stories/engine-host-placed-chrome.stories.tsx](../stories/engine-host-placed-chrome.stories.tsx) (`PortalIntoHostSidebar` using the element-value `dockContainer`, `FramedByHost` using `renderDock`) mounts the seam against a virtualized, heading-rich document for visual and future e2e verification. The three invariants that need real layout — live heading list population from the off-thread index, scroll-to-windowed-heading via `reveal`, and no-offset-corruption across dock open/close — are exercised by the story but **not** asserted automatically (no layout/worker in jsdom); they are the browser-e2e tail, deferred consistent with the note.md §5.3 finding that this WSL host runs Playwright specs unreliably. The placement, routing, eligibility, and cross-seam behavior — the parts the seam actually adds — are fully covered automatically.
+
 Scope:
 
 - `stories/` (a placed-dock story)
@@ -347,8 +387,9 @@ Scope:
 
 Tasks:
 
-- [ ] A story placing the dock in a host sidebar, driving the Outline pane against a virtualized document.
-- [ ] A consumer-shaped test asserting every §12 invariant: relocation, liveness, jump-to-windowed-heading, no offset corruption across open/close, relocated `panelHost.open` routing, and the find-button-opens-find-bar cross-seam check.
+- [x] A story placing the dock in a host sidebar, driving the Outline pane against a virtualized document.
+- [x] A consumer-shaped test asserting the jsdom-observable invariants: relocation, no-double-mount, relocated `panelHost.open` routing, the find-button → find-bar cross-seam (overlay-layer containment), the eligibility line, and mobile bypass.
+- [ ] (deferred — browser e2e) live heading population, scroll-to-windowed-heading via `reveal`, and no-offset-corruption across dock open/close — the layout/scroll tail (note.md §5.3 WSL Playwright caveat).
 
 Acceptance criteria:
 
@@ -372,7 +413,7 @@ The standalone dock export, the hand-wired overlay-authority contract a host rep
 
 ## 15. Definition of done
 
-This design (not the code) is done when each is true and signed off by review:
+The design-completion criteria below are all met as of 2026-06-29, and Tier 1 code shipped against them (§13). They were:
 
 - The Tier 1 API shape is chosen and written as a host-facing usage example — the call content-api would write (HPC-0).
 - The anchored-vs-layout line (§5) is ratified as the eligibility contract, with the find button/bar split as the worked example.
@@ -381,11 +422,11 @@ This design (not the code) is done when each is true and signed off by review:
 - The five costs (§9) are accepted with their mitigations recorded.
 - Tier 2 (§6.3/HPC-F2) stays documented and parked.
 
-The code DoD is deferred to the HPC-1 and HPC-2 acceptance criteria above; no code is written from this doc until the API shape in §11 is locked.
+The code DoD lives in the HPC-1 and HPC-2 acceptance criteria above; those are met for the desktop + jsdom scope, with the layout/scroll invariants left as the deferred browser-e2e tail (§13 HPC-2).
 
 ## 16. Out of scope
 
-Moving any anchored, transient overlay out of the editor (§5.3) — a hard boundary, not a later phase. The full headless path (Tier 2, §6.3 / HPC-F2) — documented to bound the design, not greenlit. Item-level toolbar slotting or interleaving editor chrome with host buttons in one widget (§9.3) — a Tier 2 ask. Any persistence, reader, model, or overlay-authority change. The legacy `RichTextEditor` aside rail (docs/005) — superseded by the dock; this doc does not revive it. Code — this pass is the design only.
+Moving any anchored, transient overlay out of the editor (§5.3) — a hard boundary, not a later phase. The full headless path (Tier 2, §6.3 / HPC-F2) — documented to bound the design, not greenlit. Item-level toolbar slotting or interleaving editor chrome with host buttons in one widget (§9.3) — a Tier 2 ask. Any persistence, reader, model, or overlay-authority change. The legacy `RichTextEditor` aside rail (docs/005) — superseded by the dock; this doc does not revive it. Tier 2 code (HPC-F1 toolbar/tabs, HPC-F2 headless) — not greenlit; only Tier 1 (the dock placement seam) shipped this pass.
 
 ## 17. Final model
 

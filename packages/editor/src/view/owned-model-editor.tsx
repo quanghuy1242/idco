@@ -22,8 +22,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type Ref,
 } from "react";
+import { createPortal } from "react-dom";
+import { useIsMobile } from "./chrome/surfaces/use-is-mobile";
 import type { NodeId, OwnedEditorHandle } from "../core";
 import {
   EditorToolbar,
@@ -83,6 +86,40 @@ export type OwnedModelEditorProps = OwnedModelEditorViewProps & {
   readonly toolbarLayout?: ToolbarLayoutConfig;
   /** Per-deployment toolbar capability flags (docs/023 §5.6). */
   readonly toolbarCapabilities?: Partial<ToolbarCapabilities>;
+  /**
+   * Host-placed chrome — the side-panel dock (docs/034 HPC-1, Tier 1 placement slot).
+   * The editor builds the dock fully wired (store subscription, the `PanelHost`
+   * open/active lifecycle, the shared document index, the overlay-authority context) and
+   * hands that element here; return it wrapped in the host's own markup/CSS and it renders
+   * in the dock's normal home — a sibling of the surface — so the overlay authority and the
+   * focus wrapper still enclose it (docs/034 §7.1). The host owns the box, not the wiring.
+   * The dock element renders `null` while the dock is closed or has no available pane, so a
+   * host wrapper should react to emptiness and not reserve layout space for an empty dock.
+   * Placement applies to the **desktop dock column only**: on a narrow viewport the dock is a
+   * self-portaling overlay sheet (a `Drawer`, docs/027 §8.3), so `renderDock` is bypassed and
+   * the sheet stays editor/authority-owned (wrapping a self-portaling sheet would leave an
+   * empty host box). For DOM relocation into a structurally separate region the surrounding
+   * CSS cannot reach, use {@link OwnedModelEditorProps.dockContainer} instead.
+   */
+  readonly renderDock?: (dock: ReactNode) => ReactNode;
+  /**
+   * Host-placed chrome escape hatch (docs/034 §7.1): portal the wired dock into a
+   * host-owned element so it can live in a structurally separate region (a global app
+   * sidebar) that CSS alone cannot reach. Pass the **element itself**, driven from host state
+   * via a callback ref (`const [el, setEl] = useState<HTMLElement | null>(null)` then
+   * `ref={setEl}`) so it stays render-pure and tracks the element mounting/unmounting. A
+   * `null` value means "placement intended, the target is not mounted yet" — the dock renders
+   * nowhere until the element exists (a dev warning fires if it stays `null` while a pane is
+   * open); omitting the prop (`undefined`) means no placement. The dock stays in the editor's
+   * React tree — so the overlay-authority context and focus wiring still flow through the
+   * portal — but its DOM parent becomes the given element. Takes precedence over the default
+   * sibling slot (the dock never renders in both places); composes with `renderDock` (the
+   * wrapper is applied first, then portaled). Desktop-column only, like `renderDock` (the
+   * mobile sheet stays a self-portaling overlay). The host MUST keep the editor's surface a
+   * transform-free, independently-sized box (docs/034 §9.5), or virtual-geometry offset
+   * measurement (docs/025) and the `position: fixed` overlays (docs/029) break.
+   */
+  readonly dockContainer?: HTMLElement | null;
 };
 
 /** Imperative handle for {@link OwnedModelEditor}: the view handle plus find-bar and side-panel control. */
@@ -108,8 +145,10 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   const {
     allowedEmbedDomains,
     autosave,
+    dockContainer,
     hideToolbar,
     proseClassName = "prose max-w-none",
+    renderDock,
     store,
     toolbarCapabilities,
     toolbarLayout,
@@ -310,6 +349,31 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
   const [activePanelFocusId, setActivePanelFocusId] = useState<string | null>(
     null,
   );
+  // docs/034 HPC-1 host placement applies to the desktop dock column only. On a narrow
+  // viewport the dock is a self-portaling overlay sheet (a `Drawer`, docs/027 §8.3), so
+  // wrapping it with `renderDock` or portaling it via `dockContainer` would leave an empty
+  // host box and float the sheet elsewhere; the placement is bypassed and the sheet stays
+  // editor/authority-owned. We read the same shared breakpoint the dock and ribbon use so
+  // the three stay in lockstep.
+  const isMobile = useIsMobile();
+  // Dev diagnostic (gated like the overlay-layer transform assert): a `dockContainer` that is
+  // `null` while a pane is open on desktop means the host wired placement to an element that
+  // never mounted (a sidebar not rendered, a ref not forwarded) — the dock would silently
+  // render nowhere. `null` is distinct from `undefined` (no placement intended), so this only
+  // warns when the host asked to portal but gave no target.
+  useEffect(() => {
+    if (
+      typeof process !== "undefined" &&
+      process.env?.NODE_ENV === "production"
+    )
+      return;
+    if (!isMobile && dockContainer === null && panelOpen) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[idco] OwnedModelEditor: a side panel is open but `dockContainer` is null — the dock renders nowhere. Pass the host element once it mounts (a callback ref / state element), docs/034 §7.1.",
+      );
+    }
+  }, [dockContainer, isMobile, panelOpen]);
   // Jump-to-anchor for panes (docs/027 §9): the engine's scroll-to-block reaches a
   // windowed-out node a plain `#hash` cannot under virtualization.
   const revealNode = useCallback((id: NodeId) => {
@@ -449,6 +513,39 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     ],
   );
 
+  // docs/034 HPC-1 — host-placed dock. Build the fully-wired dock ONCE, then decide where it
+  // mounts through a single resolution, so the embedded (Tier 0) and host-placed (Tier 1)
+  // forms share identical wiring — one wiring path, never a second composition root
+  // (docs/034 §9.4). The dock is the same element in every branch; only its parent changes.
+  const dock = (
+    <SidePanelDock
+      activeId={activePanelId}
+      capabilities={capabilities}
+      focusId={activePanelFocusId}
+      indexStore={indexStoreRef.current}
+      onClose={() => setPanelOpen(false)}
+      open={panelOpen}
+      panelHost={panelHost}
+      reveal={revealNode}
+      store={store}
+    />
+  );
+  // Placement applies to the desktop column only (above): on mobile, bypass it so the
+  // self-portaling Drawer renders from the default slot. `renderDock` (primary, §7.1): the
+  // host wraps/frames the dock while it stays a sibling of the surface. `dockContainer`
+  // (escape hatch, §7.1): portal it into a host element, keeping the React tree so the
+  // overlay-authority context and focus wiring still flow. `dockContainer === undefined`
+  // means no placement; `null` means placement intended but the target is not mounted yet
+  // (render nowhere until it is). The dock is never mounted in two places.
+  const placed = !isMobile;
+  const wrappedDock = placed && renderDock ? renderDock(dock) : dock;
+  const dockSlot: ReactNode =
+    placed && dockContainer !== undefined
+      ? dockContainer
+        ? createPortal(wrappedDock, dockContainer)
+        : null
+      : wrappedDock;
+
   return (
     <OverlayAuthorityRefProvider value={overlayAuthorityRef}>
       <UploadProvider value={uploadImage ?? null}>
@@ -467,7 +564,10 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
             never inside it (docs/027 §8.3/§8.4): opening it only narrows the surface's
             width, which the virtual window already treats as a resize, so it cannot
             corrupt offset measurement (docs/025). The dock renders nothing when closed,
-            so the surface reclaims the full width. */}
+            so the surface reclaims the full width. Under host placement (docs/034 HPC-1)
+            the dock element (`dockSlot`) is wrapped by the host's `renderDock` and stays
+            here as a sibling, or is portaled out via `dockContainer`; either way the
+            surface must stay a transform-free, independently-sized box (docs/034 §9.5). */}
           {/* `gap-1 p-1` puts one even 4px frame around the row and a single 4px gap
             between the editor and the dock — the margin lives on the row, not on both
             children, so the gap between them is not doubled. */}
@@ -508,17 +608,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
                 store={store}
               />
             </div>
-            <SidePanelDock
-              activeId={activePanelId}
-              capabilities={capabilities}
-              focusId={activePanelFocusId}
-              indexStore={indexStoreRef.current}
-              onClose={() => setPanelOpen(false)}
-              open={panelOpen}
-              panelHost={panelHost}
-              reveal={revealNode}
-              store={store}
-            />
+            {dockSlot}
           </div>
         </div>
       </UploadProvider>
