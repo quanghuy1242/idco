@@ -420,7 +420,17 @@ export function DataTable<T extends object>({
             </AriaColumn>
           ))}
         </AriaTableHeader>
-        <AriaTableBody items={rows}>
+        {/*
+          RAC memoizes dynamic-collection rows by item identity, so it only
+          re-invokes this render fn when a `rows` object changes. The per-row
+          selection checkbox reads `rowSelection.selectedKeys` — state that
+          lives outside `rows` — so without `dependencies` the checkboxes stay
+          stuck at their first-render `checked` value while selection changes
+          (the header select-all renders outside the collection and updated
+          fine, which is what masked this). Listing `selectedKeys` here
+          invalidates the row cache whenever the selection changes.
+        */}
+        <AriaTableBody items={rows} dependencies={[rowSelection?.selectedKeys]}>
           {(row) => (
             <AriaRow
               id={getRowKey(row)}

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DataTable, type DataTableColumn } from "@idco/ui";
@@ -20,6 +21,26 @@ const rows: Item[] = [
   { id: "b", name: "Beta", value: 2 },
   { id: "c", name: "Gamma", value: 3 },
 ];
+
+/**
+ * A self-contained controlled DataTable that actually feeds `selectedKeys`
+ * back through props, so a click re-renders the table with the new selection.
+ * The fixed-`selectedKeys` tests above only assert `onChange` fires; they
+ * cannot catch the RAC collection-cache staleness where the row checkbox keeps
+ * rendering its stale `checked` value (the header select-all, rendered outside
+ * the items collection, masked it).
+ */
+function ControlledTable() {
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  return (
+    <DataTable
+      columns={columns}
+      rows={rows}
+      getRowKey={(r) => r.id}
+      rowSelection={{ selectedKeys, onChange: setSelectedKeys }}
+    />
+  );
+}
 
 function pressTrigger(button: HTMLElement) {
   button.dispatchEvent(
@@ -293,6 +314,30 @@ describe("DataTable", () => {
     );
     fireEvent.click(screen.getByLabelText("Select visible rows"));
     expect([...onChange.mock.calls[0]![0]].sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("reflects a toggled row in its own checkbox after selectedKeys updates", () => {
+    render(<ControlledTable />);
+    const rowB = screen.getByLabelText("Select row b") as HTMLInputElement;
+    expect(rowB.checked).toBe(false);
+    fireEvent.click(rowB);
+    expect(
+      (screen.getByLabelText("Select row b") as HTMLInputElement).checked,
+    ).toBe(true);
+    // Other rows stay unchecked — only the toggled row reflects the change.
+    expect(
+      (screen.getByLabelText("Select row a") as HTMLInputElement).checked,
+    ).toBe(false);
+  });
+
+  it("checks every row checkbox when select-all updates selectedKeys", () => {
+    render(<ControlledTable />);
+    fireEvent.click(screen.getByLabelText("Select visible rows"));
+    for (const id of ["a", "b", "c"]) {
+      expect(
+        (screen.getByLabelText(`Select row ${id}`) as HTMLInputElement).checked,
+      ).toBe(true);
+    }
   });
 
   it("does not trigger row navigation from selection clicks", () => {
