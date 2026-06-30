@@ -125,7 +125,7 @@ The single most important structural fact: **the two views share zero view code 
 
 Measured against the current tree:
 
-- `packages/editor/src/core/**` ≈ **14.6k LOC**, framework-free by lint. Breakdown: `commands/` 3.2k, `store/` 2.8k, `table/` 1.6k, `registry/` 1.3k, `model/` 1.2k, `offset-model/` 0.8k, `compat/` 1.1k (deletable), `bake/` 0.7k, plus `memory/` and `index`. **This is the reuse.** Ports once under docs/031, consumed by both views.
+- `packages/editor/src/core/**` ≈ **14.6k LOC**, framework-free by lint. Breakdown: `commands/` 3.2k, `store/` 2.8k, `table/` 1.6k, `registry/` 1.3k, `model/` 1.2k, `offset-model/` 0.8k, `compat/` 1.1k (deletable), `bake/` 0.7k, and a ~1.8k top-level residual whose largest file is `scheduler.ts` (819 LOC — the rAF/idle/timer lane coordinator), then `markdown-shortcuts.ts` (392), `editor-handle.ts`, `virtual-range.ts`, `dev-flags.ts`, `url-safety.ts`, plus `memory/` and `index`. **This is the reuse — but "framework-free" is not the same as "runtime-free":** the model/command/read hot path is synchronous, yet `scheduler.ts` (rAF/idle/timer cadence), `bake/bake.worker.ts` (a Web Worker), and the async `store/body-store.ts`/`store/history-pool.ts`/`bake/bake-service.ts` are browser/async-coupled today and are *prerequisite relocation work* for the port (§4.10). It ports under docs/031 once that relocation is done; it is consumed by both views.
 - `packages/editor/src/view/**` ≈ **24.3k LOC**, React + DOM + EditContext, with 38 files touching the DOM directly. Breakdown: `chrome/` 5.4k, `spi/` 4.1k, `controllers/` 3.0k, `nodes/` 2.7k, `overlays/` 2.5k, `render/` 2.3k, `markdown/` 1.4k. **None of this ports.** The desktop view is a from-scratch second implementation of it on native primitives — mechanical for box-model components, real design for selection, tables, and overlays (§5.3).
 - `vendor/editcontext-polyfill/**` ≈ 9 modules — the hidden-`<textarea>` bridge. **Deleted on the native path** (§4.5).
 
@@ -155,7 +155,7 @@ These are not aspirational; they exist and the Rust GUI ecosystem is converging 
 | Text layout | `parley` | rich text layout + `parley::editing` (cursor, selection, AccessKit) | young, the linchpin |
 | Box layout | `taffy` | flex/grid/block, driven by Rust `Style` structs (no CSS) | solid (used by Zed, Bevy, Dioxus) |
 | Accessibility | `accesskit` | accessibility *tree* schema + platform adapters | solid |
-| Widget convenience | `masonry` | retained widget tree on vello+parley+taffy+accesskit; "no algorithms, no hidden dataflow" | alpha, deliberately thin |
+| Widget convenience | `masonry` | retained widget tree on vello+parley+taffy+accesskit; runs event/update/layout/compose/paint/a11y passes and *centralizes* focus, pointer, and a11y handling | alpha; opinionated about its internals |
 | Overlay positioning | `floating-ui-core` (RustForWeb) | flip/shift positioning math, no platform logic | a real port of Floating UI |
 
 Reference-not-dependency: **GPUI** (Zed's framework) and **Blitz** (Dioxus's HTML/CSS engine) are read for technique — how they host custom-painted widgets, cache glyphs, wire per-platform IME — but adopted as frameworks they re-introduce the coupling §4.2 rejects.
@@ -174,7 +174,7 @@ Rejected — a cross-platform UI layer both views render through: it forces the 
 
 Recommended: build on the linebender primitives directly (winit/wgpu/vello/parley/taffy/accesskit), using Masonry only as a thin, **ejectable** widget convenience. Do not adopt a heavy opinionated framework (GPUI, Blitz, or a webview) as the foundation.
 
-The user's stated criterion is "don't fight a lib in the long run," and the consistent answer to that criterion is ownership: a thin stack of primitives you control cannot impose lifecycle, dataflow, or styling opinions on you, and when one piece breaks (these are alpha) the blast radius is bounded. Masonry fits because it is *deliberately thin* — its own docs say it "doesn't do algorithms, no reconciliation, no behind-the-scenes dataflow" — and because it sits on the *same* primitives we would use raw, so ejecting from it later is an afternoon, not a rewrite. A framework (GPUI/Blitz) fails the criterion: it is a large opinionated layer, less ejectable, and its value-adds (GPUI's batteries; Blitz's CSS engine) are things we either do not need or actively want to own.
+The user's stated criterion is "don't fight a lib in the long run," and the consistent answer to that criterion is ownership: a thin stack of primitives you control cannot impose lifecycle, dataflow, or styling opinions on you, and when one piece breaks (these are alpha) the blast radius is bounded. Masonry fits not because it is internally trivial — it is *not*; its own current docs say it "is opinionated about its internals: things like text focus, pointer interactions and accessibility events are often handled in a centralized way" — but because it sits on the *same* primitives we would use raw (vello/parley/taffy/accesskit), so adopting it does not lock us into a proprietary rendering or text engine the way GPUI would. The honest ejection cost follows from that opinionatedness, and the split is worth stating plainly: ejecting Masonry means re-deriving its centralized focus/pointer/a11y orchestration on the raw primitives — real work, not "an afternoon." What *survives* ejection is the cheap part (our vello/parley leaf `layout`/`paint` bodies — §6.1's mechanical category); what we rebuild is the expensive part (the centralized focus/pointer/a11y passes and Widget scaffolding every retained-mode toolkit carries). So "ejectable" is true in *kind* — we keep the substrate — but modest in *value*. The stance (own the substrate, treat the convenience layer as replaceable) holds; what does not hold is any claim that Masonry is thin enough to drop trivially. The framework alternatives fail the criterion for *different* reasons, and it matters not to conflate them: GPUI is a foreign rendering model — its own GPU paint and its own code-editor-shaped text system, sharing only taffy — so ejecting it rewrites paint and text, not just orchestration; Blitz is *not* foreign primitives (it is built on the same vello/taffy/parley — see §4.9), but it adds a CSS/Stylo authoring layer we do not want and provides no editing surface. Both are less ejectable than Masonry, GPUI on the foreign-engine axis and Blitz on the unwanted-layer axis; their value-adds (GPUI's batteries; Blitz's CSS engine) are things we either do not need or actively want to own.
 
 Rejected — GPUI as the foundation: proven for an editor (Zed) and Tailwind-shaped, but Zed-coupled, single-vendor for its component library, and its text system is code-editor-shaped (the line-height limitation, §4.4). Keep it as reference. Rejected — Blitz/Stylo as the foundation: see §4.9. Rejected — a webview (Tauri/Electron/wry): re-imports the browser's weight and the native↔JS boundary the whole effort escapes; it is the option to actively rule out, not merely decline.
 
@@ -197,7 +197,7 @@ masonry     retained widget tree         → the "simplified API" that is STILL 
 | --- | --- | --- |
 | Editor canvas (text, caret, selection, gap cursor, decorators) | raw `parley` + `vello` | Own it fully; the line-height control (§4.4) and selection geometry (§5.3) live here |
 | Chrome (toolbar, menus, dialogs, panes) | `masonry` widgets | Ejectable convenience; do not rebuild button/focus/scroll/layout from zero |
-| Overlay positioning (slash menu, link popover, comment affordance) | `floating-ui-core` | Pure math, zero lock-in; reuses the floating-ui dependency we already rely on |
+| Overlay positioning (slash menu, link popover, comment affordance) | `floating-ui-core` | Pure positioning math, explicitly platform-agnostic (Native is a documented target, not web-only); the same algorithm family as the floating-ui we use on the web, ported to Rust |
 | Accessibility | `accesskit` | No alternative; Masonry already wires it |
 | Styling | our own theme structs | = re-expressed daisyUI tokens (§4.8), owned |
 
@@ -217,7 +217,7 @@ Rejected — GPUI's built-in text for the editor surface: re-imports the line-he
 
 Recommended: on the native path, there is no EditContext and no hidden textarea to mimic. The input path is **winit IME events → the existing core command compilers**. Delete the polyfill concept entirely.
 
-`VENDOR.md` states the polyfill's whole purpose: a "hidden-`<textarea>`-in-shadow-root bridge that translates keystrokes/IME into EditContext `textupdate`/composition events." It exists for exactly one reason — the browser will not surface IME composition without *some* focused editable target. Natively that reason evaporates: the OS IME talks to us directly through winit. The mapping is one-to-one:
+`VENDOR.md` describes the polyfill as a "hidden-`<textarea>`-in-shadow-root bridge that translates keystrokes/IME into EditContext `textupdate`/composition events." It is an IME *plus* keystroke *plus* focus bridge — its `input-translator.ts` remaps Ctrl+Backspace/Delete and handles Telex/IME regressions, and its `focus-manager.ts` does blur guards and `activeElement` patching. But the one job with *no* native counterpart is the IME target: the browser will not surface IME composition without *some* focused editable element, which is the reason a hidden-editable bridge has to exist at all. Natively that one reason evaporates — the OS IME talks to us directly through winit — and the keystroke/focus work does not vanish so much as relocate to our own input and focus model (the mapping below). The mapping is one-to-one:
 
 | EditContext / polyfill | Native (winit) |
 | --- | --- |
@@ -283,7 +283,7 @@ Rejected — Blitz "just for chrome" with parley for the editor: this is the wor
 
 Recommended: the shared core crate is **synchronous at its public API and has no async runtime dependency** — no `tokio`, no `wasm-bindgen-futures`, no executor. All async orchestration (worker offload, persistence I/O, debounced autosave, network) lives in **per-target host crates**: the wasm/browser host and the native/desktop host. This is the precondition for one crate serving both targets, and it is mirrored into docs/031 as a decision there.
 
-The forcing fact the user identified: the desktop host wants `tokio` (the de-facto native async runtime), but `tokio`'s core scheduler does not run under `wasm32-unknown-unknown` (no threads, no real timers, a single-threaded cooperative event loop owned by the browser). If the shared core depended on `tokio`, it could not compile to wasm; if it depended on browser futures, it could not run native. The only stable resolution is that the core depends on **neither** — it is a synchronous state machine plus pure compute functions, exactly the shape docs/031 already designs (model on the main thread, FFI reads synchronous, commands synchronous). Async is a *host* concern by construction.
+The forcing fact: the desktop host wants `tokio` (the de-facto native async runtime), but a full-featured `tokio` does not work under `wasm32-unknown-unknown`. With the features a native host actually wants — `rt-multi-thread` and `net`, typically pulled in via `features=['full']` (tokio enables *nothing* by default; `full` is what bundles them) — it does not *build* for wasm; the wasm-compatible subset (`sync`/`macros`/`io-util`/`rt`/`time`) does compile but fails at *runtime* — the timers panic (`Instant::now` traps), there are no OS threads for a multi-threaded scheduler (the browser owns a single-threaded cooperative event loop), and the runtime has a history of breaking outright on that target. Either way a `tokio`-dependent core cannot ship to wasm, and a browser-futures-dependent core cannot run native. The only stable resolution is that the core depends on **neither**. The model/command/read *hot path* already has the right shape (synchronous state machine on the main thread, synchronous reads and commands — the shape docs/031 designs). But "the core is *already* runtime-free" is not yet true of the TypeScript tree: `core/scheduler.ts` drives lane cadence with `requestAnimationFrame`/idle/`setTimeout`, `core/bake/bake.worker.ts` is a Web Worker, and `core/store/body-store.ts`/`history-pool.ts`/`bake/bake-service.ts` are async. Making the core runtime-free is therefore *prerequisite work*, not a property to assert: the scheduler's pure lane/budget logic can stay shared, but its waking mechanism (rAF/idle/timer), the bake worker, and the async stores relocate to the per-target host. Async is a *host* concern by design; the port is what makes it one in fact.
 
 How the core exposes work that wants to be async without importing a runtime:
 
@@ -418,13 +418,15 @@ fn paint_text_leaf(scene: &mut Scene, leaf: &TextLeafView, sel: Option<&Selectio
     layout.break_all_lines(Some(leaf.content_width));
     render_parley_glyphs(scene, &layout, leaf.origin, t.text);      // vello consumes positioned glyphs
 
-    // OUR caret + selection — what we already paint today, minus contenteditable (D6)
-    if let Some(sel) = sel {
-        for r in layout.selection_geometry(sel.range()) {           // selection rectangles
-            scene.fill(Fill::NonZero, leaf.transform(), t.selection, None, &r);
+    // OUR caret + selection — what we already paint today, minus contenteditable (D6).
+    // The geometry lives on parley's editing types — PlainEditor::selection_geometry and
+    // Selection::geometry/cursor geometry — not on Layout; shown via an editor handle here.
+    if let Some(ed) = &leaf.editor {
+        for (rect, _line) in ed.selection_geometry() {              // selection rectangles
+            scene.fill(Fill::NonZero, leaf.transform(), t.selection, None, &rect);
         }
-        if let Some(c) = layout.cursor_geometry(sel.focus_offset()) { // caret rect from parley
-            scene.fill(Fill::NonZero, leaf.transform(), t.caret, None, &c);
+        if let Some(caret) = ed.cursor_geometry(1.5) {              // caret rect (width 1.5px)
+            scene.fill(Fill::NonZero, leaf.transform(), t.caret, None, &caret);
         }
     }
 }
