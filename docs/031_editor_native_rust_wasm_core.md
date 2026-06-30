@@ -20,6 +20,7 @@
 > Related docs:
 >
 > - `note.md` §4 / docs/030 — the markdown/nesting/save/memory work whose representation costs (load, save, memory) motivate this core.
+> - `docs/035_editor_desktop_native_rust_gui.md` — the native-desktop sibling. Where 031 reads the Rust core from a TS browser view over an FFI seam, 035 adds a second, native view that links the core directly (no seam, so 031's §5.6 FFI-read gate does not apply to it). 035 is why N10 (runtime-agnostic core) is a near-term requirement rather than a future nicety: one crate must compile to both wasm (this document) and native (035), so it can depend on neither `tokio` nor browser futures.
 >
 > Assumptions:
 >
@@ -46,6 +47,7 @@
   - [5.7 N7 — The Arena Is A Hard Memory Cap On The Model (The Non-Speed Motivation)](#57-n7--the-arena-is-a-hard-memory-cap-on-the-model-the-non-speed-motivation)
   - [5.8 N8 — A Wasm-Arena BodyStore Is The Cheaper Memory Path; The Full Swap Earns Itself On Speed + Collab](#58-n8--a-wasm-arena-bodystore-is-the-cheaper-memory-path-the-full-swap-earns-itself-on-speed--collab)
   - [5.9 N9 — Keep TS As The Permanent Oracle; Retire Only The Shipped Runtime Fallback](#59-n9--keep-ts-as-the-permanent-oracle-retire-only-the-shipped-runtime-fallback)
+  - [5.10 N10 — The Core Is Runtime-Agnostic; Async Lives In Per-Target Hosts (The Wasm/Tokio Split)](#510-n10--the-core-is-runtime-agnostic-async-lives-in-per-target-hosts-the-wasmtokio-split)
 - [6. Implementation Strategy](#6-implementation-strategy)
 - [7. Detailed Implementation Plan](#7-detailed-implementation-plan)
   - [7.1 The Vertical-Slice Spike (The Gate)](#71-the-vertical-slice-spike-the-gate)
@@ -223,6 +225,23 @@ Rejected — go straight to the full swap for memory: pays N2's cost and takes t
 Recommended: "keep both TS and native" resolves differently per tier, and the distinction is what keeps the maintenance honest. Under the wasm-arena `BodyStore` (N8/Tier 1) there is only *one* core — TypeScript — with a pluggable body backend (JS-Map/IndexedDB default; wasm-arena option). "Both" there is two storage backends behind one SPI, with *zero* algorithm duplication; keep both, it costs almost nothing. Under the full swap (Tier 2) there are genuinely two cores, and "keep both" must be split: keep the TS core as the **permanent parity oracle** (in CI, validated against the native core — the `FlatOffsetModel` precedent, maintained to oracle quality, never shipped), and **retire the TS core as a shipped runtime fallback** (two production implementations of every algorithm, kept parity-green forever, for a no-WASM audience that barely exists in modern browsers). Per-document routing (small docs → TS, huge → native, both in production) is *possible* because the snapshot contract round-trips identically, but it is the heaviest model and is taken only on a measured warmup-cost need.
 
 Rejected — discontinue the TS core entirely after cutover: it is the oracle that makes "native" mean "verified," and the Tier-1 production core; deleting it removes both the correctness reference and the cheaper memory path. Rejected — ship both cores to production permanently as a fallback: a permanent double-implementation tax for an almost-empty no-WASM audience; the oracle belongs in CI, not in the shipped bundle.
+
+### 5.10 N10 — The Core Is Runtime-Agnostic; Async Lives In Per-Target Hosts (The Wasm/Tokio Split)
+
+Recommended: the `editor-native` core crate is **synchronous at its public API and depends on no async runtime** — no `tokio`, no `wasm-bindgen-futures`, no embedded executor. All async orchestration (worker offload, persistence I/O, debounced autosave, network) lives in **per-target host crates**: the wasm/browser host (this document's subject) and — once docs/035's native desktop editor exists — the native/desktop host. This was implicit in N1/N5 (model on main, synchronous FFI reads, the scheduler coordinates compute offload rather than running the model) but is made an explicit, load-bearing rule here because it is the precondition for the *one* core crate serving both wasm and native, which docs/035 turns from a future nicety into a near-term requirement.
+
+The forcing fact. The desktop host wants `tokio` (the de-facto native async runtime), but `tokio`'s scheduler does not run under `wasm32-unknown-unknown` — no OS threads, no real timers, a single-threaded cooperative event loop owned by the browser. If the shared core depended on `tokio` it could not compile to wasm; if it depended on browser futures it could not run native. The only stable resolution is that the core depends on **neither**. This is not a constraint the core resists — it is the shape N1 already chose: the model is a synchronous state machine on the main thread, reads are synchronous FFI, commands are synchronous steps. Async is a host concern by construction; N10 just forbids ever letting a runtime leak below the seam.
+
+How the core exposes work that *wants* to be async without importing a runtime:
+
+- **Synchronous core, host-driven cadence.** The hot path (apply a command, read a window) is synchronous; the host decides *when* to call it (`requestAnimationFrame` in the browser, a winit redraw / `tokio` interval natively). The core never spawns a task.
+- **Pure compute as plain functions.** Bake/highlight, markdown/HTML parse (N4), snapshot encode (N3/§7.6) are `fn(input) -> output`. The host runs them where it wants — a Web Worker (browser, N5/§7.7) or a `tokio`/`rayon` thread (native). The core does not know which, which is exactly why the same function serves both worker lanes.
+- **Cooperative long work via a step/poll interface, not futures.** If a long operation (bulk import, full re-bake) must yield, the core exposes a `step()`/`poll()` that does bounded work and returns progress, and the host drives it across frames or threads. No `async fn` in the core — that is what keeps it runtime-free.
+- **Channels at the host boundary, runtime-agnostic.** Where a worker/thread result must flow back, use a runtime-agnostic channel (`std::sync::mpsc` natively; `postMessage`/`Transferable` adoption in the browser host, §7.7), never a `tokio` channel in shared code. If any shared async ever proves unavoidable, restrict it to the runtime-agnostic `futures` traits (`Future`/`Stream`) with no executor — but the default and strong preference is that the core has *no* `async` at all.
+
+Compile-target split: the `wasm-bindgen` bindings live in the browser host crate behind `#[cfg(target_arch = "wasm32")]`; the native host links the same core plus its own `tokio`/`winit`/`vello` deps behind `#[cfg(not(target_arch = "wasm32"))]`. The core crate's `Cargo.toml` carries neither, and CI builds the core for `wasm32-unknown-unknown` to catch a runtime leak before it ships.
+
+Rejected — pick one runtime (tokio) and polyfill it on wasm (`tokio` with only the `rt`/single-thread feature, or `wasm-bindgen-futures` shims): brittle, drags a large dependency into wasm for little gain, and still cannot use tokio's threaded scheduler in the browser; the sync-core/host-async split avoids the problem rather than papering over it. Rejected — make the core `async` over a runtime-agnostic executor (`smol`/`async-executor`) embedded in the core: it couples the core to an executor's scheduling and complicates the synchronous hot path N1 depends on; async belongs to the host, not the spine.
 
 ## 6. Implementation Strategy
 
@@ -406,6 +425,7 @@ Toolchain and build: `packages/editor-native` adds a Rust + wasm-pack build to t
 - Parity drift between Rust and TS: any divergence is a build-breaking parity-test failure; the TS oracle is authoritative, and the native module falls back until fixed.
 - Debugging across the boundary: source maps and panic→JS-error plumbing must exist from the spike, or boundary bugs become opaque; budget for it explicitly.
 - CRDT history swap (future): when the op-log replaces the step algebra, the inverse-step history tests are repointed at op-log equivalents; until then, history is the adapted step algebra.
+- Async-runtime leak into the core (N10): a transitive dependency that pulls `tokio` (or any executor / browser-futures crate) into the core breaks the wasm build, and a native-only dependency breaks the desktop build the moment docs/035 reuses the crate. The core's `Cargo.toml` forbids runtime deps and a CI job builds the core for `wasm32-unknown-unknown`; a leak fails that build rather than shipping a core that only compiles for one target. The fix is always to move the async to a host crate, never to polyfill a runtime under the wrong target.
 
 ## 10. Implementation Backlog
 
