@@ -189,12 +189,34 @@ export const RICH_TEXT_DIFF_CSS =
   ".rt-diff-inline-added{border-left-color:var(--color-success, #16a34a);background:color-mix(in oklab, var(--color-success, #16a34a) 7%, transparent);}" +
   ".rt-diff-inline-removed{border-left-color:var(--color-error, #dc2626);background:color-mix(in oklab, var(--color-error, #dc2626) 6%, transparent);text-decoration:line-through;color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);}" +
   ".rt-diff-inline-moved{border-left-color:var(--color-warning, #d97706);background:color-mix(in oklab, var(--color-warning, #d97706) 5%, transparent);}" +
+  // A changed/moved TABLE CELL (a `<td>` cannot wear a card) gets a status left bar in the change
+  // cards' colors so a cell-attr change (a re-color) is visible. A box-shadow inset bar (not a
+  // border) so it never fights the cell's own background color. List items no longer use this: a
+  // changed `<li>` is promoted to a real change card (its `<li>` inside a one-item list in the card
+  // body, docs/036 §6.3), which aligns its bar with the flow-block cards — the inset-bar-on-the-`<li>`
+  // fallback both looked plainer than a card and, sitting inside the list's own indent (with an
+  // inside-marker only on changed rows), shoved the changed number out of line with unchanged ones.
+  ".rt-diff-item{border-radius:3px;padding-left:0.4em;}" +
+  ".rt-diff-item-changed{box-shadow:inset 3px 0 0 var(--color-info, #0ea5e9);background:color-mix(in oklab, var(--color-info, #0ea5e9) 6%, transparent);}" +
+  ".rt-diff-item-moved{box-shadow:inset 3px 0 0 var(--color-warning, #d97706);background:color-mix(in oklab, var(--color-warning, #d97706) 6%, transparent);}" +
+  ".rt-diff-item-added{box-shadow:inset 3px 0 0 var(--color-success, #16a34a);background:color-mix(in oklab, var(--color-success, #16a34a) 7%, transparent);}" +
+  ".rt-diff-item-removed{box-shadow:inset 3px 0 0 var(--color-error, #dc2626);background:color-mix(in oklab, var(--color-error, #dc2626) 6%, transparent);}" +
   // The inline "moved" marker for a non-flow item (an <li>/<td>) that cannot wear a card.
   ".rt-diff-moved-marker{display:inline-block;font-size:0.6em;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;color:var(--color-warning, #d97706);border:1px solid color-mix(in oklab, var(--color-warning, #d97706) 40%, transparent);border-radius:3px;padding:0 0.3em;margin-right:0.4em;vertical-align:middle;}" +
   // A changed object's field-change summary.
   ".rt-diff-fields{font-size:0.78em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:color-mix(in oklab, var(--color-base-content, currentColor) 70%, transparent);margin:0.2em 0 0;list-style:none;padding-left:0;}" +
   ".rt-diff-fields li{margin:0.1em 0;}" +
   ".rt-diff-field-key{color:var(--color-base-content, CanvasText);font-weight:600;}" +
+  // The §6.4 change-detail: attr diffs, removed/added/changed marks, and object fields that carry
+  // no text-run edit (a dropped link, a re-colored cell, a code edit). One inline block per change,
+  // so it is valid inside a <p>/<li>/<td> where a <ul> is not.
+  // `rem`, not `em`, for the font size: the detail is appended INSIDE its block's shell, so an `em`
+  // would scale with an `<h1>` (1.875em → a ~22px "note" that reads as a defect). A fixed `0.75rem`
+  // keeps it small-caption size under a heading, a paragraph, or a list item alike.
+  ".rt-diff-detail{display:block;margin-top:0.35rem;font-size:0.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.6;color:color-mix(in oklab, var(--color-base-content, currentColor) 65%, transparent);}" +
+  ".rt-diff-detail-row{display:block;}" +
+  ".rt-diff-marktag{font-weight:700;}" +
+  ".rt-diff-mark-snip{font-style:italic;color:color-mix(in oklab, var(--color-base-content, currentColor) 80%, transparent);}" +
   // The folded-context separator (context=\"focused\").
   ".rt-diff-fold{text-align:center;font-size:0.72em;letter-spacing:0.06em;color:color-mix(in oklab, var(--color-base-content, currentColor) 45%, transparent);padding:0.35rem;margin:0.4rem 0;border-top:1px dashed color-mix(in oklab, var(--color-base-content, currentColor) 15%, transparent);border-bottom:1px dashed color-mix(in oklab, var(--color-base-content, currentColor) 15%, transparent);}" +
   // Side-by-side (§6.1): a 2-col grid; each row's [left cell, right cell] land in one grid row and

@@ -91,3 +91,18 @@ export function createDefaultBlockRegistry(
     ...definitions,
   ]);
 }
+
+/**
+ * A `DiffOptions.getNodeDefinition` resolver over the default registry (built-ins + globals), so a
+ * caller gets object field-level diff detail (docs/036 §5.6/§6.4, D6) without hand-wiring one:
+ * `diffSnapshots(base, target, { getNodeDefinition: nodeDiffResolver() })`. The diff core stays
+ * pure — it never reaches the registry itself (its docstring); this is the seam a host passes in.
+ * Snapshots the globals at call time, exactly as `createDefaultBlockRegistry` does.
+ *
+ * @category Engine Core — Model
+ */
+export function nodeDiffResolver(
+  registry: BlockRegistry = createDefaultBlockRegistry(),
+): (type: string) => NodeDefinition | undefined {
+  return (type) => registry.get(type);
+}

@@ -66,6 +66,7 @@ export {
   BlockRegistry,
   createDefaultBlockRegistry,
   globalNodeDefinitions,
+  nodeDiffResolver,
   registerGlobalNodeDefinition,
   unregisterGlobalNodeDefinition,
 } from "./registry";

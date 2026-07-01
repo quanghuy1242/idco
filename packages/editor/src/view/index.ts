@@ -21,6 +21,17 @@ export {
   wordRangeAt,
 } from "./overlays";
 export {
+  applyReviewIndicators,
+  changedBlockIds,
+  deletionAnchors,
+  REVIEW_INDICATOR_CSS,
+  useReviewChangeIndicator,
+  type ReviewBlockStatus,
+  type ReviewChangedBlock,
+  type ReviewDeletionAnchor,
+} from "./overlays";
+export { useReviewSnapshot } from "./store-hooks";
+export {
   getNodeView,
   listInsertableNodes,
   registerNode,

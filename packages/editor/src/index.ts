@@ -208,6 +208,7 @@ export {
 export {
   BlockRegistry,
   createDefaultBlockRegistry,
+  nodeDiffResolver,
   registerGlobalNodeDefinition,
   unregisterGlobalNodeDefinition,
   globalNodeDefinitions,
@@ -256,6 +257,21 @@ export {
   RestingLeaf,
   renderLeafMarks,
   type RestingDocumentProps,
+} from "./view";
+// The live in-editor review affordance (docs/036 §6.2.1, R6-I): the per-block change indicator
+// (`useReviewChangeIndicator` + `REVIEW_INDICATOR_CSS`, its pure `changedBlockIds` core and DOM
+// `applyReviewIndicators`), plus the commit-coalesced snapshot hook it diffs a baseline against
+// (`useReviewSnapshot`). Review detail is the diff view; the indicator only flags which blocks changed.
+export {
+  applyReviewIndicators,
+  changedBlockIds,
+  deletionAnchors,
+  REVIEW_INDICATOR_CSS,
+  useReviewChangeIndicator,
+  useReviewSnapshot,
+  type ReviewBlockStatus,
+  type ReviewChangedBlock,
+  type ReviewDeletionAnchor,
 } from "./view";
 export { EditorToolbar } from "./view";
 export {

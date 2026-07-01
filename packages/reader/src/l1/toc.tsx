@@ -183,9 +183,20 @@ export function RichTextCheckList({ children }: RichTextChildrenProps) {
 export function RichTextCheckListItem({
   checked,
   children,
-}: RichTextChildrenProps & { readonly checked?: boolean }) {
+  className,
+}: RichTextChildrenProps & {
+  readonly checked?: boolean;
+  readonly className?: string;
+}) {
   return (
-    <li className="flex items-start gap-2" data-rt-checklist-item="">
+    <li
+      className={
+        className
+          ? `flex items-start gap-2 ${className}`
+          : "flex items-start gap-2"
+      }
+      data-rt-checklist-item=""
+    >
       {/* A real read-only checkbox (not `aria-hidden`): the static, zero-JS reader still
           conveys checked/unchecked to assistive tech. Out of tab order (it is inert until
           the checklist island activates), but present in the accessibility tree. */}

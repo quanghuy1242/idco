@@ -70,6 +70,7 @@ await import("./editor/engine-diff-marks.test");
 await import("./editor/engine-diff-tree.test");
 await import("./editor/engine-diff-object.test");
 await import("./editor/engine-diff-snapshots.test");
+await import("./editor/engine-review-indicator.test");
 await import("./editor/engine-incremental-save.test");
 await import("./editor/engine-load-perf.test");
 await import("./editor/engine-bake-lru.test");

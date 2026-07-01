@@ -1,5 +1,5 @@
 import type { Story, StoryDefault } from "@ladle/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GridList, GridListItem, Text } from "react-aria-components";
 import {
   Button,
@@ -18,13 +18,16 @@ import {
   createEditorStoreFromCompat,
   diffSnapshots,
   importPayloadLexical,
+  nodeDiffResolver,
   registerCommand,
   registerCommentSource,
   registerDataSource,
+  REVIEW_INDICATOR_CSS,
   snapshotToMarkdown,
   unregisterCommand,
   unregisterCommentSource,
   unregisterDataSource,
+  useReviewChangeIndicator,
   type DataSourcePickerProps,
   type EditorDocumentSnapshot,
   type EditorNode,
@@ -732,6 +735,23 @@ export const FullEditor: Story = () => {
   );
   const [changesOpen, setChangesOpen] = useState(false);
   const [changesDiff, setChangesDiff] = useState<SnapshotDiff | null>(null);
+  // Review (docs/036 §6.2.1, R6-I): the LIVE change indicator, the human-edit sibling of Changes.
+  // Where Changes opens the full diff view for the *detail*, Review flags *where* — a left border on
+  // each block that differs from the mount-time baseline, re-diffed as you edit through the
+  // commit-coalesced hook. No panel of diff cards (that was the withdrawn draft); the diff view is
+  // the detail surface. `editorRef` scopes the DOM decoration to this editor.
+  const [reviewOn, setReviewOn] = useState(false);
+  // A live ref so the once-registered Review command's `isActive` reflects the current toggle state
+  // (the command closure captures the stable ref, not the changing `reviewOn`).
+  const reviewOnRef = useRef(reviewOn);
+  reviewOnRef.current = reviewOn;
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const reviewChanged = useReviewChangeIndicator({
+    baseline,
+    enabled: reviewOn,
+    rootRef: editorRef,
+    store,
+  });
   // Export (docs/030 §7.2): the lossy one-way markdown projection of the live document, shown
   // read-only. `snapshotToMarkdown` reads each object's baked fields, so it is the same open
   // format an "export to markdown" menu would write. Captured at click time from the NATIVE
@@ -796,8 +816,10 @@ export const FullEditor: Story = () => {
       surfaces: { ribbon: "primary" },
     });
     // Changes, registered right after Export so it sits next to it (docs/036 §6.1, R6-F). It
-    // diffs the mount-time baseline against the current native snapshot and renders the
-    // structured diff — added/removed/moved/changed with per-run text tints — in a modal.
+    // diffs the mount-time baseline against the current native snapshot and renders the structured
+    // diff — added/removed/moved/changed with per-run text tints, attr/mark/object detail (§6.4) —
+    // in a modal. `nodeDiffResolver()` wires the object `diffData` seam so a code-block edit shows a
+    // code/language field diff, not a bare "changed" (docs/036 §5.6/§6.4).
     registerCommand({
       group: "history",
       icon: "History",
@@ -809,10 +831,28 @@ export const FullEditor: Story = () => {
           diffSnapshots(
             baseline,
             bakeSnapshotForReader(ctx.store.toSnapshot()),
+            {
+              getNodeDefinition: nodeDiffResolver(),
+            },
           ),
         );
         setChangesOpen(true);
       },
+      slot: "global.history",
+      surfaces: { ribbon: "primary" },
+    });
+    // Review, registered right after Changes (docs/036 §6.2.1, R6-I). It toggles the LIVE change
+    // indicator — a left border on each block that differs from the baseline, so you see *where* you
+    // edited; the detail is the Changes diff view. This is the human-edit affordance; the woven
+    // proposal overlay rides R6-J (§6.2).
+    registerCommand({
+      group: "history",
+      icon: "ListChecks",
+      id: "story.review",
+      isActive: () => reviewOnRef.current,
+      kind: "toggle",
+      label: "Review",
+      run: () => setReviewOn((on) => !on),
       slot: "global.history",
       surfaces: { ribbon: "primary" },
     });
@@ -869,6 +909,7 @@ export const FullEditor: Story = () => {
       unregisterCommand("story.preview");
       unregisterCommand("story.export");
       unregisterCommand("story.changes");
+      unregisterCommand("story.review");
       unregisterDataSource("media");
       unregisterDataSource("posts");
       unregisterCommentSource("comments");
@@ -879,19 +920,35 @@ export const FullEditor: Story = () => {
     // Old editor width (~900) plus the dock column (w-80 + margins), so opening the
     // Review dock does not squeeze the document (docs/027 §8.3).
     <div style={{ maxWidth: 1248 }}>
-      <OwnedModelEditor
-        autosave={{
-          delayMs: 600,
-          onSave: async () => {
-            setSaved("saving…");
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            setSaved(`saved ${new Date().toLocaleTimeString()}`);
-          },
-        }}
-        store={store}
-        uploadImage={fakeUpload}
-        virtualize={false}
-      />
+      {/* The change indicator (docs/036 §6.2.1, R6-I) decorates changed blocks' DOM elements under
+          this ref; its stylesheet is injected once here (the hook is not a component). */}
+      <style>{REVIEW_INDICATOR_CSS}</style>
+      <div ref={editorRef}>
+        <OwnedModelEditor
+          autosave={{
+            delayMs: 600,
+            onSave: async () => {
+              setSaved("saving…");
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              setSaved(`saved ${new Date().toLocaleTimeString()}`);
+            },
+          }}
+          store={store}
+          uploadImage={fakeUpload}
+          virtualize={false}
+        />
+      </div>
+      {/* Review status: while on, each block that differs from the opened version carries a live
+          left border; this line reports the count and points at Changes for the detail (docs/036
+          §6.2.1 — the indicator flags *where*, the diff view shows *what*). */}
+      {reviewOn ? (
+        <p style={{ font: "12px ui-sans-serif", marginTop: 10, opacity: 0.75 }}>
+          Review on — {reviewChanged.length}{" "}
+          {reviewChanged.length === 1 ? "block" : "blocks"} changed since the
+          opened version (left border). Open <strong>Changes</strong> for the
+          detailed diff.
+        </p>
+      ) : null}
       <ConfirmDialog
         confirmLabel="Close"
         hideCancel

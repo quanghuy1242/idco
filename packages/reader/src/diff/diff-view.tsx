@@ -27,7 +27,13 @@
  *
  * @categoryDefault Diff View
  */
-import { cloneElement, Fragment, isValidElement, type ReactNode } from "react";
+import {
+  cloneElement,
+  Fragment,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import {
   RichTextArticle,
   RichTextCheckList,
@@ -50,7 +56,6 @@ import {
 import type {
   DiffViewMode,
   ReaderBlockDiff,
-  ReaderObjectDiff,
   ReaderSnapshotDiff,
   ReaderTextLeafDiff,
 } from "./types";
@@ -63,6 +68,12 @@ export type DiffViewProps = ReaderOptions & {
   readonly mode?: DiffViewMode;
   /** Show the `stats` header summary ("+12 −3, 2 moved"); defaults to `true`. */
   readonly showStats?: boolean;
+  /**
+   * Inject the `.rt-*` typography + diff stylesheets (default `true`). A host that renders many
+   * diff surfaces at once — e.g. the editor's inline overlay banding one region per `DiffView`
+   * (docs/036 §6.2.1) — sets this `false` on each band and injects the shared stylesheet once.
+   */
+  readonly embedStyles?: boolean;
   /**
    * `"all"` (default) renders every block; `"focused"` folds runs of unchanged blocks farther
    * than `contextRadius` from any change into a `⋯ N unchanged ⋯` separator (unified only, §6.3).
@@ -146,7 +157,12 @@ function asText(node: ReaderBlockNode | undefined): ReaderTextNode | undefined {
   return node && node.kind === "text" ? node : undefined;
 }
 
-/** A "flow" block can wear a change card; a non-flow one (`<li>`/`<tr>`/`<td>`) cannot (invalid HTML). */
+/**
+ * A "flow" block can be wrapped directly in a change card; a non-flow one (`<li>`/`<tr>`/`<td>`)
+ * cannot (a `<div>` parent there is invalid HTML). List items still earn a card — via the list-run
+ * path, which nests the `<li>` in a one-item `<ol>`/`<ul>` inside the card body — so this gate only
+ * governs the *direct-wrap* `renderDiffBlock` path (cells/rows, and the rare top-level `list` node).
+ */
 function isFlowBlock(node: ReaderBlockNode): boolean {
   if (node.kind === "text") return node.type !== "listitem";
   if (node.kind === "structural") {
@@ -358,21 +374,133 @@ function renderRunSpans(
   return spans;
 }
 
-/** The field-change summary shown in a changed object's card body (§6.3). */
-function renderFieldSummary(object: ReaderObjectDiff | undefined): ReactNode {
-  if (!object?.fields || object.fields.length === 0) return null;
-  return (
-    <ul className="rt-diff-fields">
-      {object.fields.map((f) => (
-        <li key={f.path}>
-          <span className="rt-diff-field-key">{f.path}</span>{" "}
-          <span className="rt-diff-del">{JSON.stringify(f.base)}</span>
+/** Format an attr/field value for a change summary: string as-is, else JSON, truncated; `—` for absent. */
+function fmtVal(value: unknown): string {
+  if (value === undefined) return "—";
+  const raw = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
+  return raw.length > 48 ? `${raw.slice(0, 48)}…` : raw;
+}
+
+/** A friendly label for a mark kind in the mark-change summary (§6.4). */
+const MARK_LABEL: Readonly<Record<string, string>> = {
+  bold: "Bold",
+  code: "Code",
+  comment: "Comment",
+  glossary: "Glossary",
+  highlight: "Highlight",
+  italic: "Italic",
+  link: "Link",
+  strikethrough: "Strikethrough",
+  subscript: "Subscript",
+  superscript: "Superscript",
+  underline: "Underline",
+};
+
+function markLabel(kind: string): string {
+  return MARK_LABEL[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+/** The affected text of a mark change: base-side for a removed mark, target-side otherwise (§6.4). */
+function markSnippet(
+  ctx: DiffContext,
+  block: ReaderBlockDiff,
+  change: ReaderTextLeafDiff["markChanges"][number],
+): string {
+  const leaf =
+    change.op === "removed"
+      ? asText(ctx.diff.base.body.blocks[block.id])
+      : asText(ctx.diff.target.body.blocks[block.id]);
+  if (!leaf) return "";
+  const s = leaf.content.text.slice(change.from, change.to);
+  return s.length > 40 ? `${s.slice(0, 40)}…` : s;
+}
+
+const markTagClass = (op: "added" | "removed" | "changed"): string =>
+  op === "removed"
+    ? "rt-diff-tag-removed"
+    : op === "added"
+      ? "rt-diff-tag-added"
+      : "rt-diff-tag-changed";
+
+/**
+ * The change-detail summary of a changed block (docs/036 §6.4): its `attrs` diff (align, indent,
+ * heading level, a table cell's fill), its `markChanges` including removals (unstyled bold, a
+ * dropped link — invisible in the runs), and its object `fields` (from the `diffData` seam). Each
+ * is a row so a change that touches no text run is still visible. Rendered as an inline
+ * `display:block` `<span>` so it is valid inside a `<p>`, `<li>`, or `<td>` — a `<ul>` there is not.
+ */
+function renderChangeDetail(
+  ctx: DiffContext,
+  block: ReaderBlockDiff,
+): ReactNode {
+  const rows: ReactNode[] = [];
+  const attrs = block.attrs;
+  if (attrs) {
+    for (const [key, value] of Object.entries(attrs.added)) {
+      rows.push(
+        <span className="rt-diff-detail-row" key={`aa.${key}`}>
+          <span className="rt-diff-field-key">{key}</span> —{" → "}
+          <span className="rt-diff-ins">{fmtVal(value)}</span>
+        </span>,
+      );
+    }
+    for (const [key, pair] of Object.entries(attrs.changed)) {
+      rows.push(
+        <span className="rt-diff-detail-row" key={`ac.${key}`}>
+          <span className="rt-diff-field-key">{key}</span>{" "}
+          <span className="rt-diff-del">{fmtVal(pair.base)}</span>
           {" → "}
-          <span className="rt-diff-ins">{JSON.stringify(f.target)}</span>
-        </li>
-      ))}
-    </ul>
-  );
+          <span className="rt-diff-ins">{fmtVal(pair.target)}</span>
+        </span>,
+      );
+    }
+    for (const [key, value] of Object.entries(attrs.removed)) {
+      rows.push(
+        <span className="rt-diff-detail-row" key={`ar.${key}`}>
+          <span className="rt-diff-field-key">{key}</span>{" "}
+          <span className="rt-diff-del">{fmtVal(value)}</span>
+          {" → —"}
+        </span>,
+      );
+    }
+  }
+  const markChanges = block.text?.markChanges ?? [];
+  markChanges.forEach((change, index) => {
+    const snippet = markSnippet(ctx, block, change);
+    const href =
+      change.op !== "removed" &&
+      change.attrs &&
+      typeof change.attrs.href === "string"
+        ? change.attrs.href
+        : undefined;
+    rows.push(
+      <span className="rt-diff-detail-row" key={`m.${index}`}>
+        <span className={`rt-diff-marktag ${markTagClass(change.op)}`}>
+          {markLabel(change.kind)} {change.op}
+        </span>
+        {snippet ? (
+          <>
+            {" on “"}
+            <span className="rt-diff-mark-snip">{snippet}</span>
+            {"”"}
+          </>
+        ) : null}
+        {href ? <> · {href}</> : null}
+      </span>,
+    );
+  });
+  for (const field of block.object?.fields ?? []) {
+    rows.push(
+      <span className="rt-diff-detail-row" key={`f.${field.path}`}>
+        <span className="rt-diff-field-key">{field.path}</span>{" "}
+        <span className="rt-diff-del">{fmtVal(field.base)}</span>
+        {" → "}
+        <span className="rt-diff-ins">{fmtVal(field.target)}</span>
+      </span>,
+    );
+  }
+  if (rows.length === 0) return null;
+  return <span className="rt-diff-detail">{rows}</span>;
 }
 
 // --- decorated content (shared by cards + inline) ----------------------------
@@ -393,21 +521,39 @@ function changedInner(
   column: DiffColumn,
 ): ReactNode {
   const shell = renderBlock(node, snapshot, ctx.options);
+  // The §6.4 change-detail (attrs / removed marks / object fields) is appended INSIDE the shell as
+  // an inline `display:block` span, so a change carrying no text-run edit — a removed link, a
+  // re-colored cell, a code-block edit — is still visible where a run-only pass would show nothing.
+  const detail = renderChangeDetail(ctx, block);
   if (node.kind === "text" && block.text) {
     const runs = renderRunSpans(ctx, block, block.text, sideOf(column));
-    return isValidElement(shell) ? cloneElement(shell, {}, ...runs) : shell;
+    if (!isValidElement(shell)) return shell;
+    // A heading's shell is a `<RichTextHeading>` element, so `cloneElement` keeps its `anchorId` prop
+    // and the hover-anchor `<a>` survives the swap — but the block-level change detail inside the
+    // heading's inline `<span>` then breaks the line and drops that `<a>` onto its own row (a visible
+    // artifact), and a navigation anchor is meaningless in a diff. Clear `anchorId` for a decorated
+    // heading (an unchanged heading still renders it, so the §11 byte-parity guarantee holds).
+    const shellProps = node.type === "heading" ? { anchorId: undefined } : {};
+    return cloneElement(
+      shell as ReactElement<{ anchorId?: string }>,
+      shellProps,
+      ...runs,
+      detail,
+    );
   }
   if (node.kind === "structural" && block.children) {
     const kids = block.children.map((child, index) =>
       renderDiffBlock(ctx, child, column, `${block.id}.child.${index}`, true),
     );
-    return isValidElement(shell) ? cloneElement(shell, {}, ...kids) : shell;
+    return isValidElement(shell)
+      ? cloneElement(shell, {}, ...kids, detail)
+      : shell;
   }
   if (node.kind === "object") {
     return (
       <>
         {shell}
-        {renderFieldSummary(block.object)}
+        {detail}
       </>
     );
   }
@@ -425,6 +571,21 @@ function moveDetail(block: ReaderBlockDiff, column: DiffColumn): ReactNode {
   return column === "base"
     ? `to ¶${target} ${arrow}`
     : `from ¶${base} ${arrow}`;
+}
+
+/**
+ * Give a non-flow changed item (`<li>`/`<td>`, which cannot wear a card) a visible status cue: a
+ * status-colored left bar via a merged class (docs/036 §6.3 "a tag/marker placed inside the item").
+ * Without this, an attr/mark-only change on a list item (bullet→number) or a table cell (a re-color)
+ * shows only the faint detail row and is easy to miss.
+ */
+function withItemStatus(element: ReactNode, status: string): ReactNode {
+  if (!isValidElement(element)) return element;
+  const props = element.props as { readonly className?: string };
+  const cls = `rt-diff-item rt-diff-item-${status}`;
+  return cloneElement(element as ReactElement<{ className?: string }>, {
+    className: props.className ? `${props.className} ${cls}` : cls,
+  });
 }
 
 /** Prepend an inline marker into a rendered element's own children (for a non-flow item). */
@@ -468,6 +629,18 @@ function renderStructuralListItem(
         </Fragment>
       );
     }
+    // A nested `list` (Option-A: the sublist holding the item you indented) renders diff-aware so a
+    // change on a nested item shows — a plain `renderBlock` here would swallow it and also render
+    // the wrong marker (the container `list` carries no `listType`; the flavour is on the items).
+    if (childNode.kind === "structural" && childNode.type === "list") {
+      return (
+        <Fragment key={`c.${index}`}>
+          {childDiff
+            ? renderDiffSublist(ctx, childDiff, column, `${key}.sub.${index}`)
+            : renderBlock(childNode, snapshot, ctx.options)}
+        </Fragment>
+      );
+    }
     return childDiff ? (
       renderDiffBlock(ctx, childDiff, column, `${key}.c.${index}`, true)
     ) : (
@@ -476,15 +649,21 @@ function renderStructuralListItem(
       </Fragment>
     );
   });
-  const content =
-    block.status === "moved"
+  // The structural list item's OWN change detail (its `listType`/other attrs, a mark on its inner
+  // leaf) — appended inside the `<li>`, so a bullet→number change on a nested list is visible too.
+  const detail =
+    block.status !== "unchanged" ? renderChangeDetail(ctx, block) : null;
+  const content = [
+    ...(block.status === "moved"
       ? [
           <span className="rt-diff-moved-marker" key="mv">
             moved
           </span>,
-          ...body,
         ]
-      : body;
+      : []),
+    ...body,
+    ...(detail ? [<Fragment key="detail">{detail}</Fragment>] : []),
+  ];
   return typeof checked === "boolean" ? (
     <RichTextCheckListItem checked={checked} key={key}>
       {content}
@@ -503,8 +682,20 @@ function renderInlineLeaf(
   const { node, snapshot } = pick(ctx, block, column);
   const leaf = asText(node);
   if (!leaf) return null;
-  if (block.status === "changed" && block.text) {
-    return renderRunSpans(ctx, block, block.text, sideOf(column));
+  // `changed` OR a `moved` leaf that also changed (`block.text` is present) both carry a run pass
+  // (attach-runs-when-changed, §5.5) and a §6.4 detail. A moved leaf inside an Option-A nested
+  // list (indent one item → its predecessor wraps into a structural item, docs/030 §7.3) is a
+  // `moved`, and without this branch its attr change — the bullet→number the user just made —
+  // rendered as plain text with no detail. So a moved+changed inner leaf shows its runs + detail
+  // the same as a changed one; only the "moved" fact is dropped here (the item is not re-ordered
+  // for the reader, just re-parented — the detail is the signal that matters).
+  if ((block.status === "changed" || block.status === "moved") && block.text) {
+    return (
+      <>
+        {renderRunSpans(ctx, block, block.text, sideOf(column))}
+        {renderChangeDetail(ctx, block)}
+      </>
+    );
   }
   if (block.status === "added") {
     return <span className="rt-diff-ins">{leafContent(leaf, snapshot)}</span>;
@@ -574,7 +765,17 @@ function renderDiffBlock(
 
   if (block.status === "changed") {
     const inner = changedInner(ctx, block, node, snapshot, column);
-    if (!flow) return <Fragment key={key}>{inner}</Fragment>;
+    if (!flow) {
+      // A list item shows its edit through the inline track-changes (`changedInner` already put the
+      // runs + §6.4 detail inside the `<li>`), so it needs no extra bar — the faint `.rt-diff-item`
+      // inset one read as a leftover of the pre-card list treatment. A table cell keeps the bar: its
+      // change (a re-color) may carry no visible run, so the cell needs the cue.
+      return node.type === "listitem" ? (
+        <Fragment key={key}>{inner}</Fragment>
+      ) : (
+        <Fragment key={key}>{withItemStatus(inner, "changed")}</Fragment>
+      );
+    }
     if (nested) return <Fragment key={key}>{inner}</Fragment>;
     const detail =
       isText && block.text?.alignment === "text" ? "rewritten" : undefined;
@@ -678,6 +879,203 @@ function renderDiffBlock(
   );
 }
 
+// --- list items as change cards (docs/036 §6.3) ------------------------------
+
+/**
+ * Wrap list `<li>`s in a real `<ol>`/`<ul>`/checklist. Used for a shared run of unchanged items AND
+ * for a single changed item's card body — a list item cannot itself wear a `<div class="card">`
+ * (invalid list HTML), so a one-item list inside the card is how it earns the same panel every
+ * other change gets. `ordinal` (a number list's start) keeps a card's number at its real position.
+ */
+function wrapList(
+  flavour: "bullet" | "number" | "checklist",
+  children: ReactNode,
+  ordinal: number,
+  key: string,
+): ReactNode {
+  if (flavour === "checklist") {
+    return <RichTextCheckList key={key}>{children}</RichTextCheckList>;
+  }
+  return (
+    <RichTextList
+      key={key}
+      kind={flavour === "number" ? "number" : "bullet"}
+      // Emit `start` only past position 1 — a `start="1"` attr would diverge from the plain reader's
+      // `<ol>` (no start), breaking the §11 byte-parity for an unchanged numbered run.
+      start={flavour === "number" && ordinal > 1 ? ordinal : undefined}
+    >
+      {children}
+    </RichTextList>
+  );
+}
+
+/**
+ * The decorated `<li>` for a list item in any status — the body cell shared by the card path and
+ * the unchanged-run path. A structural `listitem` (Option-A nesting) renders through
+ * {@link renderStructuralListItem} (its inner leaf + nested sublist); a text leaf gets its
+ * track-changes runs (`changed` / moved-and-changed), a tint (`added`/`removed`), or its plain
+ * shell. It carries NO status bar of its own — the enclosing card owns the status cue.
+ */
+function renderDecoratedLi(
+  ctx: DiffContext,
+  block: ReaderBlockDiff,
+  column: DiffColumn,
+  key: string,
+): ReactNode {
+  const { node, snapshot } = pick(ctx, block, column);
+  if (!node) return <Fragment key={key} />;
+  if (node.kind === "structural" && node.type === "listitem") {
+    return renderStructuralListItem(ctx, block, column, key);
+  }
+  const shell = renderBlock(node, snapshot, ctx.options);
+  const leaf = asText(node);
+  if (!leaf || !isValidElement(shell)) {
+    return <Fragment key={key}>{shell}</Fragment>;
+  }
+  if (
+    block.status === "changed" ||
+    (block.status === "moved" && block.alsoChanged)
+  ) {
+    // `changedInner` clones the `<li>` shell and swaps its children for the track-changes runs +
+    // the §6.4 detail — the identical reuse the flow-block cards use for a changed leaf.
+    return (
+      <Fragment key={key}>
+        {changedInner(ctx, block, node, snapshot, column)}
+      </Fragment>
+    );
+  }
+  if (block.status === "added") {
+    return (
+      <Fragment key={key}>
+        {cloneElement(
+          shell,
+          {},
+          <span className="rt-diff-ins">{leafContent(leaf, snapshot)}</span>,
+          renderChangeDetail(ctx, block),
+        )}
+      </Fragment>
+    );
+  }
+  if (block.status === "removed") {
+    return (
+      <Fragment key={key}>
+        {cloneElement(
+          shell,
+          {},
+          <span className="rt-diff-del">{leafContent(leaf, snapshot)}</span>,
+        )}
+      </Fragment>
+    );
+  }
+  return <Fragment key={key}>{shell}</Fragment>;
+}
+
+/** A structural `listitem`'s inner text `listitem` leaf diff, if any (its own content change). */
+function innerLeafDiff(block: ReaderBlockDiff): ReaderBlockDiff | undefined {
+  return (block.children ?? []).find(
+    (child) => child.node?.kind === "text" && child.node.type === "listitem",
+  );
+}
+
+/**
+ * The card status/label/detail for a changed list item. A leaf maps its own status. A structural
+ * `listitem` the diff reports as `added`/`removed` only because Option-A nesting (docs/030 §7.3)
+ * wrapped an EXISTING item into a fresh container is really an EDIT of that item — its surviving
+ * inner leaf changed — so it reads as `Edited`, not a misleading `Added`.
+ */
+function itemCardMeta(
+  ctx: DiffContext,
+  block: ReaderBlockDiff,
+  column: DiffColumn,
+): {
+  status: "added" | "removed" | "changed" | "moved";
+  label: string;
+  detail?: ReactNode;
+} {
+  let status = block.status as "added" | "removed" | "changed" | "moved";
+  if (block.node?.kind === "structural" && block.node.type === "listitem") {
+    const inner = innerLeafDiff(block);
+    if (
+      (status === "added" || status === "removed") &&
+      inner &&
+      inner.status !== "unchanged"
+    ) {
+      status = "changed";
+    }
+  }
+  const label =
+    status === "added"
+      ? "Added"
+      : status === "removed"
+        ? "Removed"
+        : status === "moved"
+          ? "Moved"
+          : "Edited";
+  const detail = status === "moved" ? moveDetail(block, column) : undefined;
+  return { detail, label, status };
+}
+
+/** One changed list item as a full change card: its `<li>` inside a one-item list in the body. */
+function renderListItemCard(
+  ctx: DiffContext,
+  block: ReaderBlockDiff,
+  column: DiffColumn,
+  key: string,
+  ordinal: number,
+): ReactNode {
+  const { node } = pick(ctx, block, column);
+  if (!node) return null;
+  const flavour = flatListFlavour(ctx, block) ?? "bullet";
+  const li = renderDecoratedLi(ctx, block, column, `${key}.li`);
+  const body = wrapList(flavour, li, ordinal, `${key}.list`);
+  const { status, label, detail } = itemCardMeta(ctx, block, column);
+  return card(
+    status,
+    <StatusTag detail={detail} label={label} status={status} />,
+    body,
+    key,
+  );
+}
+
+/**
+ * A nested `list` inside a structural list item, rendered diff-aware (docs/030 §7.3 Option A). The
+ * container `list` node carries no `listType` — the flavour lives on each item leaf — so the marker
+ * is read from the items, and every item renders decorated inline so a change on a nested item (the
+ * bullet→number on the item you indented) shows, instead of being swallowed by a plain re-render.
+ */
+function renderDiffSublist(
+  ctx: DiffContext,
+  block: ReaderBlockDiff,
+  column: DiffColumn,
+  key: string,
+): ReactNode {
+  const { node, snapshot } = pick(ctx, block, column);
+  if (!node || node.kind !== "structural" || node.type !== "list") {
+    return renderDiffBlock(ctx, block, column, key, true);
+  }
+  const byId = new Map(
+    (block.children ?? []).map((child) => [child.id, child]),
+  );
+  const inner = node.children
+    .map((id) => snapshot.body.blocks[id])
+    .find((child) => child?.kind === "text" && child.type === "listitem");
+  const flavour =
+    inner && inner.kind === "text" ? leafFlavour(inner) : "bullet";
+  const items = node.children.map((childId, index) => {
+    const childDiff = byId.get(childId);
+    const childNode = snapshot.body.blocks[childId];
+    if (!childNode) return null;
+    return childDiff ? (
+      renderDecoratedLi(ctx, childDiff, column, `${key}.i.${index}`)
+    ) : (
+      <Fragment key={`${key}.i.${index}`}>
+        {renderBlock(childNode, snapshot, ctx.options)}
+      </Fragment>
+    );
+  });
+  return wrapList(flavour, items, 1, key);
+}
+
 // --- top-level body grouping (mirror of the reader's `groupListRuns`) --------
 
 type BodyUnit =
@@ -754,27 +1152,45 @@ function foldContext(ctx: DiffContext, units: BodyUnit[]): BodyUnit[] {
   return out;
 }
 
-/** Render a synthetic flat-list run's items into the matching real list element. */
+/**
+ * Render a flat-list run (docs/036 §6.3): each changed/added/removed/moved item becomes its own
+ * change card — the same status-tag panel and article-edge left bar every flow-block change gets,
+ * the parity the diff view promises — while consecutive unchanged items coalesce into one shared
+ * real `<ol>`/`<ul>` so an untouched run still reads as a single list. A list item cannot wear a
+ * card directly (an `<li>` under a `<div class="card">` is invalid), so the card body is a one-item
+ * list; `ordinal` (the item's 1-based position in the run) keeps an ordered card's number honest.
+ */
 function renderListRun(
   ctx: DiffContext,
   unit: Extract<BodyUnit, { kind: "list" }>,
   column: DiffColumn,
   key: string,
 ): ReactNode {
-  const items = unit.items.map((block, index) =>
-    renderDiffBlock(ctx, block, column, `${key}.item.${index}`),
-  );
-  if (items.length === 0) return null;
-  return unit.flavour === "checklist" ? (
-    <RichTextCheckList key={key}>{items}</RichTextCheckList>
-  ) : (
-    <RichTextList
-      key={key}
-      kind={unit.flavour === "number" ? "number" : "bullet"}
-    >
-      {items}
-    </RichTextList>
-  );
+  const out: ReactNode[] = [];
+  let pending: ReactNode[] = [];
+  let pendingStart = 1;
+  const flush = (tag: string | number) => {
+    if (pending.length === 0) return;
+    out.push(
+      wrapList(unit.flavour, pending, pendingStart, `${key}.run.${tag}`),
+    );
+    pending = [];
+  };
+  unit.items.forEach((block, index) => {
+    const ordinal = index + 1;
+    if (block.status === "unchanged") {
+      if (pending.length === 0) pendingStart = ordinal;
+      pending.push(renderDecoratedLi(ctx, block, column, `${key}.li.${index}`));
+    } else {
+      flush(index);
+      out.push(
+        renderListItemCard(ctx, block, column, `${key}.card.${index}`, ordinal),
+      );
+    }
+  });
+  flush("end");
+  if (out.length === 0) return null;
+  return <Fragment key={key}>{out}</Fragment>;
 }
 
 function renderUnit(ctx: DiffContext, unit: BodyUnit, key: string): ReactNode {
@@ -861,7 +1277,11 @@ function buildRows(ctx: DiffContext): Row[] {
   return rows;
 }
 
-/** A single side-by-side cell: a flat listitem is wrapped in a `<ul>` so a lone `<li>` stays valid. */
+/**
+ * A single side-by-side cell. A changed list item gets the same change card as in unified (its
+ * `<li>` inside a one-item list — a lone `<li>` is invalid otherwise); an unchanged one is wrapped
+ * bare. A non-list block renders straight through.
+ */
 function renderCell(
   ctx: DiffContext,
   block: ReaderBlockDiff,
@@ -869,20 +1289,25 @@ function renderCell(
   key: string,
 ): ReactNode {
   const flavour = flatListFlavour(ctx, block);
-  const content = renderDiffBlock(ctx, block, column, `${key}.b`);
-  const wrapped =
-    flavour === "checklist" ? (
-      <RichTextCheckList>{content}</RichTextCheckList>
-    ) : flavour ? (
-      <RichTextList kind={flavour === "number" ? "number" : "bullet"}>
-        {content}
-      </RichTextList>
-    ) : (
-      content
-    );
+  let content: ReactNode;
+  if (flavour) {
+    // No list-run context here, so an ordered item's number restarts at 1 (the same limitation the
+    // per-cell wrap has always had); the card's status header is what carries the review signal.
+    content =
+      block.status === "unchanged"
+        ? wrapList(
+            flavour,
+            renderDecoratedLi(ctx, block, column, `${key}.b`),
+            1,
+            `${key}.l`,
+          )
+        : renderListItemCard(ctx, block, column, `${key}.b`, 1);
+  } else {
+    content = renderDiffBlock(ctx, block, column, `${key}.b`);
+  }
   return (
     <div className="rt-diff-cell" key={key}>
-      {wrapped}
+      {content}
     </div>
   );
 }
@@ -978,6 +1403,7 @@ export function DiffView({
   showStats = true,
   context = "all",
   contextRadius = 2,
+  embedStyles = true,
   ...options
 }: DiffViewProps): ReactNode {
   const ctx: DiffContext = {
@@ -989,8 +1415,14 @@ export function DiffView({
   };
   return (
     <div className="rt-diff-view" data-rt-diff-mode={mode}>
-      <style>{RICH_TEXT_TYPOGRAPHY_CSS}</style>
-      <style>{RICH_TEXT_DIFF_CSS}</style>
+      {/* A host banding many `DiffView`s (the inline overlay, docs/036 §6.2.1) turns this off
+          and injects the shared stylesheet once, so the DOM holds one copy, not one per band. */}
+      {embedStyles ? (
+        <>
+          <style>{RICH_TEXT_TYPOGRAPHY_CSS}</style>
+          <style>{RICH_TEXT_DIFF_CSS}</style>
+        </>
+      ) : null}
       {showStats ? <DiffStatsHeader stats={diff.stats} /> : null}
       {mode === "side-by-side" ? (
         <div className="rt-diff-cols">{renderSideBySide(ctx)}</div>

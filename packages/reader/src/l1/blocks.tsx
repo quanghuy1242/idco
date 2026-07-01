@@ -189,13 +189,24 @@ export function RichTextList({
   );
 }
 
-/** Renders a list item as an `<li>` with its indent. */
+/**
+ * Renders a list item as an `<li>` with its indent. `className` merges after the base class so a
+ * decorator (the diff view's changed-item status bar, docs/036 §6.3) can flag one item; an
+ * undocorated item stays byte-identical to a plain render (the §11 parity guarantee).
+ */
 export function RichTextListItem({
   indent,
   children,
-}: RichTextChildrenProps & { readonly indent?: number }) {
+  className,
+}: RichTextChildrenProps & {
+  readonly indent?: number;
+  readonly className?: string;
+}) {
   return (
-    <li className={RT_BLOCK_CLASS.listItem} style={indentStyle(indent)}>
+    <li
+      className={cx(RT_BLOCK_CLASS.listItem, className)}
+      style={indentStyle(indent)}
+    >
       {children}
     </li>
   );

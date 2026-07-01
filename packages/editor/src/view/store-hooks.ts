@@ -9,6 +9,7 @@
  */
 import { useMemo, useSyncExternalStore } from "react";
 import type {
+  EditorDocumentSnapshot,
   EditorStore,
   EngineScheduler,
   EngineSchedulerTask,
@@ -19,6 +20,14 @@ import type {
 type SelectionFramePayload = {
   readonly dirty: StoreDirty;
 };
+
+/**
+ * The one publicly-exported hook here (`useReviewSnapshot`) is diff-view infrastructure; this
+ * standalone block is also the api-map module header, so the first real symbol's own doc is not
+ * consumed as it (docs/032 / `scripts/gen-api-map.mjs`).
+ *
+ * @categoryDefault Diff View
+ */
 
 export function useEditorOrder(store: EditorStore): readonly NodeId[] {
   return useSyncExternalStore(
@@ -38,6 +47,52 @@ export function useEditorNode(store: EditorStore, id: NodeId) {
     () => store.getViewNode(id),
     () => store.getViewNode(id),
   );
+}
+
+/**
+ * Subscribe to the live document as a native snapshot for the inline review overlay (docs/036
+ * §6.2.1, R6-I). A host captures a `baseline` snapshot once (e.g. at load/last-save) and diffs it
+ * against this live `current` — `diffSnapshots(baseline, useReviewSnapshot(store))` — to feed
+ * `<InlineDiffOverlay>`.
+ *
+ * The snapshot is recomputed lazily (during React's render, not inside the commit callback) and
+ * cached, so `useSyncExternalStore`'s getSnapshot returns a stable reference between commits — a
+ * fresh `toSnapshot()` on every call would tear or loop. `toSnapshot()` is incremental
+ * (docs/030 SLP-1), so recomputing per commit is cheap. Idle-lane coalescing of the re-diff
+ * itself is the R6-J live-review refinement (docs/036 §8); this read-only surface recomputes on
+ * each commit.
+ */
+export function useReviewSnapshot(store: EditorStore): EditorDocumentSnapshot {
+  const external = useMemo(() => new ReviewSnapshotStore(store), [store]);
+  return useSyncExternalStore(
+    external.subscribe,
+    external.getSnapshot,
+    external.getSnapshot,
+  );
+}
+
+class ReviewSnapshotStore {
+  readonly #store: EditorStore;
+  // Null means "invalidated, recompute on next read". Caching is what keeps getSnapshot stable
+  // between commits (the useSyncExternalStore contract); the commit callback only invalidates and
+  // notifies, so the actual toSnapshot() runs during the batched React render, not on the
+  // synchronous dispatch/keystroke path.
+  #cache: EditorDocumentSnapshot | null = null;
+
+  constructor(store: EditorStore) {
+    this.#store = store;
+  }
+
+  readonly subscribe = (listener: () => void): (() => void) =>
+    this.#store.subscribeCommit(() => {
+      this.#cache = null;
+      listener();
+    });
+
+  readonly getSnapshot = (): EditorDocumentSnapshot => {
+    if (this.#cache === null) this.#cache = this.#store.toSnapshot();
+    return this.#cache;
+  };
 }
 
 export function useSelectionFrameVersion(

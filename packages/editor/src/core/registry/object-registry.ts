@@ -401,6 +401,29 @@ function codeBlockDefinition(): NodeDefinition {
     plainText(data) {
       return pieceTableText((isJsonObject(data) ? data : {}).code);
     },
+    // Field-level diff (docs/036 §5.6/§6.4, D6): the diff core cannot read the piece-table body,
+    // so the code block resolves it to plain source text and reports a `code` and/or `language`
+    // change — turning a bare block-level "changed" into "here is what changed in the code".
+    diffData(base, target) {
+      const baseData = isJsonObject(base) ? base : {};
+      const targetData = isJsonObject(target) ? target : {};
+      const changes: ObjectFieldChange[] = [];
+      const baseCode = pieceTableText(baseData.code);
+      const targetCode = pieceTableText(targetData.code);
+      if (baseCode !== targetCode) {
+        changes.push({ base: baseCode, path: "code", target: targetCode });
+      }
+      const baseLanguage = stringValue(baseData.language) ?? "ts";
+      const targetLanguage = stringValue(targetData.language) ?? "ts";
+      if (baseLanguage !== targetLanguage) {
+        changes.push({
+          base: baseLanguage,
+          path: "language",
+          target: targetLanguage,
+        });
+      }
+      return changes;
+    },
     normalizeData(value) {
       const normalized: ObjectNormalizationResult = isObjectNormalizationResult(
         value,

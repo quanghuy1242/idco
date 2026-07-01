@@ -15,10 +15,12 @@ import { render, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { DiffView, Reader } from "@quanghuy1242/idco-reader";
 import {
+  createDefaultBlockRegistry,
   createEditorStore,
   createIdAllocator,
   createTextMark,
   diffSnapshots,
+  nodeDiffResolver,
   type EditorDocumentSnapshot,
   type EditorNode,
   type EditorStore,
@@ -26,6 +28,7 @@ import {
   makeStructuralNode,
   makeTextNode,
   type NodeId,
+  pointAtOffset,
 } from "../../packages/editor/src/core";
 
 // --- store + snapshot helpers ------------------------------------------------
@@ -280,6 +283,247 @@ describe("DiffView — mark changes (§5.3)", () => {
   });
 });
 
+// --- change detail: attrs, removed marks, object fields (§6.4) ---------------
+
+describe("DiffView — change detail (§6.4)", () => {
+  it("shows a flat list-flavour change (bullet → number) as a full change card per item", () => {
+    // A flat list converts to numbered: each item gains a `listType` attr (no text edit). The
+    // change must show as beautifully as any other block — each changed item is promoted to a full
+    // change card (its <li> inside a one-item <ol>), aligned with the flow-block cards, carrying the
+    // Edited status tag AND the listType detail row (docs/036 §6.3/§6.4). This replaced the first
+    // cut's faint inset bar on the <li>, which was plainer than a card and misaligned in the indent.
+    const a = createIdAllocator("idco_client_listflavour");
+    const id1 = a.createNodeId();
+    const id2 = a.createNodeId();
+    const c1 = a.createTextSlice("First item");
+    const c2 = a.createTextSlice("Second item");
+    const listDoc = (attrs?: { listType: string }): EditorDocumentSnapshot => ({
+      body: {
+        blocks: {
+          [id1]: makeTextNode({
+            attrs,
+            content: c1,
+            id: id1,
+            type: "listitem",
+          }),
+          [id2]: makeTextNode({
+            attrs,
+            content: c2,
+            id: id2,
+            type: "listitem",
+          }),
+        },
+        order: [id1, id2],
+      },
+      settings: {},
+      version: 1,
+    });
+    const diff = diffSnapshots(listDoc(), listDoc({ listType: "number" }));
+    expect(diff.blocks.map((b) => b.status)).toEqual(["changed", "changed"]);
+    const { root } = renderDiff(diff);
+    // Each item is its own change card (the panel parity a paragraph gets), not a bare list row.
+    const cards = root.querySelectorAll(".rt-diff-card-changed");
+    expect(cards.length).toBe(2);
+    // The item still renders as the numbered target flavour, now inside its card, at its real
+    // position (a one-item <ol start=2> keeps the second item numbered "2").
+    expect(cards[1]?.querySelector("ol")?.getAttribute("start")).toBe("2");
+    expect(cards[0]?.querySelector("li")).toBeTruthy();
+    expect(root.querySelector(".rt-diff-tag-changed")?.textContent).toContain(
+      "Edited",
+    );
+    expect(root.querySelector(".rt-diff-detail")?.textContent).toContain(
+      "listType",
+    );
+    // The old inset-bar-on-the-<li> fallback is gone for list items.
+    expect(root.querySelector("li.rt-diff-item-changed")).toBeNull();
+  });
+
+  it("surfaces a bullet→number change on a nested (indented) item, not just the flat ones", () => {
+    // Indent the middle item, then number the list: Option-A nesting (docs/030 §7.3) wraps the
+    // first item into a structural container and the middle item into an added sublist, so the diff
+    // labels them `moved`, not `changed`. The earlier renderer dropped BOTH items' listType edit
+    // (a moved inner leaf rendered plain; an added sublist re-rendered whole). Every item must
+    // still show its bullet→number change (docs/036 §6.4).
+    const a = createIdAllocator("idco_client_indentnumber");
+    const i1 = a.createNodeId();
+    const i2 = a.createNodeId();
+    const i3 = a.createNodeId();
+    const item = (id: NodeId, text: string) =>
+      makeTextNode({ content: a.createTextSlice(text), id, type: "listitem" });
+    const base: EditorDocumentSnapshot = {
+      body: {
+        blocks: {
+          [i1]: item(i1, "one"),
+          [i2]: item(i2, "two"),
+          [i3]: item(i3, "three"),
+        },
+        order: [i1, i2, i3],
+      },
+      settings: {},
+      version: 1,
+    };
+    const store = createEditorStore({ allocator: a, snapshot: base });
+    const at2 = pointAtOffset(i2, store.requireTextNode(i2).content, 0);
+    store.dispatch({
+      origin: "local",
+      selectionAfter: { anchor: at2, focus: at2, type: "text" },
+      steps: [],
+    });
+    store.command({ type: "indent" });
+    store.dispatch({
+      origin: "local",
+      selectionAfter: {
+        anchor: pointAtOffset(i1, store.requireTextNode(i1).content, 0),
+        focus: pointAtOffset(
+          i3,
+          store.requireTextNode(i3).content,
+          store.requireTextNode(i3).content.text.length,
+        ),
+        type: "text",
+      },
+      steps: [],
+    });
+    store.command({
+      type: "set-block-type",
+      blockType: "listitem",
+      listType: "number",
+    });
+    const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
+    // All three items show their listType edit (one detail row each), not just the flat item.
+    const detailRows = [...root.querySelectorAll(".rt-diff-detail-row")].filter(
+      (row) => row.textContent?.includes("listType"),
+    );
+    expect(detailRows.length).toBe(3);
+  });
+
+  it("renders an attr-only change (no text edit) as a detail row", () => {
+    // Same text (one shared slice → shared char ids, so the runs read unchanged), only the
+    // paragraph's align attr differs — the change is invisible unless the attr diff is rendered.
+    const a = createIdAllocator("idco_client_attr");
+    const id = a.createNodeId();
+    const content = a.createTextSlice("Same words, restyled.");
+    const left = makeTextNode({ attrs: { align: "left" }, content, id });
+    const centered = makeTextNode({ attrs: { align: "center" }, content, id });
+    const base: EditorDocumentSnapshot = {
+      body: { blocks: { [id]: left }, order: [id] },
+      settings: {},
+      version: 1,
+    };
+    const target: EditorDocumentSnapshot = {
+      ...base,
+      body: { blocks: { [id]: centered }, order: [id] },
+    };
+    const { root } = renderDiff(diffSnapshots(base, target));
+    const detail = root.querySelector(".rt-diff-detail");
+    expect(detail).toBeTruthy();
+    expect(detail?.textContent).toContain("align");
+    expect(detail?.textContent).toContain("left");
+    expect(detail?.textContent).toContain("center");
+  });
+
+  it("drops the hover-anchor <a> on a CHANGED heading but keeps it on an unchanged one", () => {
+    // A heading's shell is a `<RichTextHeading>`, so a naive clone kept its `anchorId` and the
+    // hover-anchor `<a>` survived — and the block-level detail inside the heading's inline `<span>`
+    // then broke the line, dropping the anchor onto its own row (a visible defect). A decorated
+    // heading strips it; an unchanged heading keeps it (the §11 byte-parity guarantee).
+    const a = createIdAllocator("idco_client_headinganchor");
+    const hid = a.createNodeId();
+    const content = a.createTextSlice("A section heading");
+    const h2 = makeTextNode({
+      attrs: { tag: "h2" },
+      content,
+      id: hid,
+      type: "heading",
+    });
+    const h3 = makeTextNode({
+      attrs: { tag: "h3" },
+      content,
+      id: hid,
+      type: "heading",
+    });
+    const base: EditorDocumentSnapshot = {
+      body: { blocks: { [hid]: h2 }, order: [hid] },
+      settings: {},
+      version: 1,
+    };
+    // Changed (tag h2 → h3): the anchor is gone, the detail is present.
+    const changed = renderDiff(
+      diffSnapshots(base, {
+        ...base,
+        body: { blocks: { [hid]: h3 }, order: [hid] },
+      }),
+    );
+    expect(changed.root.querySelector("h3 a")).toBeNull();
+    expect(
+      changed.root.querySelector(".rt-diff-detail")?.textContent,
+    ).toContain("tag");
+    // Unchanged: the anchor is still rendered (byte-identical to the plain reader).
+    const same = renderDiff(diffSnapshots(base, base));
+    expect(same.root.querySelector("h2 a")).toBeTruthy();
+  });
+
+  it("renders a removed mark (unstyled bold) as a mark-change row", () => {
+    // The text is identical; only the bold mark is dropped — previously the card showed no cue.
+    const { store, ids } = paragraphStore(["hello world"]);
+    const live = store.requireTextNode(ids[0]!);
+    store.dispatch(
+      store.transaction().addMark(
+        ids[0]!,
+        createTextMark({
+          from: 0,
+          id: "m1",
+          kind: "bold",
+          node: live,
+          to: 5,
+        }),
+      ),
+    );
+    const bold = store.toSnapshot();
+    const plain = store.requireTextNode(ids[0]!);
+    store.dispatch(store.transaction().removeMark(ids[0]!, plain.marks[0]!));
+    const unbolded = store.toSnapshot();
+    const { root } = renderDiff(diffSnapshots(bold, unbolded));
+    const detail = root.querySelector(".rt-diff-detail");
+    expect(detail).toBeTruthy();
+    expect(root.querySelector(".rt-diff-marktag")).toBeTruthy();
+    expect(detail?.textContent).toContain("Bold");
+    expect(detail?.textContent).toContain("removed");
+  });
+
+  it("renders a changed object's field detail from the diffData seam", () => {
+    const registry = createDefaultBlockRegistry();
+    const codeDef = registry.require("code-block");
+    const id = createIdAllocator("idco_client_code").createNodeId();
+    const codeNode = (source: string) => {
+      const data = codeDef.normalizeData({ code: source, language: "ts" }).data;
+      return makeObjectNode({
+        baked: codeDef.bake?.(data) ?? undefined,
+        data,
+        id,
+        status: "ready",
+        type: "code-block",
+      });
+    };
+    const base: EditorDocumentSnapshot = {
+      body: { blocks: { [id]: codeNode("const x = 1;") }, order: [id] },
+      settings: {},
+      version: 1,
+    };
+    const target: EditorDocumentSnapshot = {
+      ...base,
+      body: { blocks: { [id]: codeNode("const x = 2;") }, order: [id] },
+    };
+    const diff = diffSnapshots(base, target, {
+      getNodeDefinition: nodeDiffResolver(),
+    });
+    const { root } = renderDiff(diff);
+    const detail = root.querySelector(".rt-diff-detail");
+    expect(detail).toBeTruthy();
+    expect(detail?.textContent).toContain("code");
+    expect(detail?.textContent).toContain("const x = 2;");
+  });
+});
+
 // --- objects -----------------------------------------------------------------
 
 describe("DiffView — object blocks (§5.6)", () => {
@@ -352,7 +596,7 @@ describe("DiffView — object blocks (§5.6)", () => {
           : undefined,
     });
     const { root } = renderDiff(diff);
-    const fields = root.querySelector(".rt-diff-fields")!;
+    const fields = root.querySelector(".rt-diff-detail")!;
     expect(fields.textContent).toContain("src");
     expect(fields.textContent).toContain("/b.png");
   });
@@ -467,6 +711,9 @@ describe("DiffView — structural recursion decorates only changed descendants (
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
     expect(root.querySelectorAll("ul li").length).toBe(2);
     expect(root.querySelector("li .rt-diff-ins")?.textContent).toBe("!");
+    // The whole list is one CHANGED card; the edited item shows its change through the inline
+    // track-changes, NOT the old faint `.rt-diff-item` inset bar (a leftover of the pre-card look).
+    expect(root.querySelector("li.rt-diff-item-changed")).toBeNull();
   });
 
   it("renders a changed STRUCTURAL list item (SN-1 nested) as one valid <li>, not a nested <ul>", () => {
