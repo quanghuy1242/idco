@@ -62,6 +62,9 @@
   - [4.11 D11 — Accept/Reject At Whole And Block Granularity](#411-d11--acceptreject-at-whole-and-block-granularity)
   - [4.12 D12 — Separate The Change From The Conversation](#412-d12--separate-the-change-from-the-conversation)
   - [4.13 D13 — Model B (Tombstones) Is The Concurrent Future](#413-d13--model-b-tombstones-is-the-concurrent-future)
+  - [4.14 D14 — The Inline Overlay Mounts The Proposed Side And Ghosts Removals](#414-d14--the-inline-overlay-mounts-the-proposed-side-and-ghosts-removals)
+  - [4.15 D15 — Proposals Are Identity-Anchored; A Document Revision Signals Staleness](#415-d15--proposals-are-identity-anchored-a-document-revision-signals-staleness)
+  - [4.16 D16 — Inline Review Scales By Region, With A Diff-View Fallback](#416-d16--inline-review-scales-by-region-with-a-diff-view-fallback)
 - [5. The Diff Algorithm](#5-the-diff-algorithm)
   - [5.1 Result Data Shapes](#51-result-data-shapes)
   - [5.2 Text-Leaf Character Diff](#52-text-leaf-character-diff)
@@ -76,7 +79,7 @@
 - [7. Suggested Edits / Track-Changes](#7-suggested-edits--track-changes)
   - [7.1 The Two Models, And Why A First](#71-the-two-models-and-why-a-first)
   - [7.2 A Proposal Is An Attributed Op-Log](#72-a-proposal-is-an-attributed-op-log)
-  - [7.3 The Suggestion Source SPI And Rebase](#73-the-suggestion-source-spi-and-rebase)
+  - [7.3 The Suggestion Source SPI And Applying A Proposal](#73-the-suggestion-source-spi-and-applying-a-proposal)
   - [7.4 Attribution](#74-attribution)
   - [7.5 Accept And Reject](#75-accept-and-reject)
   - [7.6 The Reuse Map](#76-the-reuse-map)
@@ -87,6 +90,7 @@
 - [10. Future Backlog](#10-future-backlog)
 - [11. Definition Of Done](#11-definition-of-done)
 - [12. Final Model](#12-final-model)
+- [13. Resolved Design Questions](#13-resolved-design-questions)
 
 ## 1. Goal
 
@@ -157,7 +161,8 @@ Two snapshots of the same document share character-id lineage. To diff a leaf's 
 
 ```ts
 type EditorDocumentSnapshot = {
-  readonly version: 1;
+  readonly version: 1;                                                  // schema version (a literal), NOT a document revision
+  readonly revision?: number;                                          // D15: monotonic document revision, bumped per commit; added additively
   readonly body: {
     readonly order: readonly NodeId[];
     readonly blocks: Readonly<Record<NodeId, EditorSnapshotNode>>;
@@ -196,7 +201,7 @@ A search for `suggest`/`track-change`/`pending`/`proposed`/`accept-change`/`tomb
 
 ### 3.7 The Attribution Substrate And Destructive Delete
 
-Attribution is ready. Every character carries `{client, clock}`; `characterIdsForSlice` reads which client inserted a run (`model.ts:410`); `ClientId` is minted per allocator/store (`model.ts:694`, `allocator.clientId`). The `origin` field exists on every transaction and commit (`steps.ts:177,189`), threaded through dispatch (`editor-store.ts:338,1320`) and already filtered by the view (`react-view.tsx:449` reclaims focus only on local edits). Today only `"local"` is used; a non-local origin (`"suggested"`/an author id) is a value to thread through, not a mechanism to build.
+Attribution is ready. Every character carries `{client, clock}`; `characterIdsForSlice` reads which client inserted a run (`model.ts:410`); `ClientId` is minted per allocator/store (`model.ts:694`, `allocator.clientId`). The `origin` field exists on every transaction and commit (`steps.ts:177,189`), threaded through dispatch (`editor-store.ts:338,1320`) and already filtered by the view (`react-view.tsx:449` reclaims focus only on local edits). Today only `"local"` is used; a non-local origin (`"suggested"`/an author id) is a value to thread through, not a mechanism to build. There is also **no persistent document revision** today: `snapshot.version` is a schema version (the literal `1`) and the handle's `revision` is an in-memory dirty counter that resets per session (`editor-handle.ts:85`) — D15 adds a persisted monotonic revision so a proposal can name the version it was made against.
 
 Destructive delete is today's behavior, and it is the reason Model A is preferred. When text is deleted, the removed `TextSlice` (with its character ids) survives in the inverse step for undo (`steps.ts:53-60`, `editor-store.ts:1454`), but the live document drops those ids. `docs/014 §4` names tombstones (non-destructive delete) as "the one genuinely new cost," collected immediately in the single-user build. Model A never tombstones — the deleted content lives in the base branch, and the diff renders it struck. Model B needs tombstones (§4.13).
 
@@ -210,7 +215,7 @@ The comment system is the review wrapper, and it is ~100% reusable:
 - **The caret affordance** (`view/chrome/comment-affordance.tsx`): a chip anchored to a mark's rect that routes into the dock.
 - **The derived index** (`core/bake/bake.ts:80-102`): `buildDocumentIndex` rolls up `CommentIndexEntry { id, node, kind, text, ref }` off-thread, published live.
 
-The overlay authority supplies the anchored affordance (`docs/029`): the anchor-target spine (`view/spi/anchor-target.ts`) already has a `mark` anchor kind and a `point` kind, supports many simultaneous affordances with collision avoidance, and drives the focus-reclaim seam (`suspendReclaim`/`resumeReclaim`, `overlay-authority.ts:744`). Anchoring an accept/reject control to a change is either a small new `range` anchor kind or reuse of the `mark` anchor. Gutter/change-bar placement is a separate painted layer, outside the authority.
+The overlay authority supplies the anchored affordance (`docs/029`): the anchor-target spine (`view/spi/anchor-target.ts`) already has a `block` anchor kind, a `mark` anchor, and a `point` kind, supports many simultaneous affordances with collision avoidance, and drives the focus-reclaim seam (`suspendReclaim`/`resumeReclaim`, `overlay-authority.ts:744`). The accept/reject control reuses the existing `block` anchor — accept is block-granular (D11), so the control sits at the changed block and **no new anchor kind is needed** (§7.5). The change-bar is not a separate layer either: it is a CSS left-border on the block's diff wrapper (§6.3), so it moves and virtualizes with the block.
 
 ## 4. Architecture Decisions
 
@@ -284,7 +289,7 @@ Rejected — store proposals inside the document: pollutes the live model with p
 
 Recommended: the accept/reject unit is the whole proposal or a single block (a `BlockDiff`). Per-character-run accept is out of scope for the first cut. Display granularity is finer than accept granularity: the overlay still tints per-run insert/delete inside a changed block (§6.3); the user just cannot accept half a paragraph.
 
-Per-run accept multiplies rebase complexity for little value; block-level ops rebase cleanly. This is the user's decision, recorded.
+Per-run accept multiplies conflict-resolution complexity for little value; block-level ops resolve cleanly. This is the user's decision, recorded.
 
 ### 4.12 D12 — Separate The Change From The Conversation
 
@@ -298,6 +303,32 @@ Recommended: reserve Model B (inline suggestions: insertions tagged pending, del
 
 Model B's net-new — tombstones plus read-path filtering plus a convergence rule — is exactly the `docs/014 §7` Tier-1 CRDT work required for collaboration anyway, so it rides that milestone rather than being invented for suggestions (§7.7). Building it first would block every shippable suggestion behind tombstones.
 
+### 4.14 D14 — The Inline Overlay Mounts The Proposed Side And Ghosts Removals
+
+Recommended: while reviewing a proposal, the live editable surface is the **proposed** document, not the base. Apply the proposal's ops to the live store optimistically (`recordHistory: false`, `origin: "suggested"`), so the new content — an added callout, an inserted phrase — is a real, editable node the reviewer can tweak before accepting. The **removed** content (a deleted table, struck text) is not in the proposed store; it renders as a non-editable **ghost** from the diff's base-side node, positioned by `baseIndex`. Accept clears the `suggested` tag and keeps the ops; reject reverts them (a clean inverse, since they were `recordHistory: false`) and drops the ghosts.
+
+This follows from the rule "new content is editable, old content is not": editable new content must be real mounted nodes, which forces the live surface to be the proposed side. The mirror holds for the "changes since my last save" mode — there the live store already *is* the newer side (current), and the removed-since-save content is the ghost, with no optimistic apply. So the general rule is: **the inline overlay mounts the newer side and ghosts the removals from the older side**, and the diff derives the decoration — no suggestion tags baked into the model.
+
+Two bounded caveats. Save safety: the store transiently holds un-accepted content, so a save excludes `origin: "suggested"` ops (or warns/blocks) while a proposal is pending — the tag is the filter. Ghost positioning: a removed block's ghost has no offset-model height, so the affected span renders as a bounded, non-virtualized **review band** (§6.2) rather than injecting phantoms into the virtualized flow.
+
+Rejected — mount the base and ghost the *additions*: the new content is then a non-editable ghost, violating "new is editable" and making it impossible to tweak a suggestion. Rejected — bake per-node suggestion tags into the model (a partial Model B): a model change we do not need, since the diff already tells the view what is inserted vs removed; deriving the decoration keeps the model clean (D9/D12).
+
+### 4.15 D15 — Proposals Are Identity-Anchored; A Document Revision Signals Staleness
+
+Recommended: a proposal's ops carry **identity anchors** (node ids, and character ids at text boundaries via the existing `TextAnchor`), so applying a proposal to a document that moved since it was made is a **merge by identity**, not an offset rebase. Non-overlapping intervening edits do not affect the proposal (the anchors still resolve); an op whose target node or character id was deleted by an intervening edit is a **conflict**, surfaced rather than applied silently. This is the CRDT-native behavior the model was shaped for (`docs/014 §2-§3`): positions are identity, not offset, so "the reviewer typed elsewhere" never disturbs a pending proposal, and only a genuine overlap conflicts. It also resolves the "rebase needs the intervening op-log" worry — there is no log to replay.
+
+Separately, add a persisted **document revision**: a monotonic integer on the snapshot (`revision`, §3.3), incremented per committed transaction, because none exists today (§3.7). `Proposal.baseVersion` is that revision. It is not a rebase key (identity anchoring handles apply); it *detects and labels staleness* ("made against revision N, the document is now N+7") and orders proposals. The revision generalizes to a CRDT state vector under collaboration (`docs/013` "state-vector diffs"); a single integer is its single-user form. It is added additively (optional, defaulting to 0 on a legacy snapshot), so stored documents keep round-tripping.
+
+Rejected — offset rebase through the intervening op-log (`mapStep` over every commit between `baseVersion` and now): it needs the full log retained, but the history pool is byte-capped (`docs/030` SLP-4) and may not hold it, and it re-solves under offsets exactly the drift the identity substrate exists to eliminate. Rejected — a content hash as the version id: it gives identity but not ordering or staleness distance, and hashing a large snapshot per save is wasted work when a counter is O(1). Rejected — no revision at all: the diff still renders, but the reviewer cannot be told a proposal is stale and two proposals cannot be ordered.
+
+### 4.16 D16 — Inline Review Scales By Region, With A Diff-View Fallback
+
+Recommended: the inline overlay renders **one bounded review band per contiguous changed region**, not one band for the whole proposal. Unchanged blocks between two changed regions stay virtualized and live, so a proposal touching block 3 and block 50 produces two small bands with normal editing between them. A single region larger than a threshold — the default: taller than the viewport, roughly 20–30 blocks, tunable — does **not** render inline; the affordance opens that proposal in the dedicated **diff view** (§6.1) instead, which is virtualization-free by construction and built for whole-document comparison.
+
+This bounds the cost D14's non-virtualized band would otherwise incur: a small local change reviews inline where it happens; a large rewrite (an agent restructuring half the document) reviews in the surface built for it. "A proposal touches a small region" becomes a rule with an explicit escape hatch, not an unstated hope.
+
+Rejected — always inline, one band for the whole proposal: a 500-block rewrite renders 500 blocks non-virtualized, defeating virtualization on the exact large-document case it exists for. Rejected — a review-specific offset model that virtualizes the band with measured ghost heights: it scales inline review to any size but is real work (measure every ghost, maintain a second offset model), deferred until a large-inline-review need is proven (§10); the threshold-plus-diff-view fallback ships now and covers the same cases.
+
 ## 5. The Diff Algorithm
 
 ### 5.1 Result Data Shapes
@@ -307,7 +338,8 @@ Defined in `core/diff/types.ts`:
 ```ts
 export type BlockStatus = "unchanged" | "added" | "removed" | "moved" | "changed";
 
-// A "moved" block may also be "changed"; carry both signals rather than collapsing.
+// "moved" = a common id whose order among the surviving blocks changed (LCS-based, §5.4),
+// NOT any index shift from a neighbouring insert/delete; a moved block may also be "changed".
 export type BlockDiff = {
   readonly id: NodeId;
   readonly status: BlockStatus;
@@ -321,6 +353,8 @@ export type BlockDiff = {
   readonly text?: TextLeafDiff;                    // set for a changed text leaf
   readonly object?: ObjectDiff;                    // set for a changed object node
   readonly children?: readonly BlockDiff[];        // set for a structural container (recursive)
+  readonly replacedBy?: NodeId;                    // a "removed" entry links to the "added" one taking its slot
+  readonly replaces?: NodeId;                      // the reverse: an "added" entry standing in for a removed one (§5.4)
 };
 
 export type TextLeafDiff = {
@@ -396,14 +430,14 @@ Resolve both leaves' marks to concrete offsets with `resolveLeafMarks` (`core/mo
 
 ### 5.4 Block Sequence Diff And Move Detection
 
-`diffScope(base, target, scope)` in `core/diff/tree.ts`, run first on the body (`order`) then recursively (§5.5).
+`diffScope(base, target, scope)` in `core/diff/tree.ts`, run first on the body (`order`) then recursively (§5.5). The diff keeps its **own merged order**: each snapshot's `body.order` is unchanged, but neither base order nor target order alone is the display order once blocks were added, removed, or moved, so `diffScope` aligns the two.
 
 1. Compute base and target child-id lists (`body.order` for the body; `node.children` for a container).
-2. `baseIds = Set(base)`, `targetIds = Set(target)`.
-3. Classify each id in the union: target-only → `added`; base-only → `removed`; both → compare payloads (§5.5/§5.6) for `unchanged` vs `changed`, and compare `(parent, index)` for `moved`. A block can be both (`status:"moved"`, `alsoChanged:true`).
-4. Emit `BlockDiff[]` ordered by target index, `removed` interleaved at base index. `baseIndex`/`targetIndex`/`baseParent`/`targetParent` drive move arrows and gutters.
+2. `baseIds = Set(base)`, `targetIds = Set(target)`. Classify by membership: target-only → `added`; base-only → `removed`; both → compare payloads (§5.5/§5.6) for `unchanged` vs `changed`.
+3. Detect moves by **aligning the two order lists, not by comparing absolute indices**. Compute the longest common subsequence of the base and target child-id lists — the same identity alignment §5.2 runs on characters, one level up on block ids. Ids in the LCS keep their relative order and are *not* moves; a common id outside the LCS, or one whose `parent` changed, is `moved` (with `alsoChanged` if its payload also changed). Absolute-index comparison is wrong here: inserting one block shifts every later index, which would flag every following block as moved.
+4. Emit `BlockDiff[]` in the **merged order** — the LCS spine, with `added` slotted at their target position and `removed` at their base position relative to that spine. Nothing is lost: either original order is recoverable (non-added entries by `baseIndex`, non-removed by `targetIndex`), and `baseParent`/`targetParent` drive move connectors and gutters. Within a single gap between two spine blocks, `removed` and `added` entries are paired **positionally 1:1** (first removed ↔ first added, and so on) and linked via `replaces`/`replacedBy`, so the display can show a replacement as one unit; a lone `removed` or lone `added` in a gap is not a replacement.
 
-Parent/index come from one pre-pass per snapshot: walk `order` + `children` once to build `Map<NodeId, {parent, index}>` (the `ParentEntry` shape, `model.ts:285`), making move detection O(1) per node.
+Parent/index come from one pre-pass per snapshot: walk `order` + `children` once to build `Map<NodeId, {parent, index}>` (the `ParentEntry` shape, `model.ts:285`). The LCS runs per scope on the child-id lists; total cost stays near-linear for the shared-lineage case (few edits) and is bounded by standard LCS otherwise.
 
 ### 5.5 Structural Recursion
 
@@ -432,23 +466,35 @@ Document-history review is the first host: fetch two snapshots, call `diffSnapsh
 
 ### 6.2 The Inline Diff Overlay (Live In-Editor)
 
-The inline overlay reviews a proposal against the *current* document, in place, while editing. Its input is `diffSnapshots(currentDoc, proposedDoc)` where `proposedDoc = apply(currentDoc-or-baseVersion, proposal.ops)` (§7). It renders over the live editor content, not a separate page: changed text shows insert/delete tinting inline, added/removed blocks show in flow, and each change carries an anchored accept/reject affordance (§7.5) and, optionally, a comment thread.
+The inline overlay reviews a proposal in place, while editing. Per D14 the live editable surface is the **proposed** document: the proposal's ops are applied to the live store optimistically (`recordHistory: false`, `origin: "suggested"`), so an added callout or an inserted phrase is a real editable node, and the diff is `diffSnapshots(base, proposedLiveStore)`. What the diff reports as `insert`/`added` is decorated but stays editable; what it reports as `delete`/`removed` renders as a non-editable **ghost** from the diff's base-side node, positioned by `baseIndex`.
 
-The overlay is not a second editor. The authoritative document stays the live store; the overlay is a derived decoration layer plus anchored controls, mounted through the same portal seam the selection overlay uses (`react-view.tsx:497`) and anchored through the overlay authority (§3.8). A degenerate case with no attribution and no accept/reject — "show changes since my last save" — is `diffSnapshots(lastSaved, current)` rendered read-only; the suggested-edits case adds attribution, a proposal source, and the accept/reject controls on top of the same overlay.
+Because a removed block's ghost has no offset-model height, the affected contiguous span renders as a bounded, non-editable **review band** rather than phantoms injected into the virtualized flow. The band hooks the seam `QuarantineBlock` uses — `EngineBlock` returns an inert, preserved render before dispatching to the editable renderers (`view/render/quarantine-block.tsx`) — so for a block in the reviewed span it returns the diff render (real editable new content plus removed ghosts) instead of the plain editable surface. Unchanged blocks around the band stay live, so editing continues elsewhere. Accept materializes (clears the `suggested` tag, keeps the ops, dissolves the band); reject reverts the ops and dissolves the band.
+
+Scale is **per region, not per proposal** (D16): each contiguous changed region is its own band, unchanged blocks between stay virtualized and live, and a single region larger than the viewport (~20–30 blocks, tunable) opens in the diff view (§6.1) instead of rendering inline. When the reviewer edits on top of the proposal, the overlay re-diffs **incrementally** — only the commit's `touched` blocks intersected with the proposal's region, coalesced on the scheduler's idle lane (`coalesce:"latest"`), never synchronously on the keystroke path — the same derive-off-thread discipline the document index uses (`docs/027 §2.2`).
+
+The "which side is live" rule generalizes: a proposal mounts the proposed side and ghosts its removals (above); the degenerate "changes since my last save" mode is `diffSnapshots(lastSaved, current)` where the live store already *is* the newer side, so the removed-since-save content is the ghost and there is no optimistic apply. Both feed the same §6.3 decoration.
+
+Save and undo safety: the optimistic ops are `recordHistory: false`, so a reject is a clean inverse and the undo stack is untouched; a save while a proposal is pending excludes `origin: "suggested"` ops (or warns), so un-accepted content is never persisted.
 
 ### 6.3 Shared Decoration
 
-One per-status decoration, used by both surfaces, wrapping the L1 result:
+Decoration has two tiers, because strikethrough is a text-run concept and cannot express a removed table, image, or callout.
+
+**Tier 1 — inline text decoration** (inside a `changed` text leaf, from `TextRunDiff`): an `insert` run is an additive tint (green/success background or underline) and stays editable — it is the new content; a `delete` run is a subtractive tint (red/error background **plus strikethrough**) and is non-editable; a `keep` run is plain. "Changed text" is never one highlight — it is a `delete` run and an `insert` run shown adjacent (for "Hello" → "Hi": `H` plain, `ello` struck non-editable, `i` green editable). Mark changes (`markChanges`) overlay on top, reusing `segmentText`+`wrapMark` for the surviving marks.
+
+**Tier 2 — block-level decoration** (whole blocks, and any non-text block): a **change bar** in the gutter (green `added` / red `removed` / blue `changed` / amber `moved`) plus a per-status block treatment, never inline strikethrough. A `removed` table is the whole block dimmed/desaturated with the red bar and a "removed" badge — not a struck grid. An `added` block gets the green bar and a subtle green wash. A `changed` structural container gets a blue bar while the decoration lives only on its changed *descendants* (recurse `children`) — a one-cell edit does not wash the whole table. A `moved` block gets the amber bar and a connector (side-by-side) or a "moved from ¶N" note (unified).
+
+The change bar is a **CSS left-border on the block's diff wrapper** (a `.rt-diff-*` class), not a separate rail — so it moves and virtualizes with the block and needs no positioning layer; block padding gives it the gutter inset. Per-status render entry points, wrapping the L1 result:
 
 - `unchanged`: `renderBlock(node)` as-is.
-- `added`: `renderBlock(target node)` in an added-tint wrapper (`data-rt-diff="added"`).
-- `removed`: `renderBlock(base node)` in a removed-tint wrapper.
-- `moved`: `renderBlock(target node)` with a moved marker and, side-by-side, a connector; if `alsoChanged`, also the changed decoration.
-- `changed` text leaf: render the leaf but replace its text pass with a `TextRunDiff`-aware pass — `insert` tinted/underlined, `delete` tinted/struck, `keep` plain — reusing `segmentText`+`wrapMark` for surviving marks and overlaying `markChanges`.
-- `changed` object: `renderBlock` plus a field-change summary from `ObjectDiff.fields`.
-- `changed` structural: recurse `children`, so only changed descendants carry decoration.
+- `added`: `renderBlock(target node)` + green bar/wash (`data-rt-diff="added"`); editable in the inline overlay (a real proposed node, D14), read-only in the diff view.
+- `removed`: `renderBlock(base node)` + red bar + dim + "removed" badge; non-editable ghost.
+- `moved`: `renderBlock(target node)` + amber bar + connector/note; if `alsoChanged`, also the changed decoration.
+- `changed` text leaf: the Tier-1 run pass.
+- `changed` object: `renderBlock` + a field-change summary from `ObjectDiff.fields` + blue bar.
+- `changed` structural: blue bar on the container; recurse `children` so only changed descendants carry decoration.
 
-Styling uses the `.rt-*` token contract plus new `.rt-diff-*` classes, shipped in the reader stylesheet (the `docs/028` mechanism). No raw color literals; tokens only, so themes apply.
+Styling uses the `.rt-*` token contract plus new `.rt-diff-*` classes (bars, tints, wash, badge), shipped in the reader stylesheet (the `docs/028` mechanism). No raw color literals; tokens only, so themes apply.
 
 ## 7. Suggested Edits / Track-Changes
 
@@ -469,17 +515,17 @@ export type Proposal = {
   readonly id: string;
   readonly author: ProposalAuthor;              // agent id, or a human user id
   readonly createdAt: string;
-  readonly baseVersion: string;                  // the document version the ops were computed against
-  readonly ops: readonly Step[];                 // the change, in the model's own step algebra
+  readonly baseVersion: number;                  // the document revision (D15) it was made against — a staleness signal, not a rebase key
+  readonly ops: readonly Step[];                 // the change; identity-anchored (node ids + char ids at text boundaries), so apply merges by identity (D15)
   readonly status: "pending" | "accepted" | "rejected";
   readonly threadId?: string;                    // a comment Thread for discussion (§7.6)
 };
 export type ProposalAuthor = { readonly kind: "agent" | "human"; readonly id: string; readonly label: string };
 ```
 
-The proposed document is `applyOps(baseSnapshot, ops)`; the inline diff is `diffSnapshots(currentDoc, proposedDoc)`. Steps are the model's own algebra (`steps.ts:160`), so a proposal expresses text edits, mark changes, block insert/remove/move, object edits, and settings/collection changes with no new vocabulary. Storing ops (not a proposed snapshot) is what makes per-block accept a subset-apply and Model B a reuse (§7.7).
+The proposed document is `applyOps(currentDoc, ops)`; the inline diff is `diffSnapshots(currentDoc, proposedDoc)`. Steps are the model's own algebra (`steps.ts:160`), so a proposal expresses text edits, mark changes, block insert/remove/move, object edits, and settings/collection changes with no new vocabulary. The ops carry **identity anchors** (D15), so `applyOps` resolves each against the *current* document — a non-overlapping intervening edit does not disturb them, and a deleted anchor is a conflict (§7.3). Storing ops (not a proposed snapshot) is what makes per-block accept a subset-apply and Model B a reuse (§7.7).
 
-### 7.3 The Suggestion Source SPI And Rebase
+### 7.3 The Suggestion Source SPI And Applying A Proposal
 
 Proposals are host-owned, a sibling of `CommentSource`:
 
@@ -497,7 +543,7 @@ export type SuggestionSource = {
 
 The host owns storage and lifecycle (a DB, a per-session queue, an async agent's output). The document carries at most an anchor; the change is the op-log the source holds. The Review dock gains a Changes pane registered like the Comments pane (`registerSidePanel({ id: "changes", ... })`), reading proposals filtered to this document.
 
-Rebase: a proposal's ops are anchored to `baseVersion`. If the reviewer has edited since, the base moved. Whole-proposal *display* is robust — `diffSnapshots(current, applyOps(baseVersion, ops))` is a valid diff regardless of drift, so the change always renders. Whole-proposal or per-block *accept* against a moved base needs rebase (`mapStep`, `docs/014 §7`, `docs/011 §6.3` reserves the hook). First cut: when `baseVersion ≠ currentVersion`, mark the proposal "based on an older version" and rebase its ops through the intervening commits before applying; if a rebase conflict makes an op inapplicable, surface it rather than applying silently.
+Staleness and conflict, not offset rebase (D15): a proposal's `baseVersion` (the revision it was made against) tells whether the document moved since. Because the ops are identity-anchored, applying them to the current document is a **merge by identity** — the reviewer's intervening edits *elsewhere* do not disturb the proposal, and only an op whose target node or character id was deleted by an intervening edit is a **conflict**. Whole-proposal *display* is always robust (`diffSnapshots(current, applyOps(current, ops))` resolves anchors against the live doc). On accept, each op resolves its anchor against the current document: a resolved op applies, an unresolved (deleted-anchor) op is surfaced as a conflict on its block, and the rest of the proposal still applies. No intervening op-log is replayed, so the history pool's byte cap (`docs/030` SLP-4) is irrelevant. When `baseVersion ≠ current revision`, the Changes pane labels the proposal "based on an older version" so the reviewer knows some ops may conflict.
 
 ### 7.4 Attribution
 
@@ -505,14 +551,16 @@ Attribution is mostly free (§3.7). Every character the author inserts already c
 
 ### 7.5 Accept And Reject
 
-Accept and reject operate on the proposal's ops at whole or block granularity (D11):
+Under the optimistic-apply model (D14) the proposal's ops are already applied to the live store during review (tagged `origin: "suggested"`, `recordHistory: false`); accept and reject resolve that pending state at whole or block granularity (D11):
 
-- **Accept whole:** apply all `ops` to the live store (rebased if the base moved, §7.3), set `status:"accepted"` via the source, drop the overlay for that proposal.
-- **Reject whole:** set `status:"rejected"`, drop the overlay; the ops are never applied.
-- **Accept block:** apply the subset of `ops` whose target is that block (`BlockDiff.id`); the rest of the proposal stays pending. This is why ops, not a proposed snapshot, are the representation.
-- **Reject block:** drop that block's ops from the proposal (`source.update` with the reduced set); the rest stays pending.
+- **Accept whole:** clear the `suggested` tag on all the proposal's ops so they become permanent document content, set `status:"accepted"` via the source, dissolve the overlay.
+- **Reject whole:** revert all the proposal's ops (a clean inverse, since they were `recordHistory:false`), set `status:"rejected"`, dissolve the overlay.
+- **Accept block:** clear the tag on the subset of `ops` for that block; the rest stay pending. Ops are grouped into the `BlockDiff` they produced **by target node id** — an `insert-node` belongs to the block it creates, a `move-block` to the moved block, a `replace-text` to the leaf it edits — so per-block accept applies exactly that group. This is why ops, not a proposed snapshot, are the representation.
+- **Reject block:** revert that block's ops and drop them from the proposal (`source.update` with the reduced set); the rest stay pending.
 
-The affordance is an anchored control (accept ✓ / reject ✗, and open-thread) rendered by the overlay authority, anchored to the change's range (a new `range` anchor kind, or the `mark` anchor if the change carries a marker, §3.8). It is a `taking`-focus surface so a click does not tear editor focus (the focus-reclaim seam). Many changes show many affordances at once; the authority's collision avoidance positions them.
+(If a proposal is reviewed *without* optimistic apply — a read-only preview against an untouched store — accept instead *applies* the ops, resolving identity anchors against the current document (§7.3). The two modes differ only in when the ops hit the store; the source lifecycle and granularity are identical.)
+
+The affordance is an anchored control (accept ✓ / reject ✗, and open-thread) rendered by the overlay authority, anchored to the changed block via the existing `block` anchor (accept is block-granular, D11; §3.8) — no new anchor kind is needed. It is a `taking`-focus surface so a click does not tear editor focus (the focus-reclaim seam). Many changes show many affordances at once; the authority's collision avoidance positions them.
 
 ### 7.6 The Reuse Map
 
@@ -550,16 +598,20 @@ Suggested edits is async, review-gated collaboration: edits held out of the auth
 - **Structural type change of a matched id.** Mitigation: `changed` with both nodes; render removed-old over added-new.
 - **Object with no `diffData` seam.** Mitigation: shallow `data` compare marks it `changed` at block granularity; never a silent "unchanged" when `data` differs.
 - **Baked-only difference.** Equal `data`, different `baked`. Mitigation: `unchanged` (§5.6); a re-highlight is not a content change.
-- **Proposal against a moved base.** The reviewer edited after the proposal was made. Mitigation: display is robust (re-diff); accept rebases the ops through intervening commits and surfaces an inapplicable op rather than applying silently (§7.3).
-- **Proposal targeting a block the reviewer deleted.** The op's target no longer exists. Mitigation: rebase drops or flags that op; the affordance shows "no longer applies," and the proposal is partially acceptable (the remaining blocks still apply).
-- **Two proposals touching the same block (Model A).** Both render as separate proposals; accepting one rebases the other. If the second becomes inapplicable, it is flagged. Concurrent *interleaving* in one span is out of scope until Model B.
+- **Proposal against a moved base.** The reviewer edited after the proposal was made. Mitigation: identity-anchored apply (D15) — display is always robust (re-diff), and accept resolves each op's anchor against the current document, applying the non-overlapping ops and surfacing a deleted-anchor op as a conflict rather than mis-applying (§7.3). No op-log replay.
+- **Proposal targeting a block the reviewer deleted.** The op's target node id no longer resolves. Mitigation: that op is flagged as a conflict (not silently applied); the affordance shows "no longer applies," and the proposal is partially acceptable (the remaining blocks still apply).
+- **Two proposals touching the same block (Model A).** Both render as separate proposals; accepting one leaves the other's identity-anchored ops to re-resolve against the new state (D15), and an op that then conflicts is flagged. Concurrent *interleaving* in one span is out of scope until Model B.
+- **Un-accepted content leaking into a save.** Optimistic apply (D14) leaves `origin:"suggested"` ops in the store while a proposal is pending. Mitigation: the save path excludes `suggested`-origin ops (or warns/blocks while pending); the tag is the filter, so a save persists only accepted content.
+- **Removed-block ghost positioning.** A ghosted removed block has no offset-model height, so it cannot be injected into the virtualized flow. Mitigation: render the affected span as a bounded, non-virtualized review band (§6.2, D14); a proposal touches a small region, so the band is cheap.
+- **Editing on top of a suggestion.** The reviewer tweaks the proposed (editable) content before accepting. Mitigation: those edits land as further `suggested`-origin ops folded into the proposal (`source.update`); accept keeps them, reject reverts them with the rest.
+- **Over-flagged moves.** A single insertion must not report every following block as `moved`. Mitigation: LCS-based move detection (§5.4) — only a block outside the longest common subsequence of the two orders, or one whose parent changed, is `moved`.
 - **Orphaned proposal / stale thread.** A proposal whose ops all became inapplicable, or a thread whose anchor collapsed. Mitigation: keep-and-flag (the comment orphan pattern, `docs/027`), never silent-drop; the Changes pane surfaces it for manual dismissal.
 - **Tombstone-less deletion display (Model A).** A proposed deletion has no tombstone in the live doc; the struck content comes from the base branch. Mitigation: the overlay reads deleted runs from `diffSnapshots`' base side (`TextRunDiff` `op:"delete"`), so no live-model tombstone is needed.
 - **Two-view drift with the reader.** Mitigation: both surfaces reuse the reader L1; a parity test asserts an `unchanged` block renders identically to the plain reader render (§11).
 
 ## 9. Implementation Backlog
 
-Phased, reviewable, tested. Diff core is R6-A…H; display and suggested edits are R6-I…N.
+Phased, reviewable, tested, and sequenced by shippable milestone: the **diff engine** (R6-A…E) first, then the **diff view** (R6-F…H) — the first shippable feature, document-history review — then the **inline overlay** (R6-I), then **suggested edits** (R6-J…N). Diff core is R6-A…H; display and suggested edits are R6-I…N.
 
 ### R6-A. Diff Types And Scaffolding
 
@@ -637,23 +689,26 @@ Scope: `packages/editor/api/**`, `packages/reader/api/**` (regenerated). Accepta
 
 ### R6-I. The Inline Diff Overlay
 
-Scope: `packages/editor/src/view/overlays/inline-diff-overlay.tsx` (or a reader-diff import mounted in the editor), reusing the §6.3 decoration and the portal seam (`react-view.tsx:497`).
+Scope: `packages/editor/src/view/overlays/inline-diff-overlay.tsx` + the `EngineBlock` review-band hook (`view/render/`), reusing the §6.3 decoration and the `QuarantineBlock` inert-render seam.
 Tasks:
 
-- [ ] Render `diffSnapshots(current, proposed)` over the live content, per-status decoration in place.
-- [ ] "Changes since last save" read-only mode (`diffSnapshots(lastSaved, current)`).
+- [ ] Optimistic apply of a proposal's ops (`recordHistory:false`, `origin:"suggested"`); the review band renders new content editable + removed ghosts (D14, §6.2).
+- [ ] Two-tier decoration (§6.3): Tier-1 inline runs (insert editable / delete struck non-editable); Tier-2 block change-bar gutter rail.
+- [ ] "Changes since last save" mode (`diffSnapshots(lastSaved, current)`, live = newer side, read-only).
+- [ ] Save path excludes `origin:"suggested"` ops while a proposal is pending.
 
-Acceptance: a proposed change shows inline with correct tinting; the read-only mode shows uncommitted changes; the authoritative store is untouched. Tests: `tests/editor/engine-inline-diff.test.ts` + an e2e that applies a proposal and asserts inline decoration.
+Acceptance: a proposed added callout is editable and a removed table shows as a dimmed ghost with a red change-bar (not a struck grid); accepting materializes, rejecting reverts cleanly; a save while pending omits un-accepted content. Tests: `tests/editor/engine-inline-diff.test.ts` + an e2e asserting editable-new / ghost-removed / clean revert.
 
-### R6-J. Proposal Model + Apply/Rebase
+### R6-J. Proposal Model + Identity-Anchored Apply + Document Revision
 
-Scope: `core/diff/proposal.ts` (or `core/suggestions/`), `core/model/mapping.ts` (rebase reuse).
+Scope: `core/diff/proposal.ts` (or `core/suggestions/`), `core/model/model.ts` (add `revision` to the snapshot), `core/store/editor-store.ts` (maintain + bump `revision` per commit).
 Tasks:
 
-- [ ] `Proposal` type (§7.2); `applyProposal(store, proposal)` and `applyProposalBlock(store, proposal, blockId)`.
-- [ ] Rebase ops through intervening commits when `baseVersion ≠ current` (`mapStep`); flag inapplicable ops.
+- [ ] Add a persisted monotonic `revision` to `EditorDocumentSnapshot` (additive/optional, D15, §3.3); the store bumps it per committed transaction and initializes from a loaded snapshot.
+- [ ] `Proposal` type (§7.2, `baseVersion: number`); ops carry identity anchors (node/char ids at boundaries).
+- [ ] `applyProposal(store, proposal)` / `applyProposalBlock(store, proposal, blockId)` resolving anchors against the current document; group ops into blocks by target node id (§7.5); a deleted-anchor op is a surfaced conflict, and the rest still applies.
 
-Acceptance: applying a whole proposal reproduces the proposed snapshot; applying one block applies only that block's ops; a proposal against a moved base rebases or flags. Tests: `engine-proposal-apply.test.ts`.
+Acceptance: applying a whole proposal reproduces the proposed snapshot; applying one block applies only that block's ops; a proposal made against an older revision applies its non-overlapping ops and flags an op whose anchor was deleted, never silently mis-applying; `revision` round-trips and legacy snapshots default to 0. Tests: `engine-proposal-apply.test.ts` (including a moved-base conflict case).
 
 ### R6-K. Suggestion Source SPI + Changes Pane
 
@@ -692,7 +747,7 @@ Scope: regenerate API maps for `Proposal`, `SuggestionSource`, the overlay, the 
 ## 10. Future Backlog
 
 - **Model B — inline tombstoned suggestions.** Concurrent multi-author suggesting in one span: a tombstone flag on `CharacterRun`, read-path filtering, a convergence rule. Rides the collaboration milestone (§4.13, §7.7).
-- **Per-run accept.** Accept/reject a single character run inside a block. Deferred (D11); needs finer rebase.
+- **Per-run accept.** Accept/reject a single character run inside a block. Deferred (D11); needs finer conflict resolution.
 - **Op-log warm path.** Project persisted adjacent-save `Step[]` into a `SnapshotDiff` without a full walk (§3.5).
 - **Word/sentence grouping.** Group `TextRunDiff` runs into word/sentence changes for a calmer display. Display-layer post-processing.
 - **Real-time collaboration.** Live convergence, awareness, multi-peer GC (`docs/013`/`docs/014`); suggested edits is the on-ramp (§7.8).
@@ -702,10 +757,29 @@ Scope: regenerate API maps for `Proposal`, `SuggestionSource`, the overlay, the 
 - `diffSnapshots(base, target)` ships in `core/diff/**`, framework-free, returning `SnapshotDiff` (§5.1), R6-A…E green.
 - Identity path proven: an edit made through commands, captured as two snapshots, diffs back to exactly that edit (the parity oracle `engine-diff-snapshots.test.ts`), including insert/delete text, mark add/remove, block add/remove, reorder-as-move, nested-container edits. Fallback proven: a retyped leaf reports `alignment:"text"`.
 - The diff view (R6-F) and the inline overlay (R6-I) render every status on the reader L1; an `unchanged` block renders identically to the plain reader render (the parity assertion extending `docs/028`).
-- Suggested edits (Model A) ships end to end: a `Proposal` applies whole and per-block (R6-J), the `SuggestionSource` + Changes pane drive lifecycle (R6-K), accept/reject affordances anchor and do not tear focus (R6-L), and changes render attributed (R6-M). Rebase against a moved base applies or flags, never silently mis-applies.
+- Suggested edits (Model A) ships end to end: a `Proposal` applies whole and per-block (R6-J), the `SuggestionSource` + Changes pane drive lifecycle (R6-K), accept/reject affordances anchor on the `block` anchor and do not tear focus (R6-L), and changes render attributed (R6-M). Applying a proposal to a moved document resolves identity anchors: non-overlapping edits do not conflict, a deleted-anchor op is surfaced as a conflict, never silently mis-applied. The snapshot's `revision` round-trips (legacy snapshots default to 0).
 - No product/runtime dependency entered `packages/editor` or `packages/reader`; the architecture lint stays green.
 - `pnpm check` green (format, lint, dup, typecheck, tests, build, `check:docs`, `check:package`); API maps regenerated with the new public symbols documented.
 
 ## 12. Final Model
 
-A diff between two versions of an idco document is an identity problem the model already has the keys for: match blocks by `NodeId`, characters by `CharacterId`, marks by `mark.id`, and every change reads as what it is, not the delete-plus-insert noise a text diff produces. `diffSnapshots` is one pure core function returning one structured result; a dedicated diff view and a live inline overlay both decorate the reader's L1 render with it, inheriting reader↔editor parity instead of re-deriving it. Suggested edits rides on that engine without touching the authoritative document: a proposal is an attributed op-log branch, the inline overlay is the derived diff, accept applies the ops and reject drops them, at whole-proposal or per-block granularity. The change content is ops; the conversation is a comment thread; the affordance is an anchored overlay control; the persistence is a host-owned Suggestion Source — three substrates the editor already has, plus a small range anchor and a Changes pane. Because a proposal is ops, per-block accept is a subset-apply and the eventual Model B (inline tombstones for concurrent multi-author suggesting) is a reuse of the same ops and the same review wrapper, riding the collaboration milestone that has to build tombstones anyway. Suggested edits is async, review-gated collaboration, so building it now is the low-risk on-ramp to the real-time version later, exactly as the identity-addressed model was shaped to allow. The producer of proposals — an in-editor AI action or an external agent — is `docs/037`; this document is where their changes land, are seen, and are accepted or rejected.
+A diff between two versions of an idco document is an identity problem the model already has the keys for: match blocks by `NodeId`, characters by `CharacterId`, marks by `mark.id`, and every change reads as what it is, not the delete-plus-insert noise a text diff produces. `diffSnapshots` is one pure core function returning one structured result; a dedicated diff view and a live inline overlay both decorate the reader's L1 render with it, inheriting reader↔editor parity instead of re-deriving it. Suggested edits rides on that engine without touching the authoritative document: a proposal is an attributed op-log branch, the inline overlay is the derived diff, accept applies the ops and reject drops them, at whole-proposal or per-block granularity. The change content is ops; the conversation is a comment thread; the affordance is an anchored overlay control on the existing `block` anchor; the persistence is a host-owned Suggestion Source — substrates the editor already has, plus a Changes pane. The ops are identity-anchored, so applying a proposal to a document that moved is a merge by identity — the reviewer's edits elsewhere never disturb it, only a genuine overlap conflicts — and a monotonic document `revision` labels staleness without any op-log replay. Because a proposal is ops, per-block accept is a subset-apply and the eventual Model B (inline tombstones for concurrent multi-author suggesting) is a reuse of the same ops and the same review wrapper, riding the collaboration milestone that has to build tombstones anyway. Suggested edits is async, review-gated collaboration, so building it now is the low-risk on-ramp to the real-time version later, exactly as the identity-addressed model was shaped to allow. The producer of proposals — an in-editor AI action or an external agent — is `docs/037`; this document is where their changes land, are seen, and are accepted or rejected.
+
+## 13. Resolved Design Questions
+
+The gaps a decision-completeness pass surfaced, each now closed in the section noted. Nothing here is deferred.
+
+| # | Question | Decision | Where |
+| --- | --- | --- | --- |
+| 1 | What is `baseVersion` / a document revision? | A monotonic `revision` on the snapshot (additive, per-commit); ops are identity-anchored so apply is a merge by identity, not an offset rebase. | D15, §3.3, §3.7, §7.2, §7.3 |
+| 2 | `range` vs `mark` anchor for the accept/reject control? | The existing `block` anchor — accept is block-granular (D11), so no new anchor kind is needed; inline run tinting renders in the block's own pass. | §3.8, §7.5 |
+| 3 | What substrate hosts the gutter change-bar? | A CSS left-border on the per-block diff wrapper (`.rt-diff-*`), not a separate rail — it virtualizes with the block. | §6.3 |
+| 4 | How does the review band scale to scattered/large proposals? | One bounded band per contiguous changed region (unchanged blocks between stay live); a region past a threshold (~viewport / 20–30 blocks) opens in the diff view. | D16, §6.2 |
+| 5 | Does rebase need the intervening op-log? | No — identity-anchored apply replays no log; a deleted anchor is a surfaced conflict. | D15, §7.3 |
+| 6 | How are ops attributed to a block for per-block accept? | Grouped into the `BlockDiff` they produced by target node id (insert-node → the new block, move-block → the moved block). | §7.5 |
+| 7 | When is a remove+add a `replaces` pair? | Positionally 1:1 within a single gap between two LCS-spine blocks; a lone entry is not a replacement. | §5.4 |
+| 8 | Re-diff cadence during live review? | Incremental and block-scoped (commit `touched` ∩ the proposal's region), coalesced on the idle lane, never synchronous per keystroke. | §6.2, §8 |
+| dep | Op-log fast path availability | The cold tree diff is the baseline and ships first; the warm op-log path stays future backlog. | §3.5, §10 |
+| dep | Milestone sequencing | Diff engine → diff view (first shippable) → inline overlay → suggested edits. | §9, §11 |
+
+With these closed, the diff engine, the diff view, and the inline overlay + suggested edits are all decision-complete: no open fork remains between the schema (§5) and the definition of done (§11).
