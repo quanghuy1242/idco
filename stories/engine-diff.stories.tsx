@@ -669,3 +669,54 @@ export const EdgeCases: Story = () => {
     </>,
   );
 };
+
+// --- focused context ---------------------------------------------------------
+
+/** A long document with two scattered edits, shown with context folding (§6.3). */
+export const FocusedContext: Story = () => {
+  const diff = useMemo(() => {
+    const a = alloc("focus");
+    const paras = Array.from({ length: 16 }, (_v, i) =>
+      makeTextNode({
+        content: a.createTextSlice(`Section paragraph number ${i + 1}.`),
+        id: a.createNodeId(),
+      }),
+    );
+    const store = createEditorStore({
+      allocator: a,
+      snapshot: snapshot(paras),
+    });
+    const base = store.toSnapshot();
+    // Edit paragraph 4 and paragraph 13 — far apart, most of the doc unchanged.
+    store.dispatch(
+      store.transaction().replaceText({
+        at: 0,
+        inserted: "Revised: ",
+        node: paras[3]!.id,
+        removed: "",
+      }),
+    );
+    store.dispatch(
+      store.transaction().replaceText({
+        at: 0,
+        inserted: "Also revised: ",
+        node: paras[12]!.id,
+        removed: "",
+      }),
+    );
+    return diffSnapshots(base, store.toSnapshot());
+  }, []);
+  return wrap(
+    <>
+      <DiffView context="focused" diff={diff} />
+      {caption(
+        <>
+          Context folding (docs/036 §6.3): only the changed paragraphs and a
+          band of neighbours render; the long unchanged runs between the two
+          edits collapse to a <code>⋯ N unchanged ⋯</code> separator, so a
+          change is reviewed in place instead of scrolling the whole document.
+        </>,
+      )}
+    </>,
+  );
+};

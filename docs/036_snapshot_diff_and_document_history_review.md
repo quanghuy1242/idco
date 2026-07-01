@@ -459,8 +459,10 @@ Both surfaces render the same `SnapshotDiff` on the reader L1 (D7), sharing one 
 
 Layout modes (a `mode` prop):
 
-- **Unified** — one column, blocks in target order with `removed` interleaved, tinted by status. The default.
-- **Side-by-side** — two columns (base | target), matched blocks aligned by `baseIndex`/`targetIndex`, moves drawn with a connector. Better for large structural change.
+- **Unified** — one column in the merged spine order (target order with `removed` interleaved at its base slot), so a changed document reads top-to-bottom as the new version with edits marked in place. The default.
+- **Side-by-side** — two columns, base | target, **row-aligned**: a matched block (unchanged or changed) occupies one row with its base cell on the left and its target cell on the right; an `added` block leaves a blank **gap** opposite it on the left, a `removed` block a gap on the right (§6.3). Row alignment is the whole point — you compare a block against its counterpart on the same line — so it is built on the LCS spine, not two independently-ordered columns (two independent columns lose the alignment and were the wrong call). Better for large structural change.
+
+Two review affordances the flat surface needs (specified in §6.3): **context folding** — a long run of unchanged blocks between two changes collapses to a `⋯ N unchanged ⋯` separator while ±N blocks of context are kept around each change, so a change is reviewed in place rather than lost in the whole document — and **two-ended moves** — a move names its origin at the destination and, in side-by-side, shows a ghost at both ends so the reader can trace where a block came from and went.
 
 Document-history review is the first host: fetch two snapshots, call `diffSnapshots`, render `<DiffView mode="unified" diff={...} />` with a version picker; `stats` drives a header summary ("+12 −3, 2 moved").
 
@@ -476,25 +478,47 @@ The "which side is live" rule generalizes: a proposal mounts the proposed side a
 
 Save and undo safety: the optimistic ops are `recordHistory: false`, so a reject is a clean inverse and the undo stack is untouched; a save while a proposal is pending excludes `origin: "suggested"` ops (or warns), so un-accepted content is never persisted.
 
-### 6.3 Shared Decoration
+### 6.3 The Decoration Design System
 
-Decoration has two tiers, because strikethrough is a text-run concept and cannot express a removed table, image, or callout.
+A diff is only useful if a human can review it, so the decoration is a small closed vocabulary applied by one set of rules, not per-status ad-hoc styling (the first cut mixed a floating italic note, an inline badge, a "was" chip, and inline flags, so a reader could not tell change from context — that is the failure this section exists to prevent). Five principles govern it.
 
-**Tier 1 — inline text decoration** (inside a `changed` text leaf, from `TextRunDiff`): an `insert` run is an additive tint (green/success background or underline) and stays editable — it is the new content; a `delete` run is a subtractive tint (red/error background **plus strikethrough**) and is non-editable; a `keep` run is plain. "Changed text" is never one highlight — it is a `delete` run and an `insert` run shown adjacent (for "Hello" → "Hi": `H` plain, `ello` struck non-editable, `i` green editable). Mark changes (`markChanges`) overlay on top, reusing `segmentText`+`wrapMark` for the surviving marks.
+1. **Change versus context are visually distinct.** A change is a bordered **change card** — a status-colored left bar, a one-line status header, then the content; unchanged content renders bare, muted, and foldable. A reviewer finds every change by scanning for cards.
+2. **One label system.** Every change states itself with the same **status tag** in the same place — the card header (`✎ Edited`, `＋ Added`, `－ Removed`, `⇅ Moved from ¶5`) — never a floating note in one spot and an inline badge in another.
+3. **Track-changes for text, block-treatment for structure.** A text edit shows inline: an `insert` run is a colored **underline** (the new text), a `delete` run is **strikethrough** (the removed text) — never a filled chip that reads as chrome. A structural change (a whole block added/removed/moved, an object, a table) shows as the card and its tag. Nothing that looks like UI is placed inside prose.
+4. **Moves are two-ended.** A move names its origin at the destination (`Moved from ¶5`, with a direction arrow), and in side-by-side shows a ghost at both the base and target rows in the same color, so the eye can trace where a block came from and went.
+5. **Context, not the whole document.** Unchanged blocks near a change are kept as context; a long unchanged run folds to a `⋯ N unchanged ⋯` separator (§6.1).
 
-**Tier 2 — block-level decoration** (whole blocks, and any non-text block): a **change bar** in the gutter (green `added` / red `removed` / blue `changed` / amber `moved`) plus a per-status block treatment, never inline strikethrough. A `removed` table is the whole block dimmed/desaturated with the red bar and a "removed" badge — not a struck grid. An `added` block gets the green bar and a subtle green wash. A `changed` structural container gets a blue bar while the decoration lives only on its changed *descendants* (recurse `children`) — a one-cell edit does not wash the whole table. A `moved` block gets the amber bar and a connector (side-by-side) or a "moved from ¶N" note (unified).
+The closed set of primitives — tokens only, no raw color literals, so themes apply:
 
-The change bar is a **CSS left-border on the block's diff wrapper** (a `.rt-diff-*` class), not a separate rail — so it moves and virtualizes with the block and needs no positioning layer; block padding gives it the gutter inset. Per-status render entry points, wrapping the L1 result:
+| Primitive | What it is | For |
+| --- | --- | --- |
+| change bar | a left border (3px) in the status color | every card |
+| status tag | an icon + word in the card header (one component) | naming the change |
+| inline insert | a colored underline with a faint tint | added text |
+| inline delete | strikethrough, muted | removed text |
+| move ghost | a thin one-line marker | the *other* end of a move |
+| fold separator | `⋯ N unchanged ⋯` | folded context |
+| gap | a clean blank cell | a side-by-side one-sided row |
+| field summary | `key: base → target` | object/settings/collection detail |
 
-- `unchanged`: `renderBlock(node)` as-is.
-- `added`: `renderBlock(target node)` + green bar/wash (`data-rt-diff="added"`); editable in the inline overlay (a real proposed node, D14), read-only in the diff view.
-- `removed`: `renderBlock(base node)` + red bar + dim + "removed" badge; non-editable ghost.
-- `moved`: `renderBlock(target node)` + amber bar + connector/note; if `alsoChanged`, also the changed decoration.
-- `changed` text leaf: the Tier-1 run pass.
-- `changed` object: `renderBlock` + a field-change summary from `ObjectDiff.fields` + blue bar.
-- `changed` structural: blue bar on the container; recurse `children` so only changed descendants carry decoration.
+Colors: `added` green, `removed` red, `changed` blue, `moved` amber, `unchanged` neutral.
 
-Styling uses the `.rt-*` token contract plus new `.rt-diff-*` classes (bars, tints, wash, badge), shipped in the reader stylesheet (the `docs/028` mechanism). No raw color literals; tokens only, so themes apply.
+The status × block-family matrix — the rule for every combination:
+
+| | text leaf | object | structural container |
+| --- | --- | --- | --- |
+| unchanged | bare context (foldable) | bare | bare |
+| added | card, green, whole block + green wash | card, green, whole block | card, green, whole block |
+| removed | card, red, **text struck through** | card, red, **dimmed** (a table/image cannot be struck) | card, red, dimmed whole |
+| changed | card, blue, **inline track-changes** | card, blue, **field summary** | blue bar on the container; only changed **descendants** decorate, inline, not as nested cards |
+| moved | amber, `Moved from ¶N` + direction; a ghost at both ends in side-by-side | same | same |
+| moved+changed | amber + the changed treatment | amber + field summary | amber + descendant decoration |
+
+Nested scaffolding that must remain an `<li>`/`<tr>`/`<td>` never wears a card (a `<div>` there is invalid HTML) — its change shows through inline track-changes on its content and a tag placed inside the cell/item.
+
+Text-run rules. In **unified** a changed leaf shows the union on one line (`keep` plain, `delete` struck, `insert` underlined — for "Hello" → "Hi": `H` · ~~ello~~ · <u>i</u>). In **side-by-side** the run pass is side-aware: the base cell shows `keep`+`delete` (the old text), the target cell `keep`+`insert` (the new). When the two leaves share no character-id lineage (the §5.2 fallback) the character-level LCS is discarded for display — the old text renders struck and the new inserted as **whole units** rather than interleaved character noise — and the leaf is flagged `heuristic` in the card header, not inline. Mark changes overlay on the surviving runs, reusing `segmentText`+`wrapMark`.
+
+The card is a `.rt-diff-*` wrapper (the bar is its left border, block padding is the gutter inset), shipped in the reader stylesheet the same way `.rt-*` is (docs/028), so it moves and virtualizes with the block and needs no positioning layer. Per-status render entry points wrap the reader's own `renderBlock` result — `unchanged` renders it as-is (byte-identical to the reader, the §11 parity guarantee); `added`/`removed`/`moved` wrap the whole block in the card; `changed` text runs the inline pass; `changed` object appends the field summary; `changed` structural recurses `children` so only changed descendants carry decoration. Both display surfaces (§6.1, §6.2) consume this one system.
 
 ## 7. Suggested Edits / Track-Changes
 

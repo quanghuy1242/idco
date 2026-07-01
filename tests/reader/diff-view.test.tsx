@@ -1,16 +1,15 @@
 // @vitest-environment jsdom
 /**
- * `DiffView` — the dedicated diff surface (docs/036 §6.1, R6-F). These tests feed the REAL
- * engine (`diffSnapshots`) into the REAL reader surface (`<DiffView>`), so they prove three
- * things at once: (1) every block status renders with the right `.rt-diff-*` decoration on the
- * reader L1, tokens only; (2) an `unchanged` block renders identically to the plain `<Reader>`
- * (the R6-F parity assertion, extending docs/028); (3) the editor's `SnapshotDiff` is
- * structurally assignable to the reader's `ReaderSnapshotDiff` with no cast — a host computes
- * the diff with the editor and passes it straight in (the reader-below-editor boundary).
+ * `DiffView` — the dedicated diff surface (docs/036 §6.1/§6.3, R6-F). These tests feed the REAL
+ * engine (`diffSnapshots`) into the REAL reader surface (`<DiffView>`), proving the §6.3 design
+ * system renders on the reader L1: every change is a **change card** with a single **status tag**;
+ * text edits are inline **track-changes** (insert / delete, not chips); a removed text block is
+ * **struck** (still readable); moves are labelled; unchanged blocks are bare/foldable context; and
+ * an `unchanged` block is byte-identical to plain `<Reader>` (the §11 parity assertion). They also
+ * prove the editor's `SnapshotDiff` is assignable to `ReaderSnapshotDiff` with no cast.
  *
- * Text/mark/move edits go through the real store (so they exercise the character-id identity
- * path); structural containers are seeded and edited through the store too, so a changed cell
- * inside an unchanged table is a genuine engine result, not a hand-built diff.
+ * Visual quality (spacing, alignment, hue) is verified separately by the Playwright story capture;
+ * these tests assert structure/semantics.
  */
 import { render, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -74,10 +73,27 @@ function soloDoc(node: EditorNode): EditorDocumentSnapshot {
   };
 }
 
+/** Seed a store from a hand snapshot (containers + their children resolvable). */
+function seededStore(
+  order: NodeId[],
+  blocks: Record<string, ReturnType<typeof makeTextNode>>,
+  allocator: ReturnType<typeof createIdAllocator>,
+): EditorStore {
+  return createEditorStore({
+    allocator,
+    snapshot: { body: { blocks, order }, settings: {}, version: 1 },
+  });
+}
+
 /** Render a diff and return the DiffView root plus a `within` scope. */
 function renderDiff(
   diff: ReturnType<typeof diffSnapshots>,
-  props?: { mode?: "unified" | "side-by-side"; showStats?: boolean },
+  props?: {
+    mode?: "unified" | "side-by-side";
+    showStats?: boolean;
+    context?: "all" | "focused";
+    contextRadius?: number;
+  },
 ) {
   const utils = render(<DiffView diff={diff} {...props} />);
   const root = utils.container.querySelector(".rt-diff-view") as HTMLElement;
@@ -87,7 +103,7 @@ function renderDiff(
 // --- parity (the R6-F guarantee) ---------------------------------------------
 
 describe("DiffView — unchanged parity with the plain reader (R6-F)", () => {
-  it("renders an unchanged block byte-identical to <Reader>, with no diff wrapper", () => {
+  it("renders an unchanged block byte-identical to <Reader>, with no change card", () => {
     const a = createIdAllocator("idco_client_parity");
     const heading = makeTextNode({
       attrs: { tag: "h2" },
@@ -110,22 +126,21 @@ describe("DiffView — unchanged parity with the plain reader (R6-F)", () => {
     const readerOut = render(<Reader value={snapshot} />);
     const diffOut = renderDiff(diffSnapshots(snapshot, snapshot));
 
-    // Same semantic elements, byte-identical outerHTML.
     for (const sel of ["h2", "p"]) {
       const fromReader = readerOut.container.querySelector(sel)!;
       const fromDiff = diffOut.root.querySelector(sel)!;
       expect(fromDiff.outerHTML).toBe(fromReader.outerHTML);
     }
-    // An all-unchanged diff carries zero `.rt-diff-*` block wrappers.
     expect(diffOut.root.querySelector("[data-rt-diff]")).toBeNull();
+    expect(diffOut.root.querySelector(".rt-diff-card")).toBeNull();
     expect(diffOut.q.getByText("No changes")).toBeTruthy();
   });
 });
 
-// --- block statuses ----------------------------------------------------------
+// --- block statuses: the change card + one status tag ------------------------
 
-describe("DiffView — block statuses (§6.3)", () => {
-  it("wraps an added block in a green change bar", () => {
+describe("DiffView — change cards and the status tag (§6.3)", () => {
+  it("wraps an added block in a green card with an 'Added' tag", () => {
     const { store, next, para } = paragraphStore(["a", "b"]);
     const base = store.toSnapshot();
     const newId = next();
@@ -133,26 +148,34 @@ describe("DiffView — block statuses (§6.3)", () => {
       store.transaction().insertNode(store.bodyId, 2, para("c", newId)),
     );
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    const added = root.querySelector('[data-rt-diff="added"]')!;
-    expect(added).toHaveClass("rt-diff", "rt-diff-added");
-    expect(added.textContent).toContain("c");
+    const card = root.querySelector('[data-rt-diff="added"]')!;
+    expect(card).toHaveClass("rt-diff-card", "rt-diff-card-added");
+    const tag = card.querySelector(".rt-diff-tag")!;
+    expect(tag).toHaveClass("rt-diff-tag-added");
+    expect(tag.textContent).toContain("Added");
+    expect(card.querySelector(".rt-diff-card-body")?.textContent).toContain(
+      "c",
+    );
   });
 
-  it("renders a removed block dimmed with a red bar and a badge", () => {
-    const { store, ids } = paragraphStore(["a", "b", "c"]);
+  it("strikes a removed text block (still readable) with a 'Removed' tag", () => {
+    const { store, ids } = paragraphStore(["alpha", "beta", "gamma"]);
     const base = store.toSnapshot();
     store.dispatch(
       store.transaction().removeNode(store.bodyId, 1, store.getNode(ids[1]!)!),
     );
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    const removed = root.querySelector('[data-rt-diff="removed"]')!;
-    expect(removed).toHaveClass("rt-diff-removed");
-    expect(within(removed as HTMLElement).getByText("removed")).toHaveClass(
-      "rt-diff-badge",
+    const card = root.querySelector('[data-rt-diff="removed"]')!;
+    expect(card).toHaveClass("rt-diff-card-removed");
+    expect(card.querySelector(".rt-diff-tag")?.textContent).toContain(
+      "Removed",
     );
+    // The removed text is struck through — present in the DOM, not hidden.
+    const struck = card.querySelector(".rt-diff-struck")!;
+    expect(struck.textContent).toContain("beta");
   });
 
-  it("marks a reordered block as moved (amber) with a moved-from note, not add+remove", () => {
+  it("labels a reordered block 'Moved from ¶N', not delete+add", () => {
     const { store, ids } = paragraphStore(["a", "b", "c"]);
     const base = store.toSnapshot();
     store.dispatch({
@@ -167,21 +190,21 @@ describe("DiffView — block statuses (§6.3)", () => {
       ],
     });
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    const moved = root.querySelector('[data-rt-diff="moved"]')!;
-    expect(moved).toHaveClass("rt-diff-moved");
-    expect(moved.querySelector(".rt-diff-note")?.textContent).toMatch(
-      /moved from position/,
+    const card = root.querySelector('[data-rt-diff="moved"]')!;
+    expect(card).toHaveClass("rt-diff-card-moved");
+    expect(card.querySelector(".rt-diff-tag")?.textContent).toContain("Moved");
+    expect(card.querySelector(".rt-diff-tag-detail")?.textContent).toMatch(
+      /from ¶\d/,
     );
-    // A move is not a delete+add.
     expect(root.querySelector('[data-rt-diff="added"]')).toBeNull();
     expect(root.querySelector('[data-rt-diff="removed"]')).toBeNull();
   });
 });
 
-// --- Tier 1: changed text leaf ------------------------------------------------
+// --- track-changes (inline text) ---------------------------------------------
 
-describe("DiffView — changed text leaf run pass (§5.2, §6.3 Tier 1)", () => {
-  it("tints an inserted phrase green and keeps surrounding text plain", () => {
+describe("DiffView — inline track-changes (§5.2, §6.3)", () => {
+  it("underlines an inserted phrase (no delete run) inside an Edited card", () => {
     const { store, ids } = paragraphStore(["hello world"]);
     const base = store.toSnapshot();
     store.dispatch(
@@ -190,16 +213,15 @@ describe("DiffView — changed text leaf run pass (§5.2, §6.3 Tier 1)", () => 
         .replaceText({ at: 5, inserted: " big", node: ids[0]!, removed: "" }),
     );
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    const ins = root.querySelector(".rt-diff-ins")!;
-    expect(ins.textContent).toBe(" big");
-    // No delete run for a pure insertion.
+    const card = root.querySelector('[data-rt-diff="changed"]')!;
+    expect(card.querySelector(".rt-diff-tag")?.textContent).toContain("Edited");
+    expect(root.querySelector(".rt-diff-ins")?.textContent).toBe(" big");
     expect(root.querySelector(".rt-diff-del")).toBeNull();
   });
 
-  it("shows a substitution as adjacent delete (struck) + insert runs (Hello → Hi)", () => {
+  it("shows a substitution as adjacent delete (struck) + insert (Hello → Hi)", () => {
     const { store, ids } = paragraphStore(["Hello"]);
     const base = store.toSnapshot();
-    // Replace "ello" with "i": H | ello→del | i→ins.
     store.dispatch(
       store
         .transaction()
@@ -211,8 +233,7 @@ describe("DiffView — changed text leaf run pass (§5.2, §6.3 Tier 1)", () => 
     expect(root.textContent).toContain("H");
   });
 
-  it("falls back to a heuristic text alignment badge when the leaf shares no char ids", () => {
-    // Two independent allocators → disjoint character-id lineage → §5.2 fallback.
+  it("renders the disjoint-id fallback as whole old-struck + new-inserted, flagged in the tag", () => {
     const a = createIdAllocator("idco_client_fb_a");
     const b = createIdAllocator("idco_client_fb_b");
     const id = a.createNodeId();
@@ -224,7 +245,13 @@ describe("DiffView — changed text leaf run pass (§5.2, §6.3 Tier 1)", () => 
     const { root } = renderDiff(
       diffSnapshots(soloDoc(baseLeaf), soloDoc(targetLeaf)),
     );
-    expect(root.querySelector(".rt-diff-fallback")).toBeTruthy();
+    // Whole units, not interleaved character noise.
+    expect(root.querySelector(".rt-diff-del")?.textContent).toBe("alpha");
+    expect(root.querySelector(".rt-diff-ins")?.textContent).toBe("alpine");
+    // The heuristic flag lives in the card header, not inline.
+    expect(root.querySelector(".rt-diff-tag-detail")?.textContent).toContain(
+      "rewritten",
+    );
   });
 });
 
@@ -247,10 +274,7 @@ describe("DiffView — mark changes (§5.3)", () => {
         }),
       ),
     );
-    const diff = diffSnapshots(base, store.toSnapshot());
-    const { root } = renderDiff(diff);
-    // The leaf is changed (bold applied); every run is `keep`, so the change shows as the
-    // dotted `.rt-diff-mark` overlay, and the new bold still renders.
+    const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
     expect(root.querySelector(".rt-diff-mark")).toBeTruthy();
     expect(root.querySelector("strong")?.textContent).toBe("hello");
   });
@@ -259,16 +283,14 @@ describe("DiffView — mark changes (§5.3)", () => {
 // --- objects -----------------------------------------------------------------
 
 describe("DiffView — object blocks (§5.6)", () => {
-  const bakedDivider = { kind: "divider", payload: {} };
-
-  it("renders an added object block (divider) with a green bar", () => {
+  it("renders an added object block (divider) as a green card", () => {
     const a = createIdAllocator("idco_client_obj_add");
     const p = makeTextNode({
       content: a.createTextSlice("intro"),
       id: a.createNodeId(),
     });
     const divider = makeObjectNode({
-      baked: bakedDivider,
+      baked: { kind: "divider", payload: {} },
       data: {},
       id: a.createNodeId(),
       status: "ready",
@@ -288,8 +310,7 @@ describe("DiffView — object blocks (§5.6)", () => {
       version: 1,
     };
     const { root } = renderDiff(diffSnapshots(base, target));
-    const added = root.querySelector('[data-rt-diff="added"]')!;
-    expect(added.querySelector("hr")).toBeTruthy();
+    expect(root.querySelector('[data-rt-diff="added"] hr')).toBeTruthy();
   });
 
   it("summarizes a changed object's fields via the diffData seam", () => {
@@ -309,14 +330,13 @@ describe("DiffView — object blocks (§5.6)", () => {
       status: "ready",
       type: "media",
     });
-    // A definition whose diffData reports the `src` field change (D6 seam).
     const diff = diffSnapshots(soloDoc(mediaBase), soloDoc(mediaTarget), {
       getNodeDefinition: (type) =>
         type === "media"
           ? {
-              diffData: (b, t) => {
-                const bo = b as { src?: string };
-                const to = t as { src?: string };
+              diffData: (base, target) => {
+                const bo = base as { src?: string };
+                const to = target as { src?: string };
                 return bo.src === to.src
                   ? []
                   : [
@@ -340,20 +360,8 @@ describe("DiffView — object blocks (§5.6)", () => {
 
 // --- structural recursion ----------------------------------------------------
 
-/** Seed a store from a hand snapshot (containers + their children resolvable). */
-function seededStore(
-  order: NodeId[],
-  blocks: Record<string, ReturnType<typeof makeTextNode>>,
-  allocator: ReturnType<typeof createIdAllocator>,
-): EditorStore {
-  return createEditorStore({
-    allocator,
-    snapshot: { body: { blocks, order }, settings: {}, version: 1 },
-  });
-}
-
 describe("DiffView — structural recursion decorates only changed descendants (§5.5)", () => {
-  it("a changed cell inside a table marks the table changed but only the cell content tinted", () => {
+  it("a changed cell inside a table marks the table Edited but only the cell content tinted", () => {
     const a = createIdAllocator("idco_client_table");
     const para = makeTextNode({
       content: a.createTextSlice("v1"),
@@ -388,14 +396,12 @@ describe("DiffView — structural recursion decorates only changed descendants (
         .replaceText({ at: 2, inserted: "!", node: para.id, removed: "" }),
     );
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    // The table (flow container) carries the changed bar and still renders as a real <table>.
-    const changed = root.querySelector('[data-rt-diff="changed"]')!;
-    expect(changed.querySelector("table")).toBeTruthy();
-    // The changed leaf inside the cell shows the inserted "!" tinted.
+    const card = root.querySelector('[data-rt-diff="changed"]')!;
+    expect(card.querySelector("table")).toBeTruthy();
     expect(root.querySelector("td .rt-diff-ins")?.textContent).toBe("!");
   });
 
-  it("a changed callout child marks the callout changed with the child edit inline", () => {
+  it("a changed callout child marks the callout Edited, tone preserved, edit inline", () => {
     const a = createIdAllocator("idco_client_callout");
     const keep = makeTextNode({
       content: a.createTextSlice("keep me"),
@@ -424,11 +430,8 @@ describe("DiffView — structural recursion decorates only changed descendants (
         .replaceText({ at: 7, inserted: "!", node: edit.id, removed: "" }),
     );
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    const changed = root.querySelector('[data-rt-diff="changed"]')!;
-    // Reuses the reader shell: the callout tone survives.
-    expect(
-      changed.querySelector('[data-rt-callout-tone="warning"]'),
-    ).toBeTruthy();
+    const card = root.querySelector('[data-rt-diff="changed"]')!;
+    expect(card.querySelector('[data-rt-callout-tone="warning"]')).toBeTruthy();
     expect(root.querySelector(".rt-diff-ins")?.textContent).toBe("!");
   });
 
@@ -462,15 +465,11 @@ describe("DiffView — structural recursion decorates only changed descendants (
         .replaceText({ at: 3, inserted: "!", node: two.id, removed: "" }),
     );
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    // A real <ul> with two <li>; the edited item carries the inline insert tint.
     expect(root.querySelectorAll("ul li").length).toBe(2);
     expect(root.querySelector("li .rt-diff-ins")?.textContent).toBe("!");
   });
 
   it("renders a changed STRUCTURAL list item (SN-1 nested) as one valid <li>, not a nested <ul>", () => {
-    // A structural `listitem`: an inner text `listitem` leaf plus a nested paragraph. The reader
-    // has no `renderBlock` shell for it, so a naive render would emit the inner leaf as its own
-    // <ul><li>, producing invalid `ul > ul` markup. It must render as one <li> with the edit inline.
     const a = createIdAllocator("idco_client_snitem");
     const innerLeaf = makeTextNode({
       content: a.createTextSlice("task one"),
@@ -505,15 +504,13 @@ describe("DiffView — structural recursion decorates only changed descendants (
         .replaceText({ at: 8, inserted: "!", node: innerLeaf.id, removed: "" }),
     );
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    // Exactly one <ul> (the inner leaf is inline, not its own list); one valid <li> child.
     expect(root.querySelectorAll("ul").length).toBe(1);
     expect(root.querySelectorAll("ul > li").length).toBe(1);
-    // The nested paragraph still renders, and the inner-leaf edit is tinted inline.
     expect(root.querySelector("li")?.textContent).toContain("a detail line");
     expect(root.querySelector("li .rt-diff-ins")?.textContent).toBe("!");
   });
 
-  it("renders a moved list item without an invalid <span> sibling inside the <ul>", () => {
+  it("renders a moved list item without an invalid <span> sibling, with an inline marker", () => {
     const a = createIdAllocator("idco_client_limove");
     const items = ["one", "two", "three"].map((t) =>
       makeTextNode({
@@ -533,7 +530,6 @@ describe("DiffView — structural recursion decorates only changed descendants (
     ]) as Record<string, ReturnType<typeof makeTextNode>>;
     const store = seededStore([list.id], blocks, a);
     const base = store.toSnapshot();
-    // Move the last item to the front, inside the list container.
     store.dispatch({
       origin: "local",
       steps: [
@@ -546,19 +542,18 @@ describe("DiffView — structural recursion decorates only changed descendants (
       ],
     });
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()));
-    // Three valid <li> and NO <span> emitted as a direct child of the <ul> (the old bug).
     expect(root.querySelectorAll("ul > li").length).toBe(3);
     expect(root.querySelector("ul > span")).toBeNull();
-    // The moved item IS still signalled — an inline "moved" chip lives inside its <li>.
-    const badge = root.querySelector("li > .rt-diff-moved-badge");
-    expect(badge?.textContent).toBe("moved");
+    expect(root.querySelector("li > .rt-diff-moved-marker")?.textContent).toBe(
+      "moved",
+    );
   });
 });
 
 // --- side-by-side ------------------------------------------------------------
 
 describe("DiffView — side-by-side layout (§6.1)", () => {
-  it("renders two columns; an added block appears only in the Target column, not Base", () => {
+  it("renders a 2-column grid with a gap opposite an added block", () => {
     const { store, next, para } = paragraphStore(["alpha", "beta"]);
     const base = store.toSnapshot();
     const newId = next();
@@ -569,17 +564,15 @@ describe("DiffView — side-by-side layout (§6.1)", () => {
       mode: "side-by-side",
     });
     expect(root.querySelector(".rt-diff-cols")).toBeTruthy();
-    const cols = root.querySelectorAll(".rt-diff-col");
-    expect(cols.length).toBe(2);
-    // The added block appears in Target (col 2) but NOT in Base (col 1).
-    expect(cols[0]!.textContent).not.toContain("gamma-new");
-    expect(cols[1]!.textContent).toContain("gamma-new");
+    expect(root.querySelectorAll(".rt-diff-colhead").length).toBe(2);
+    // The added block has no base-side counterpart → a clean gap exists opposite it.
+    expect(root.querySelector(".rt-diff-gap")).toBeTruthy();
+    expect(root.textContent).toContain("gamma-new");
   });
 
-  it("shows the Base column in base order for a reorder (not merged/target order)", () => {
+  it("shows a reorder as the block moved at both ends (two-ended), anchors aligned", () => {
     const { store, ids } = paragraphStore(["one", "two", "three"]);
     const base = store.toSnapshot();
-    // Move "three" (index 2) to the front.
     store.dispatch({
       origin: "local",
       steps: [
@@ -594,12 +587,41 @@ describe("DiffView — side-by-side layout (§6.1)", () => {
     const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()), {
       mode: "side-by-side",
     });
-    const cols = root.querySelectorAll(".rt-diff-col");
-    // Base column keeps base order (one, two, three); Target shows the moved order (three, one, two).
-    const baseText = cols[0]!.textContent ?? "";
-    const targetText = cols[1]!.textContent ?? "";
-    expect(baseText.indexOf("one")).toBeLessThan(baseText.indexOf("three"));
-    expect(targetText.indexOf("three")).toBeLessThan(targetText.indexOf("one"));
+    // "three" is the moved block; it appears at its base row (left) and target row (right),
+    // each as a moved card — two-ended.
+    const moved = root.querySelectorAll('[data-rt-diff="moved"]');
+    expect(moved.length).toBe(2);
+    for (const card of moved) expect(card.textContent).toContain("three");
+    // one/two are unchanged anchors, aligned (no card).
+    expect(root.querySelectorAll("[data-rt-diff]").length).toBe(2);
+  });
+});
+
+// --- context folding ---------------------------------------------------------
+
+describe("DiffView — focused context folding (§6.3)", () => {
+  it("folds far unchanged runs into a separator, keeping the change and its neighbours", () => {
+    const texts = Array.from({ length: 12 }, (_v, i) => `para ${i}`);
+    const { store, ids } = paragraphStore(texts);
+    const base = store.toSnapshot();
+    // Edit only the middle paragraph.
+    store.dispatch(
+      store
+        .transaction()
+        .replaceText({ at: 0, inserted: "X", node: ids[6]!, removed: "" }),
+    );
+    const target = store.toSnapshot();
+    // "all" shows every block, no fold.
+    const all = renderDiff(diffSnapshots(base, target), { context: "all" });
+    expect(all.root.querySelector(".rt-diff-fold")).toBeNull();
+    // "focused" folds the far unchanged blocks.
+    const focused = renderDiff(diffSnapshots(base, target), {
+      context: "focused",
+      contextRadius: 1,
+    });
+    const folds = focused.root.querySelectorAll(".rt-diff-fold");
+    expect(folds.length).toBeGreaterThan(0);
+    expect(focused.root.querySelector('[data-rt-diff="changed"]')).toBeTruthy();
   });
 });
 
@@ -645,7 +667,7 @@ describe("DiffView — stats header (§6.1)", () => {
 // --- edge cases --------------------------------------------------------------
 
 describe("DiffView — edge cases (§8)", () => {
-  it("a kind change (leaf → object) shows removed-old over added-new", () => {
+  it("a kind change (leaf → object) shows a struck removed card over an added card", () => {
     const a = createIdAllocator("idco_client_kind");
     const id = a.createNodeId();
     const asLeaf = makeTextNode({ content: a.createTextSlice("was text"), id });
@@ -659,13 +681,14 @@ describe("DiffView — edge cases (§8)", () => {
     const { root } = renderDiff(
       diffSnapshots(soloDoc(asLeaf), soloDoc(asObject)),
     );
-    expect(
-      root.querySelector('[data-rt-diff="removed"]')?.textContent,
-    ).toContain("was text");
+    const removed = root.querySelector('[data-rt-diff="removed"]')!;
+    expect(removed.querySelector(".rt-diff-struck")?.textContent).toContain(
+      "was text",
+    );
     expect(root.querySelector('[data-rt-diff="added"] hr')).toBeTruthy();
   });
 
-  it("an empty diff (identical snapshots) renders no decoration and a clean stats line", () => {
+  it("an empty diff (identical snapshots) renders no card and a clean stats line", () => {
     const a = createIdAllocator("idco_client_empty");
     const p = makeTextNode({
       content: a.createTextSlice("stable"),
@@ -678,6 +701,7 @@ describe("DiffView — edge cases (§8)", () => {
     };
     const { root, q } = renderDiff(diffSnapshots(s, s));
     expect(root.querySelector("[data-rt-diff]")).toBeNull();
+    expect(root.querySelector(".rt-diff-card")).toBeNull();
     expect(q.getByText("No changes")).toBeTruthy();
   });
 });
