@@ -193,15 +193,24 @@ function wrapMark(
   }
 }
 
-/** Render a leaf's text with its marks as nested L1 elements (mirror of `renderLeafMarks`). */
-function renderLeafMarks(
-  node: ReaderTextNode,
+/**
+ * Render a text span with an already-resolved mark set as nested L1 elements — the reusable
+ * core of `renderLeafMarks`.
+ *
+ * Extracted so a caller that already holds resolved, offset-space marks (the diff view's
+ * changed-leaf run pass, docs/036 §6.3, which wraps each keep/insert/delete run's own text in
+ * the marks covering it) nests them through the *exact* same segmentation + mark-order rule
+ * the whole-leaf render uses — so a marked run in the diff cannot drift from the reader. The
+ * marks must already be resolved to `[from, to)` offsets in this `text`'s coordinate space;
+ * `snapshot` is read only to resolve a glossary term to its definition.
+ */
+export function renderMarkedSpans(
+  text: string,
+  resolved: readonly ReaderResolvedMark[],
   snapshot: ReaderSnapshot,
 ): ReactNode {
-  const resolved = resolveLeafMarks(node);
-  const text = node.content.text;
-  // Empty/unmarked leaf: a bare text node (or a zero-width space so an empty block keeps
-  // its line box), matching the editor's resting leaf.
+  // Empty/unmarked span: a bare text node (or a zero-width space so an empty block keeps its
+  // line box), matching the editor's resting leaf.
   if (resolved.length === 0) return text.length > 0 ? text : "​";
   const segments = segmentText(text, resolved);
   return segments.map((segment) => {
@@ -215,6 +224,14 @@ function renderLeafMarks(
     }
     return <Fragment key={segment.from}>{child}</Fragment>;
   });
+}
+
+/** Render a leaf's text with its marks as nested L1 elements (mirror of `renderLeafMarks`). */
+function renderLeafMarks(
+  node: ReaderTextNode,
+  snapshot: ReaderSnapshot,
+): ReactNode {
+  return renderMarkedSpans(node.content.text, resolveLeafMarks(node), snapshot);
 }
 
 /** The block indent level from `attrs.indent` (set by indent/outdent + Tab), or undefined. */

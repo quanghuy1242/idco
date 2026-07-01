@@ -15,3 +15,8 @@ export * from "./l1";
 
 // The server Reader + projection adapter types (server-safe; no island/client import).
 export * from "./reader";
+
+// The diff view (docs/036 §6.1, R6-F): a pure surface that renders one structured
+// `SnapshotDiff` (from the editor's `diffSnapshots`) on the reader L1, unified or side-by-side.
+// Server-safe; the types are a structural mirror so the editor's result passes straight in.
+export * from "./diff";

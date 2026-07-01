@@ -48,6 +48,22 @@
       ],
       "reason": "Cluster B (note.md §3): same as the table renderer — the reader's L1 table-of-contents renderer mirrors the client @idco/ui TOC across the RSC boundary that forbids reader L1 from importing @idco/ui. Tracked by the retire-content-renderer backlog; collapses when the client renderer is retired in favor of the reader path.",
       "fingerprint": "0d7a0592e6446bbb"
+    },
+    {
+      "files": [
+        "stories/engine-diff.stories.tsx",
+        "tests/editor/engine-markdown-export.test.ts"
+      ],
+      "reason": "Incidental fixture boilerplate. Both build a small owned-model table by hand with the same makeTextNode/makeStructuralNode(tablecell/tablerow/table) node-construction shape (the only way to hand-build a table snapshot); the diff-view story uses it to demo deep structural recursion, the markdown-export test to feed the serializer. No shared logic — nothing to extract.",
+      "fingerprint": "20ef5c5962e729e7"
+    },
+    {
+      "files": [
+        "tests/editor/engine-diff-snapshots.test.ts",
+        "tests/reader/diff-view.test.tsx"
+      ],
+      "reason": "Intentional parallel fixture. The reader diff-view stats test deliberately mirrors the engine oracle's compound-edit sequence (replaceText + insertNode + removeNode) so the exact multi-op edit the engine proves it diffs is also proven to render (added/removed/changed decoration + stats). The shared shape is the point — it ties the view test to the engine oracle — not duplicated logic.",
+      "fingerprint": "76a01a2f44382f02"
     }
   ]
 }

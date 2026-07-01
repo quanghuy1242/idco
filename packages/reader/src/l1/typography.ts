@@ -135,3 +135,67 @@ export const RICH_TEXT_TYPOGRAPHY_CSS =
   // `[&>div>*]:my-0` neutralizer (unlayered CSS wins over @layer utilities), double-spacing
   // the rule against every other block.
   ".rt-hr{border:0;border-top:1px solid color-mix(in oklab, var(--color-base-content, currentColor) 24%, transparent);}";
+
+/**
+ * The diff-view decoration stylesheet (docs/036 §6.3) — the `.rt-diff-*` companion to the
+ * `.rt-*` typography contract, kept as a separate string so a plain editor/reader mount pays
+ * nothing for it: only `DiffView` injects it. It is tokens-only for the same reason the
+ * typography CSS is (docs/036 §6.3 "No raw color literals; tokens only"): a `color-mix` over
+ * DaisyUI theme custom properties (`var(--color-success|error|info|warning)`) with literal
+ * fallbacks, so bars/tints/wash theme correctly and need no Tailwind compilation.
+ *
+ * Two decoration tiers (§6.3), because strikethrough is a text-run concept and cannot express
+ * a removed table or image: Tier 1 is inline run tinting inside a changed text leaf
+ * (`.rt-diff-ins`/`.rt-diff-del`); Tier 2 is the whole-block change bar — a CSS left-border on
+ * the block's diff wrapper (`.rt-diff-*`), NOT a separate rail, so it moves and virtualizes
+ * with the block and needs no positioning layer (Resolved Q3). Change the hue here and every
+ * diff surface (view, and later the inline overlay) moves with it.
+ */
+export const RICH_TEXT_DIFF_CSS =
+  // The diff-view container. A diff view is virtualization-free by construction (§6.1/D16),
+  // so blocks render directly with no content-visibility wrapper.
+  ".rt-diff-view{position:relative;}" +
+  // The stats header summary ("+12 −3, 2 moved") — `stats` drives it (§6.1).
+  ".rt-diff-stats{display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;font-size:0.8em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;padding:0.4rem 0.7rem;margin-bottom:0.9rem;border-radius:var(--radius-box, 0.5rem);background:color-mix(in oklab, var(--color-base-content, currentColor) 5%, transparent);}" +
+  ".rt-diff-stat-added{color:var(--color-success, #16a34a);font-weight:600;}" +
+  ".rt-diff-stat-removed{color:var(--color-error, #dc2626);font-weight:600;}" +
+  ".rt-diff-stat-moved{color:var(--color-warning, #d97706);font-weight:600;}" +
+  ".rt-diff-stat-changed{color:var(--color-info, #0ea5e9);font-weight:600;}" +
+  ".rt-diff-stat-clean{color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);}" +
+  // Tier 2 — the whole-block change bar (a left border) plus a per-status block treatment
+  // (§6.3). The left padding gives the bar its gutter inset.
+  ".rt-diff{position:relative;border-left:3px solid transparent;padding-left:0.65rem;border-radius:2px;}" +
+  ".rt-diff-added{border-left-color:var(--color-success, #16a34a);background:color-mix(in oklab, var(--color-success, #16a34a) 8%, transparent);}" +
+  // A removed block is dimmed/desaturated with the red bar and a badge — never a struck grid.
+  ".rt-diff-removed{border-left-color:var(--color-error, #dc2626);background:color-mix(in oklab, var(--color-error, #dc2626) 7%, transparent);opacity:0.72;filter:saturate(0.6);}" +
+  ".rt-diff-changed{border-left-color:var(--color-info, #0ea5e9);}" +
+  ".rt-diff-moved{border-left-color:var(--color-warning, #d97706);background:color-mix(in oklab, var(--color-warning, #d97706) 6%, transparent);}" +
+  // The per-status badge ("removed"/"moved") and the unified-mode "moved from ¶N" note.
+  ".rt-diff-badge{display:inline-block;font-size:0.62em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:0.05em 0.45em;border-radius:3px;vertical-align:middle;margin-left:0.45em;background:color-mix(in oklab, var(--color-base-content, currentColor) 12%, transparent);color:color-mix(in oklab, var(--color-base-content, currentColor) 78%, transparent);}" +
+  ".rt-diff-note{font-size:0.72em;font-style:italic;color:color-mix(in oklab, var(--color-base-content, currentColor) 58%, transparent);margin-bottom:0.2em;}" +
+  // Tier 1 — inline text decoration inside a changed leaf (§6.3): an insert run is an additive
+  // tint, a delete run a subtractive tint PLUS strikethrough. "Changed text" is never one
+  // highlight — it is a delete run and an insert run shown adjacent.
+  ".rt-diff-ins{background:color-mix(in oklab, var(--color-success, #16a34a) 24%, transparent);border-radius:2px;}" +
+  ".rt-diff-del{background:color-mix(in oklab, var(--color-error, #dc2626) 18%, transparent);border-radius:2px;text-decoration:line-through;text-decoration-color:color-mix(in oklab, var(--color-error, #dc2626) 70%, currentColor);}" +
+  // A mark whose presence or attrs changed (bold added, link re-pointed) — a dotted underline
+  // overlaid on the surviving text, so a mark-only change is visible when every run is `keep`.
+  ".rt-diff-mark{text-decoration-line:underline;text-decoration-style:dotted;text-decoration-color:var(--color-info, #0ea5e9);text-underline-offset:3px;}" +
+  // The alignment:"text" fallback flag — the two leaves shared no character ids, so the run
+  // split is a heuristic character LCS, not identity (§5.2). Flagged so it is observable.
+  ".rt-diff-fallback{display:inline-block;font-size:0.62em;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;margin-left:0.45em;padding:0.02em 0.4em;border-radius:3px;color:var(--color-warning, #d97706);border:1px solid color-mix(in oklab, var(--color-warning, #d97706) 45%, transparent);}" +
+  // A changed object's field-change summary (§6.3 "changed object").
+  ".rt-diff-fields{font-size:0.75em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:color-mix(in oklab, var(--color-base-content, currentColor) 62%, transparent);margin-top:0.3em;list-style:none;padding-left:0;}" +
+  ".rt-diff-fields li{margin:0.1em 0;}" +
+  // A "moved" marker for a non-flow item (an `<li>`/`<td>`) that cannot carry the amber bar: an
+  // inline amber chip placed INSIDE the item's own content (legal there, unlike a sibling), so a
+  // reordered list item / cell is still signalled (§6.3 "a moved block gets … a note").
+  ".rt-diff-moved-badge{display:inline-block;font-size:0.62em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-right:0.4em;padding:0.02em 0.4em;border-radius:3px;vertical-align:middle;color:var(--color-warning, #d97706);border:1px solid color-mix(in oklab, var(--color-warning, #d97706) 45%, transparent);}" +
+  // Side-by-side (§6.1): two independent columns — Base in BASE order, Target in TARGET order —
+  // so each column faithfully represents its own document (a reorder shows the block low on the
+  // left and high on the right, both correct), rather than forcing one merged order onto both.
+  // A moved block keeps its amber treatment in each column; a drawn cross-column connector is a
+  // deferred nicety (§6.1), the per-column ordering is the correctness the connector illustrates.
+  ".rt-diff-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 1.25rem;align-items:start;}" +
+  ".rt-diff-col{min-width:0;}" +
+  ".rt-diff-colhead{font-size:0.72em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);padding-bottom:0.25rem;border-bottom:1px solid color-mix(in oklab, var(--color-base-content, currentColor) 12%, transparent);margin-bottom:0.4rem;}";

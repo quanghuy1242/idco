@@ -18,4 +18,5 @@ export {
   RT_MARK_CLASS,
   rtHeadingClass,
   RICH_TEXT_TYPOGRAPHY_CSS,
+  RICH_TEXT_DIFF_CSS,
 } from "./typography";

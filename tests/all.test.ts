@@ -3,6 +3,7 @@ import { describe as moduleMarker } from "vitest";
 void moduleMarker;
 
 await import("./reader.test");
+await import("./reader/diff-view.test");
 await import("./lib/auth-fetch.test");
 await import("./lib/rich-text.test");
 await import("./ui/alert.test");

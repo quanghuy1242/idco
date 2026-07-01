@@ -9,6 +9,7 @@ export {
   collectHeadings,
   groupListRuns,
   renderBlock,
+  renderMarkedSpans,
   renderRestingDocument,
   renderTableOfContents,
   renderUnit,

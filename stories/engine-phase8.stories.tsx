@@ -9,13 +9,14 @@ import {
   Input,
   type ResourceOption,
 } from "@idco/ui";
-import { Reader } from "@quanghuy1242/idco-reader";
+import { DiffView, Reader } from "@quanghuy1242/idco-reader";
 import {
   OwnedModelEditor,
   RestingDocument,
   bakeObjectData,
   createDefaultBlockRegistry,
   createEditorStoreFromCompat,
+  diffSnapshots,
   importPayloadLexical,
   registerCommand,
   registerCommentSource,
@@ -29,6 +30,7 @@ import {
   type EditorNode,
   type EditorStore,
   type RichTextCompatNode,
+  type SnapshotDiff,
   type UploadImage,
 } from "../packages/editor/src";
 import { createInMemoryCommentSource } from "./_fake-comment-source";
@@ -719,6 +721,17 @@ export const FullEditor: Story = () => {
   const [previewDoc, setPreviewDoc] = useState<EditorDocumentSnapshot | null>(
     null,
   );
+  // Changes (docs/036 §6.1, R6-F): capture a baseline snapshot at mount, then the command
+  // diffs it against the current live document and opens the reader's <DiffView> in a modal —
+  // the document-history review flow (compute the diff with the editor, render it with the
+  // reader, the same reader that renders the published page). Baked so the diff can render
+  // object payloads (media/code/divider) inside removed/added/changed blocks.
+  const baseline = useMemo(
+    () => bakeSnapshotForReader(store.toSnapshot()),
+    [store],
+  );
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [changesDiff, setChangesDiff] = useState<SnapshotDiff | null>(null);
   // Export (docs/030 §7.2): the lossy one-way markdown projection of the live document, shown
   // read-only. `snapshotToMarkdown` reads each object's baked fields, so it is the same open
   // format an "export to markdown" menu would write. Captured at click time from the NATIVE
@@ -782,6 +795,27 @@ export const FullEditor: Story = () => {
       slot: "global.history",
       surfaces: { ribbon: "primary" },
     });
+    // Changes, registered right after Export so it sits next to it (docs/036 §6.1, R6-F). It
+    // diffs the mount-time baseline against the current native snapshot and renders the
+    // structured diff — added/removed/moved/changed with per-run text tints — in a modal.
+    registerCommand({
+      group: "history",
+      icon: "History",
+      id: "story.changes",
+      kind: "button",
+      label: "Changes",
+      run: (ctx) => {
+        setChangesDiff(
+          diffSnapshots(
+            baseline,
+            bakeSnapshotForReader(ctx.store.toSnapshot()),
+          ),
+        );
+        setChangesOpen(true);
+      },
+      slot: "global.history",
+      surfaces: { ribbon: "primary" },
+    });
     // Wire the same host data sources the Reference Blocks story uses (docs/026
     // §6.1) so the image config field browses a real library and `/` can insert a
     // Linked post. Registered here in the first-render initializer (before the
@@ -834,6 +868,7 @@ export const FullEditor: Story = () => {
       unregisterCommand("story.save");
       unregisterCommand("story.preview");
       unregisterCommand("story.export");
+      unregisterCommand("story.changes");
       unregisterDataSource("media");
       unregisterDataSource("posts");
       unregisterCommentSource("comments");
@@ -913,13 +948,31 @@ export const FullEditor: Story = () => {
           value={markdown}
         />
       </ConfirmDialog>
+      {/* Changes: the structured diff of the mount-time baseline vs the current document
+          (docs/036 §6.1, R6-F), rendered by the reader's <DiffView> on the same L1 the
+          published page uses — edit the document, then open Changes to review what moved. */}
+      <ConfirmDialog
+        confirmLabel="Close"
+        hideCancel
+        onConfirm={() => {}}
+        onOpenChange={setChangesOpen}
+        open={changesOpen}
+        size="xl"
+        title="Changes — diff vs the opened version (packages/reader DiffView)"
+      >
+        <div className="max-h-[70vh] overflow-auto p-1">
+          {changesDiff ? <DiffView diff={changesDiff} /> : null}
+        </div>
+      </ConfirmDialog>
       <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
         Try the table: hover it, then use the chrome's cell button (paint
         bucket) to merge a dragged cell range, fill a cell color, or set
         vertical align; hover an edge to insert/delete a row/column; drag a
         column boundary to resize; the gear toggles header row/column. Also:
         toolbar marks, <code># </code>/<code>- </code> shortcuts,{" "}
-        <kbd>Ctrl/Cmd+F</kbd> to find, click the image to edit/upload. Open{" "}
+        <kbd>Ctrl/Cmd+F</kbd> to find, click the image to edit/upload. Edit
+        anything, then <strong>Changes</strong> diffs the current document
+        against the version you opened (docs/036 §6.1). Open{" "}
         <strong>Review</strong> for the document-insight dock (docs/027):
         Comments, Glossary, Insights, Accessibility, and Broken refs — or{" "}
         <strong>View → Outline</strong>. Select text for the flyout’s Comment
