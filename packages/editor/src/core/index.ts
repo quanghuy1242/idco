@@ -58,6 +58,7 @@ export type {
   BlockDefinition,
   NodeAnchor,
   NodeDefinition,
+  NodeHeightHint,
   ObjectNormalizationResult,
   UnknownObjectPolicy,
 } from "./registry";

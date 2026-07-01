@@ -465,6 +465,73 @@ function useEditorFocusWithin(rootRef: RefObject<HTMLElement | null>): boolean {
   return focused;
 }
 
+/** The empty-document placeholder hint's painted position, in root-relative px. */
+type PlaceholderHint = {
+  readonly left: number;
+  readonly top: number;
+  readonly maxWidth: number;
+  readonly text: string;
+};
+
+/** The post-commit painted geometry the overlay holds in state (backlog §3, defect 2). */
+type PaintedGeometry = {
+  readonly rects: readonly OverlayRect[];
+  readonly hint: PlaceholderHint | null;
+};
+
+const EMPTY_PAINTED: PaintedGeometry = { hint: null, rects: [] };
+
+// Sub-pixel tolerance for the painted-geometry equality guard: fractional
+// `getBoundingClientRect` values jitter (fractional DPI, zoom, font swaps), so a
+// strict compare would setState — and re-render — every commit at rest and the
+// layout effect would never settle. Matches the measure-path tolerance in
+// use-virtual-window's `onResize`.
+const PAINT_EPSILON = 0.5;
+
+/**
+ * Whether the newly measured rects + placeholder equal the currently painted ones
+ * within the sub-pixel tolerance. Returning true lets the layout effect keep the
+ * previous state object so React bails the re-render — the guard that stops the
+ * no-deps effect from looping while still repainting the instant anything moves.
+ */
+function samePaintedGeometry(
+  prev: PaintedGeometry,
+  rects: readonly OverlayRect[],
+  hint: PlaceholderHint | null,
+): boolean {
+  if (prev.rects.length !== rects.length) return false;
+  for (let i = 0; i < rects.length; i += 1) {
+    const a = prev.rects[i]!;
+    const b = rects[i]!;
+    if (a.kind !== b.kind || a.node !== b.node || a.color !== b.color) {
+      return false;
+    }
+    if (
+      Math.abs(a.left - b.left) > PAINT_EPSILON ||
+      Math.abs(a.top - b.top) > PAINT_EPSILON ||
+      Math.abs(a.width - b.width) > PAINT_EPSILON ||
+      Math.abs(a.height - b.height) > PAINT_EPSILON
+    ) {
+      return false;
+    }
+  }
+  return samePlaceholder(prev.hint, hint);
+}
+
+function samePlaceholder(
+  a: PlaceholderHint | null,
+  b: PlaceholderHint | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.text === b.text &&
+    Math.abs(a.left - b.left) <= PAINT_EPSILON &&
+    Math.abs(a.top - b.top) <= PAINT_EPSILON &&
+    Math.abs(a.maxWidth - b.maxWidth) <= PAINT_EPSILON
+  );
+}
+
 export function SelectionOverlay(props: {
   readonly store: EditorStore;
   readonly scheduler: EngineScheduler;
@@ -490,16 +557,6 @@ export function SelectionOverlay(props: {
     props;
   const version = useSelectionFrameVersion(store, scheduler);
   void version;
-  // The block refs register during commit — AFTER this overlay's first render read
-  // an empty registry — so the empty-document placeholder (which needs the slot
-  // block's mounted rect) cannot compute on the first paint, and nothing else
-  // re-renders the overlay until the first interaction. Bump once post-mount to
-  // re-render with the registry populated, so the hint shows on load rather than
-  // only after a click (note.md §5.8 second follow-up). The selection frame version
-  // covers every change after that; pre-paint (layout effect) so the hint does not
-  // flash in.
-  const [, setMountTick] = useState(0);
-  useLayoutEffect(() => setMountTick(1), []);
   // The caret/gap is an *insertion* affordance: it must only show while the
   // editor actually holds focus. Painting it on a blurred surface (the previous
   // behavior) is misleading — it implies typing lands there when it does not,
@@ -509,27 +566,61 @@ export function SelectionOverlay(props: {
   // focused text leaf AND the scroller root a gap selection focuses — so a gap
   // cursor paints under virtualization where checking the content div would not.
   const focused = useEditorFocusWithin(focusRootRef ?? rootRef);
-  const allRects = selectionRects(store, rootRef.current, registry.blockRefs);
-  const rects = focused
-    ? allRects
-    : allRects.filter((rect) => rect.kind !== "caret" && rect.kind !== "gap");
-  registry.selectionOverlayRenderCount += 1;
-  registry.selectionRectCount = rects.filter(
-    (rect) => rect.kind !== "preedit",
-  ).length;
-  // The empty-document placeholder, decided per frame from the live model (R2,
-  // note.md §5.8 redo): show only while the slot block exists and is empty. Reading
-  // the model — not the leaf DOM — is what makes it immune to the typing fast path
-  // (which patches the host out of band and skip-notifies the leaf).
-  const placeholderHint = placeholderHintRect(
-    store,
-    placeholder ?? null,
-    rootRef.current,
-    registry.blockRefs,
-  );
-  // Feed IME bounds for the active leaf each frame (docs/010 §7.4, Phase 7 AC4),
-  // so the OS candidate window follows the caret/selection after edits.
-  feedImeBounds(rootRef.current, store, registry);
+  const [painted, setPainted] = useState<PaintedGeometry>(EMPTY_PAINTED);
+  /*
+   * Measure painted geometry AFTER the DOM commits, never during render (backlog
+   * §3, defect 2).
+   *
+   * `selectionRects`/`placeholderHintRect` read `getBoundingClientRect`. Reading
+   * them in the render phase returns the PREVIOUS commit's layout, so on a
+   * virtualized scroll frame that shifts the window — the top spacer grows, blocks
+   * mount/unmount, a height correction lands — the caret/selection rects describe
+   * where the text WAS, not where this commit places it. The painted caret then
+   * trails the scroll by a frame and flickers. A layout effect runs after React
+   * mutates the DOM but before the browser paints, so the rects always match the
+   * just-committed positions and stay glued to the content (the geometry is already
+   * content-relative on the virtualized path: rects are `leaf - contentRoot`, both
+   * inside the scroller, so once measured post-commit they translate with the
+   * content for free).
+   *
+   * No dependency array on purpose: the effect must re-measure after EVERY commit
+   * (selection change, scroll-driven window shift, height correction, focus change,
+   * mount — the block refs also register during commit, so this first sees a
+   * populated registry where a render-phase read saw an empty one, subsuming the
+   * old post-mount tick). The equality guard makes running-every-commit safe — it
+   * returns the previous state object unchanged when nothing moved, so React bails
+   * out of the re-render and the effect does not loop (in jsdom every rect is a
+   * zero DOMRect, so it converges on the first pass).
+   */
+  useLayoutEffect(() => {
+    const all = selectionRects(store, rootRef.current, registry.blockRefs);
+    const nextRects = focused
+      ? all
+      : all.filter((rect) => rect.kind !== "caret" && rect.kind !== "gap");
+    // The empty-document placeholder, decided per frame from the live model (R2,
+    // note.md §5.8 redo): show only while the slot block exists and is empty.
+    // Reading the model — not the leaf DOM — is what makes it immune to the typing
+    // fast path (which patches the host out of band and skip-notifies the leaf).
+    const nextHint = placeholderHintRect(
+      store,
+      placeholder ?? null,
+      rootRef.current,
+      registry.blockRefs,
+    );
+    // Feed IME bounds from the same post-commit geometry so the OS candidate window
+    // follows the caret/selection after edits and scroll (docs/010 §7.4, Phase 7 AC4).
+    feedImeBounds(rootRef.current, store, registry);
+    registry.selectionOverlayRenderCount += 1;
+    registry.selectionRectCount = nextRects.filter(
+      (rect) => rect.kind !== "preedit",
+    ).length;
+    setPainted((prev) =>
+      samePaintedGeometry(prev, nextRects, nextHint)
+        ? prev
+        : { hint: nextHint, rects: nextRects },
+    );
+  });
+  const { hint: placeholderHint, rects } = painted;
   return (
     <div
       aria-hidden="true"

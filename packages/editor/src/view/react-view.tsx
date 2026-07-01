@@ -58,6 +58,7 @@ import { EngineBlock } from "./render";
 import type { EditorPlaceholder } from "./overlays";
 import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
+import { getNodeView } from "./spi";
 import { registerBuiltInMarks } from "./render";
 import { registerBuiltInBlockTypes } from "./spi";
 import type { OverlayAuthority, OverlayAuthorityRef, PanelHost } from "./spi";
@@ -523,7 +524,12 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       if (
         node?.kind === "object" &&
         store.activeObjectId !== id &&
-        !nodeSelected
+        !nodeSelected &&
+        // A `lightweight` object (a divider) renders as cheaply as text, so skip the
+        // placeholder for it — otherwise it flashes a blank box and lands a beat
+        // behind a neighbouring structural block, which is never placeholdered
+        // (docs/025 §5.5, backlog §3).
+        !getNodeView(node.type)?.lightweight
       ) {
         const index = windowRange.startIndex + positionInWindow;
         const model = refs.offsetModelRef.current;

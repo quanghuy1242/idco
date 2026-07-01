@@ -9,10 +9,14 @@
  *   analytic(content)  →  per-type bucket mean  →  global mean
  *
  * Analytic where the document model already predicts height — text from its
- * character count and the content width, code from its line count. For blocks
- * with no content signal (images here carry no dimensions; embeds, dividers,
- * structural containers) the ladder falls to the per-type bucket mean, and with
- * no samples at all to the global mean / default — which is exactly the old
+ * character count and the content width, code from its line count — or where a
+ * node DECLARES its shape through the node SPI (`estimateMetrics`: an `aspect`,
+ * `lines`, or `fixed` signal, backlog §3). A video embed is 16:9 and a reference
+ * card is a near-constant height before their async data resolves, so declaring
+ * that seeds them accurately instead of letting them pop in late on a fast scroll.
+ * For blocks with no such signal (a media image with no dimensions yet; a
+ * structural container) the ladder falls to the per-type bucket mean, and with no
+ * samples at all to the global mean / default — which is exactly the old
  * single-estimate baseline, so the worst case never regresses (docs/025 §5.3).
  *
  * Calibration is "structural formula × one learned correction factor per type"
@@ -28,7 +32,7 @@
  * @categoryDefault Virtual Geometry
  */
 
-/** The content signal a block hands the estimator: text chars, code lines, image aspect, or opaque. */
+/** The content signal a block hands the estimator: text chars, code lines, image aspect, a declared fixed height, or opaque. */
 export type BlockMetrics =
   | { readonly kind: "text"; readonly typeKey: string; readonly chars: number }
   | { readonly kind: "code"; readonly typeKey: string; readonly lines: number }
@@ -37,6 +41,18 @@ export type BlockMetrics =
       readonly typeKey: string;
       // height / width, so height ≈ contentWidth · aspectRatio.
       readonly aspectRatio: number;
+    }
+  // A height a node DECLARES for itself (a reference card, a divider) through the
+  // node SPI's `estimateMetrics` (docs/016, backlog §3). It seeds an object whose
+  // real height its data does not predict analytically — the card is ~constant
+  // regardless of snapshot content — so an async reference block does not fall to
+  // the coarse bucket mean and pop in late on a fast scroll. Still calibrated: the
+  // per-type factor learns declared→measured, so a wrong-but-close declaration
+  // self-corrects rather than sticking.
+  | {
+      readonly kind: "fixed";
+      readonly typeKey: string;
+      readonly height: number;
     }
   | { readonly kind: "opaque"; readonly typeKey: string };
 
@@ -136,6 +152,10 @@ export class BlockEstimator {
           Math.max(1, this.contentWidth * metrics.aspectRatio) +
           this.o.imageChrome
         );
+      case "fixed":
+        // The declared height IS the full block height (chrome included); the
+        // factor calibrates it toward the measured truth, so no extra chrome.
+        return Math.max(1, metrics.height);
       case "opaque":
         return this.o.defaultHeight;
     }

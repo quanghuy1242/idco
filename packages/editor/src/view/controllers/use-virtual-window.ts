@@ -172,7 +172,14 @@ export function useVirtualWindow(args: {
       const cached = heightCacheRef.current.get(id);
       if (cached !== undefined) return cached;
       const node = store.getNode(id);
-      if (node) return estimatorRef.current!.seed(metricsForNode(node));
+      if (node) {
+        // Object nodes may declare their own height signal (docs/025 §5.3, backlog
+        // §3); resolve the definition so `metricsForNode` can consult it. Text and
+        // structural nodes have no object definition, so skip the lookup for them.
+        const definition =
+          node.kind === "object" ? store.registry.get(node.type) : undefined;
+        return estimatorRef.current!.seed(metricsForNode(node, definition));
+      }
       return estimateRef.current;
     };
     const prev = modelOrderRef.current;
@@ -322,10 +329,18 @@ export function useVirtualWindow(args: {
           cache.set(id, height);
           changed = true;
           // Calibrate from real, post-fonts.ready measurements only (docs/025
-          // §5.3) — never a seed, never a fallback-font height.
+          // §5.3) — never a seed, never a fallback-font height. The definition is
+          // passed so a declared-height object (backlog §3) calibrates in the same
+          // per-type bucket its seed came from, closing the seed→measure loop.
           if (fontsReadyRef.current) {
             const node = storeRef.current.getNode(id);
-            if (node) estimator.observe(metricsForNode(node), height);
+            if (node) {
+              const definition =
+                node.kind === "object"
+                  ? storeRef.current.registry.get(node.type)
+                  : undefined;
+              estimator.observe(metricsForNode(node, definition), height);
+            }
           }
         }
       }

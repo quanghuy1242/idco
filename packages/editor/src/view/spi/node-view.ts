@@ -162,6 +162,17 @@ export type NodeView = {
    * this off; a non-editable atom (divider) has no live surface and leaves it off.
    */
   readonly activateOnInsert?: boolean;
+  /**
+   * Whether this object's resting render is cheap enough to run every frame, so the
+   * virtualization *velocity-gated placeholder* is skipped for it (docs/025 §5.5,
+   * backlog §3). The placeholder exists to avoid per-frame decorator work during a
+   * fling — an image decode, an iframe frame, syntax highlighting — so a static atom
+   * gains nothing from it and only pays the cost of flashing a blank box in and out
+   * (the "the divider mounts a beat behind the callout on a fling" report; structural
+   * blocks are never placeholdered, so a bare object read as slower next to them).
+   * A `divider` sets this; media/embed/code/post-ref leave it off. Default off.
+   */
+  readonly lightweight?: boolean;
   readonly insert?: NodeViewInsert;
   /**
    * Per-type metadata the dispatcher reads generically so it keeps no node-type

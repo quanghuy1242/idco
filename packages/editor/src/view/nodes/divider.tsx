@@ -11,6 +11,11 @@ export const dividerView: NodeView = {
   chromeMeta: { icon: "Minus", label: "Divider" },
   // A divider has no settings (docs/020 §5.4), so the gear is hidden.
   configurable: false,
+  // A static rule costs nothing to render, so skip the virtualization fling
+  // placeholder (docs/025 §5.5, backlog §3) — otherwise it flashes a blank box and
+  // mounts a beat behind a structural block (a callout) next to it, which never
+  // placeholders. The placeholder is for objects whose decorator is expensive.
+  lightweight: true,
   insert: {
     createData: () => ({}),
     group: "Blocks",

@@ -12,7 +12,7 @@ Two tracks grew their own implementation-grade docs: #6 (diff, inline review, an
 | --- | --- | --- | --- |
 | 1 | Reflowable EPUB3 + PDF export | decided (reflowable-only); ready to scope | medium (packaging) |
 | 2 | Lossless document format + per-node markdown syntax SPI | designed; ready to build (TS-only) | small–medium |
-| 3 | Virtualization: object-render lag + selection scroll-desync | ready to do | small–medium |
+| 3 | Virtualization: object-render lag + selection scroll-desync | done (2026-07-02, note.md §7) | small–medium |
 | 4 | Columns container (discrete, per-column selection) | decided; ready to scope | small–medium |
 | 5 | Math: block node, then inline atom | block ready; inline is a model extension | small (block) + medium (inline) |
 | 6 | Snapshot diff + inline review + suggested edits | design doc `docs/036` | large |
@@ -55,6 +55,8 @@ Size: small–medium, two independent tracks (the format shapes; the markdown-sy
 ## 3. Virtualization: object-render lag + selection scroll-desync
 
 **Purpose.** These are live UX defects on the *default* (virtualized) path — not features. Object nodes pop in late during fast scroll, causing visible layout jumps, and the painted caret/selection drifts out of sync with the text while scrolling. They degrade the core typing and reading experience for exactly the large documents virtualization exists to serve, so they undercut the editor's baseline feel for its most demanding use case. Ready to do, not large.
+
+**Done (2026-07-02) — the closed record is `note.md §7`.** Both fixes shipped: object nodes now declare an intrinsic-height signal through a new `NodeDefinition.estimateMetrics` seam (so an async reference block seeds at the right height instead of a coarse bucket mean and popping in late — this also recovered code blocks, whose piece-table source the string heuristic had missed), and the selection overlay measures its geometry in a post-commit layout effect (so the painted caret/selection stays glued to the content on a virtualized scroll frame instead of trailing by one commit). `pnpm check` green. The original findings below stand as the problem statement.
 
 Two distinct async races under `virtualize={true}`, separate from the closed B3 focus bug (`note.md §5.3`).
 

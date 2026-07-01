@@ -19,6 +19,7 @@
 import { isRecord } from "@quanghuy1242/idco-lib";
 import type { BlockMetrics } from "./block-estimator";
 import type { EditorNode, JsonValue } from "../model";
+import type { NodeDefinition, NodeHeightHint } from "../registry";
 
 function asRecord(value: JsonValue | undefined): {
   readonly [key: string]: JsonValue;
@@ -40,8 +41,25 @@ function numberField(
  * @categoryDefault Virtual Geometry
  */
 
-/** Map an editor node to the `BlockMetrics` its height estimate is derived from. */
-export function metricsForNode(node: EditorNode): BlockMetrics {
+/**
+ * Map an editor node to the `BlockMetrics` its height estimate is derived from.
+ *
+ * When a `definition` is supplied (the object's `NodeDefinition`) its
+ * `estimateMetrics` hook wins: an object that declares its own height signal —
+ * a 16:9 embed, a reference card, code by line count — seeds accurately before
+ * its async data resolves (docs/025 §5.3, backlog §3). The hook is consulted only
+ * for object nodes and only when it returns a usable signal; otherwise (and for
+ * text/structural nodes, or when no definition is passed) the generic data-shape
+ * heuristics below apply, so callers that omit `definition` keep the old behavior.
+ */
+export function metricsForNode(
+  node: EditorNode,
+  definition?: NodeDefinition,
+): BlockMetrics {
+  if (node.kind === "object" && definition?.estimateMetrics) {
+    const declared = declaredMetrics(node.type, definition, node.data);
+    if (declared) return declared;
+  }
   switch (node.kind) {
     case "text":
       return {
@@ -72,5 +90,51 @@ export function metricsForNode(node: EditorNode): BlockMetrics {
     }
     default:
       return { kind: "opaque", typeKey: "unknown" };
+  }
+}
+
+/**
+ * Resolve an object's declared height signal to `BlockMetrics`, or null when it
+ * declares none / an unusable one (the caller then falls through to the generic
+ * heuristics). The typeKey mirrors the analytic kind the hint maps onto, so a
+ * declared `aspect`/`lines`/`fixed` calibrates in the same per-type bucket as an
+ * analytically-classified block of that type would. Defensive like the rest of
+ * this module: a throwing or nonsense hook costs a coarser seed, never a crash.
+ */
+function declaredMetrics(
+  type: string,
+  definition: NodeDefinition,
+  data: JsonValue | undefined,
+): BlockMetrics | null {
+  let hint: NodeHeightHint | null;
+  try {
+    hint = definition.estimateMetrics!(data ?? null);
+  } catch {
+    return null;
+  }
+  if (!hint) return null;
+  switch (hint.kind) {
+    case "aspect":
+      return Number.isFinite(hint.aspectRatio) && hint.aspectRatio > 0
+        ? {
+            aspectRatio: hint.aspectRatio,
+            kind: "image",
+            typeKey: `image:${type}`,
+          }
+        : null;
+    case "lines":
+      return Number.isFinite(hint.lines) && hint.lines > 0
+        ? {
+            kind: "code",
+            lines: Math.max(1, Math.floor(hint.lines)),
+            typeKey: `code:${type}`,
+          }
+        : null;
+    case "fixed":
+      return Number.isFinite(hint.height) && hint.height > 0
+        ? { height: hint.height, kind: "fixed", typeKey: `fixed:${type}` }
+        : null;
+    default:
+      return null;
   }
 }

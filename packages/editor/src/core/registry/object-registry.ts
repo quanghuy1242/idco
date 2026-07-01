@@ -55,6 +55,25 @@ export type NodeAnchor = {
 };
 
 /**
+ * A node's declared intrinsic-height signal for the virtualization seed ladder
+ * (docs/025 §5.3, backlog §3). An object states how tall it renders from its data
+ * BEFORE it mounts and before its async snapshot (media dimensions, an embed's
+ * iframe) resolves, so the offset model seeds an offscreen block at roughly the
+ * right height instead of a coarse per-type bucket mean — otherwise a reference
+ * block's real height lands only after the user has scrolled past it, jumping the
+ * layout. `aspect` → height ≈ contentWidth · aspectRatio (a 16:9 video, an image
+ * of known ratio); `lines` → a code-like block by its line count; `fixed` → a
+ * card of near-constant pixel height. The estimator still calibrates the declared
+ * value against real measurements (block-estimator), so a close-but-wrong
+ * declaration self-corrects. Pure and DOM-free, worker-safe like the rest of the
+ * SPI.
+ */
+export type NodeHeightHint =
+  | { readonly kind: "aspect"; readonly aspectRatio: number }
+  | { readonly kind: "lines"; readonly lines: number }
+  | { readonly kind: "fixed"; readonly height: number };
+
+/**
  * The framework-free half of the node SPI (docs/016 §6.1).
  *
  * Atomic objects own their opaque data. The engine can store, move, select, and
@@ -104,6 +123,17 @@ export type NodeDefinition = {
   plainText?(data: JsonValue): string;
   /** Indexable internal anchors the object owns (docs/016 §6.1, 011 §2.7). */
   anchors?(data: JsonValue): readonly NodeAnchor[];
+  /**
+   * Declare this object's intrinsic height signal for the virtualization seed
+   * ladder (docs/025 §5.3, backlog §3). Returns a {@link NodeHeightHint} derived
+   * from the object's data so the offset model seeds an offscreen block accurately
+   * before it mounts and before its async snapshot resolves — otherwise a
+   * reference block (media/embed/post-ref) falls to a coarse bucket mean and pops
+   * in late during a fast scroll, jumping the layout. Return `null` when the data
+   * carries no usable signal (the block then falls back to the bucket mean, as
+   * before). Pure and DOM-free, worker-safe like the rest of the SPI.
+   */
+  estimateMetrics?(data: JsonValue): NodeHeightHint | null;
   /**
    * Fine-grained invertible object edit (docs/016 §6.1, 011 §6.5). When omitted
    * the engine inverts object edits with the wholesale `SetObjectData` swap.
@@ -237,6 +267,25 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
         .filter(Boolean)
         .join(" ");
     },
+    // Seed by aspect ratio when the resolved snapshot carries pixel dimensions
+    // (docs/025 §5.3, backlog §3); an image with no dimensions yet has no height
+    // signal (its natural size arrives only when the asset loads), so fall to the
+    // per-type bucket mean by returning null. A host whose media source projects
+    // `width`/`height` (or `aspectRatio`) into the snapshot gets an exact seed.
+    (data) => {
+      const record = isJsonObject(data) ? data : {};
+      const snap = isJsonObject(record.snapshot) ? record.snapshot : {};
+      const width = numberValue(snap.width) ?? numberValue(record.width);
+      const height = numberValue(snap.height) ?? numberValue(record.height);
+      if (width !== undefined && height !== undefined && width > 0) {
+        return { aspectRatio: height / width, kind: "aspect" };
+      }
+      const aspect =
+        numberValue(snap.aspectRatio) ?? numberValue(record.aspectRatio);
+      return aspect !== undefined && aspect > 0
+        ? { aspectRatio: aspect, kind: "aspect" }
+        : null;
+    },
   ),
   simpleObjectDefinition(
     "post-ref",
@@ -278,6 +327,16 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
       const record = isJsonObject(data) ? data : {};
       const snapshot = isJsonObject(record.snapshot) ? record.snapshot : {};
       return stringValue(snapshot.title) ?? "";
+    },
+    // A resolved post-ref renders a near-constant `card` (docs/026 §7.4, reader
+    // `RichTextPostReference`); seed it at that card height (docs/025 §5.3, backlog
+    // §3). An unresolved one (no target post) renders a small inline badge instead,
+    // which has no fixed shape worth declaring — fall to the bucket mean (null).
+    (data) => {
+      const record = isJsonObject(data) ? data : {};
+      const snapshot = isJsonObject(record.snapshot) ? record.snapshot : {};
+      const url = stringValue(snapshot.url) ?? "";
+      return url.length > 0 ? { height: 96, kind: "fixed" } : null;
     },
   ),
   simpleObjectDefinition(
@@ -322,6 +381,16 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
       const loc = isJsonObject(record.local) ? record.local : {};
       return stringValue(loc.title) ?? stringValue(record.title) ?? "";
     },
+    // A configured embed renders a 16:9 iframe (reader `RichTextEmbed`,
+    // `aspect-video`); seed it at that aspect (docs/025 §5.3, backlog §3) so a tall
+    // video does not pop in late on a fast scroll — the case that jumps the layout
+    // most. This holds the moment a URL is set (the `ref`), before `resolve` even
+    // validates it; an empty embed is a small prompt, so fall to the bucket mean.
+    (data) => {
+      const record = isJsonObject(data) ? data : {};
+      const url = stringValue(record.ref) ?? stringValue(record.url) ?? "";
+      return url.length > 0 ? { aspectRatio: 9 / 16, kind: "aspect" } : null;
+    },
   ),
   simpleObjectDefinition(
     "table-of-contents",
@@ -354,6 +423,13 @@ export const BUILT_IN_OBJECT_DEFINITIONS: readonly NodeDefinition[] = [
 function dividerDefinition(): NodeDefinition {
   return {
     bake: () => ({ kind: "divider", payload: {} }),
+    // A divider is a near-zero-height rule (a 1px `<hr>` plus the object wrapper's
+    // 8px vertical padding, docs/025 §5.3 / backlog §3): a constant, tiny footprint.
+    // Without this it seeded from the opaque bucket at the document's mean block
+    // height and then collapsed on mount — the worst pop-in of any block because
+    // the seed/real ratio is the largest. The estimator calibrates the exact pixel
+    // value; this just puts the seed in the right (small) neighbourhood.
+    estimateMetrics: () => ({ height: 24, kind: "fixed" }),
     fromCompatNode: () => ({ data: {}, status: "ready" }),
     normalizeData: () => ({ data: {}, status: "ready" }),
     plainText: () => "",
@@ -400,6 +476,17 @@ function codeBlockDefinition(): NodeDefinition {
     // §2.7, docs/016 §6.1) so find-in-page reaches inside code, not just prose.
     plainText(data) {
       return pieceTableText((isJsonObject(data) ? data : {}).code);
+    },
+    // Seed by line count (docs/025 §5.3, backlog §3). The owned code block stores
+    // its source as a piece table, not a plain string, so the generic
+    // `metricsForNode` string heuristic never fired for it and it seeded as an
+    // opaque bucket — this declares the real signal (lines) instead.
+    estimateMetrics(data) {
+      const code = pieceTableText((isJsonObject(data) ? data : {}).code);
+      return {
+        kind: "lines",
+        lines: code.length === 0 ? 1 : code.split("\n").length,
+      };
     },
     // Field-level diff (docs/036 §5.6/§6.4, D6): the diff core cannot read the piece-table body,
     // so the code block resolves it to plain source text and reports a `code` and/or `language`
@@ -467,17 +554,20 @@ function simpleObjectDefinition(
   fromCompatNode: (node: RichTextCompatNode) => ObjectNormalizationResult,
   bake?: (data: JsonValue) => BakedSnapshot | null,
   plainText?: (data: JsonValue) => string,
+  estimateMetrics?: (data: JsonValue) => NodeHeightHint | null,
 ): NodeDefinition {
   /*
    * Built-in object definitions preserve known fields as JSON-safe data and keep
    * the `baked`/`status` slots alive. The optional `bake` produces the object's
    * static snapshot from that data (Phase 6); when omitted the object has no
    * baker and stays unresolved (docs/010 §7.5 / Phase 6 AC4). The optional
-   * `plainText` is the search/index adapter (011 §2.7, docs/016 §6.1).
+   * `plainText` is the search/index adapter (011 §2.7, docs/016 §6.1). The optional
+   * `estimateMetrics` is the virtualization seed signal (docs/025 §5.3, backlog §3).
    */
   return {
     ...(bake ? { bake } : {}),
     ...(plainText ? { plainText } : {}),
+    ...(estimateMetrics ? { estimateMetrics } : {}),
     fromCompatNode(node) {
       const value = fromCompatNode(node);
       return {

@@ -224,6 +224,7 @@ export {
   type NodeDefinition,
   type BlockDefinition,
   type NodeAnchor,
+  type NodeHeightHint,
   type ObjectNormalizationResult,
   type UnknownObjectPolicy,
   type BakeObjectResult,

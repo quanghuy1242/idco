@@ -17,6 +17,11 @@ const image = (aspectRatio: number): BlockMetrics => ({
   typeKey: "image:media",
 });
 const opaque = (typeKey: string): BlockMetrics => ({ kind: "opaque", typeKey });
+const fixed = (height: number, typeKey = "fixed:post-ref"): BlockMetrics => ({
+  height,
+  kind: "fixed",
+  typeKey,
+});
 
 describe("BlockEstimator — analytic seeds (cold, no calibration)", () => {
   it("is monotonic in content length and width-adaptive for text", () => {
@@ -129,6 +134,34 @@ describe("BlockEstimator — outlier resistance", () => {
     e.observe(text(200), Number.POSITIVE_INFINITY);
     expect(e.seed(text(200))).toBe(before);
     expect(e.globalMean()).toBe(40);
+  });
+});
+
+describe("BlockEstimator — declared fixed height (backlog §3)", () => {
+  it("seeds a declared fixed height cold, before any measurement, and never below 1px", () => {
+    const e = new BlockEstimator();
+    expect(e.seed(fixed(96))).toBe(96);
+    expect(e.seed(fixed(0))).toBeGreaterThanOrEqual(1);
+    // Width-invariant: a card of declared height does not reflow with the column.
+    e.setContentWidth(320);
+    expect(e.seed(fixed(96))).toBe(96);
+  });
+
+  it("gives an async reference block a far better seed than the coarse opaque bucket", () => {
+    // The whole point of the declared signal: a tall video/card seeds near its real
+    // height instead of the ~40px default an unmeasured opaque block starts at.
+    const e = new BlockEstimator({ defaultHeight: 40 });
+    expect(e.seed(opaque("obj:post-ref"))).toBe(40);
+    expect(e.seed(fixed(96))).toBeGreaterThan(e.seed(opaque("obj:post-ref")));
+  });
+
+  it("calibrates the declared height toward the measured truth per type", () => {
+    const e = new BlockEstimator({ alpha: 0.5 });
+    // Declared 96, but this card actually renders 140. Feed the real height.
+    for (let i = 0; i < 30; i += 1) e.observe(fixed(96), 140);
+    expect(e.seed(fixed(96))).toBeCloseTo(140, 0);
+    // A different fixed type calibrates independently.
+    expect(e.seed(fixed(96, "fixed:other"))).toBe(96);
   });
 });
 

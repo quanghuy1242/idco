@@ -129,9 +129,21 @@ export function resolveViewStyle(opts: {
   if (virtualize) {
     return {
       ...base,
+      // Isolate the scroller's layout from its ancestors (backlog §3). A fast fling
+      // mounts/unmounts blocks and rewrites the tall content spacer every frame; `contain:
+      // layout` promises the outside world that none of that churn changes the size or
+      // position of anything outside the scroller, so each frame stays a subtree relayout
+      // instead of a whole-page one. `paint` is deliberately NOT used: portaled overlays
+      // (flyouts/popovers) must not be clipped to the scroller box.
+      contain: "layout",
       height: fillHeight ? "100%" : viewportHeight,
       overflowAnchor: "none",
       overflowY: "auto",
+      // Reserve the vertical scrollbar's gutter always, so the content column keeps
+      // one width whether the scrollbar is showing (mid-fling) or hidden (at rest) —
+      // an auto-hiding/overlay scrollbar otherwise reflows the whole column as it
+      // appears and disappears while scrolling (backlog §3).
+      scrollbarGutter: "stable",
       // Same content inset as the non-virtualized path (was `padding: 0`, which
       // jammed the text against the surface edge — note.md §5.9 follow-up). The
       // caret/selection overlay lives INSIDE the scrolled content div, so it moves
@@ -301,7 +313,16 @@ export const objectBlockStyle: CSSProperties = {
   // Override the surface-wide `cursor: text` (baseViewStyle): an object is not
   // editable text, so it reads with the default arrow, not the I-beam.
   cursor: "default",
-  margin: "4px 0",
+  // Vertical spacing as PADDING, not margin (backlog §3 / docs/025 §5.5). The
+  // wrapper is transparent (no background/border — the only affordance is a
+  // no-layout hover box-shadow), so padding vs margin is visually identical, but
+  // the ResizeObserver measures the border box and NOT margins. A margin here left
+  // the object's true footprint (notably a 1px divider's 8px of spacing) invisible
+  // to the offset model, so `total` under-counted every object and the last block
+  // rendered below `contentRect.bottom` — which floated the end-of-document gap
+  // cursor. Padding is inside the border box, so the measured height is the honest
+  // footprint and the geometry stays exact.
+  padding: "4px 0",
   position: "relative",
 };
 
