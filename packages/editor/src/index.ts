@@ -391,6 +391,29 @@ export {
   type TextSegment,
 } from "./core";
 // ============================================================================
+// Snapshot diff (docs/036 §5, R6-A…E). `diffSnapshots` is one pure, framework-free
+// function that computes a structured, JSON-serializable `SnapshotDiff` between two
+// document snapshots by identity — blocks by NodeId, characters by CharacterId,
+// marks by mark.id — so a move reads as a move, not delete-plus-insert. The diff
+// view, the live inline overlay, and suggested-edits review all consume this one
+// result. The result-shape types are the contract every consumer reads.
+// ============================================================================
+export { diffSnapshots } from "./core";
+export type {
+  AttrDiff,
+  BlockDiff,
+  BlockStatus,
+  CollectionDiff,
+  DiffOptions,
+  DiffStats,
+  MarkChange,
+  ObjectDiff,
+  ObjectFieldChange,
+  SnapshotDiff,
+  TextLeafDiff,
+  TextRunDiff,
+} from "./core";
+// ============================================================================
 // Snapshot lifecycle & performance (docs/030 §7.4–§7.6, SLP). Incremental save is
 // internal to the store; these are the host-configurable knobs and the building
 // blocks for the deferred body-paging follow-on: the memory arbiter and its pool

@@ -26,6 +26,7 @@
  * @categoryDefault Node SPI
  */
 import { isRecord } from "@quanghuy1242/idco-lib";
+import type { ObjectFieldChange } from "../diff/types";
 import type {
   BakedSnapshot,
   JsonValue,
@@ -109,6 +110,14 @@ export type NodeDefinition = {
    */
   applyEdit?(data: JsonValue, patch: JsonValue): JsonValue;
   invertPatch?(patch: JsonValue, dataBefore: JsonValue): JsonValue;
+  /**
+   * Field-level diff of two versions of this object's opaque `data` (docs/036 §5.6,
+   * D6). The mirror of `plainText`/`anchors`: the diff core cannot interpret custom
+   * object data, so it delegates granularity to the object. When omitted the diff
+   * reports the object `changed` at block granularity on any `data` difference,
+   * with no field detail (§8). Pure and DOM-free, like the rest of the SPI.
+   */
+  diffData?(base: JsonValue, target: JsonValue): readonly ObjectFieldChange[];
 };
 
 /**

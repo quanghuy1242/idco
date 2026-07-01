@@ -225,6 +225,39 @@ export {
   type PendingFormat,
   type SchemaProfile,
 } from "./store";
+export { diffSnapshots } from "./diff";
+export {
+  BODY_SCOPE_ID,
+  attrDiffIsEmpty,
+  buildParentIndex,
+  countStats,
+  diffAttrs,
+  diffMarks,
+  diffObject,
+  diffScope,
+  diffSequences,
+  diffTextLeaf,
+  jsonEqual,
+  longestCommonSubsequence,
+  type DiffContext,
+  type ObjectDiffResult,
+  type SequenceOp,
+} from "./diff";
+export type {
+  AttrDiff,
+  BlockDiff,
+  BlockStatus,
+  CollectionDiff,
+  DiffOptions,
+  DiffStats,
+  MarkChange,
+  ObjectDiff,
+  ObjectDiffDefinition,
+  ObjectFieldChange,
+  SnapshotDiff,
+  TextLeafDiff,
+  TextRunDiff,
+} from "./diff";
 export {
   TEXT_FORMAT,
   compatFromEditorStore,
