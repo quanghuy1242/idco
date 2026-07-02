@@ -34,6 +34,15 @@
  *
  * @categoryDefault Typography
  */
+import { diffStatusColor } from "../diff/tokens";
+
+/**
+ * The typography contract exports (docs/015 §4.3). This standalone block is the api-map module header:
+ * the file header above now precedes a value import and is dropped from the emitted `.d.ts`, so the
+ * category default is re-declared here (the `review-model.ts` convention).
+ *
+ * @categoryDefault Typography
+ */
 
 /** The base class every prose block carries; sets the shared line-height baseline. */
 export const RT_BLOCK = "rt-block";
@@ -153,18 +162,23 @@ export const RICH_TEXT_DIFF_CSS =
   ".rt-diff-view{position:relative;}" +
   // Stats header summary ("+12 −3, 2 moved").
   ".rt-diff-stats{display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;font-size:0.8em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;padding:0.4rem 0.7rem;margin-bottom:0.9rem;border-radius:var(--radius-box, 0.5rem);background:color-mix(in oklab, var(--color-base-content, currentColor) 5%, transparent);}" +
-  ".rt-diff-stat-added{color:var(--color-success, #16a34a);font-weight:600;}" +
-  ".rt-diff-stat-removed{color:var(--color-error, #dc2626);font-weight:600;}" +
-  ".rt-diff-stat-moved{color:var(--color-warning, #d97706);font-weight:600;}" +
-  ".rt-diff-stat-changed{color:var(--color-info, #0ea5e9);font-weight:600;}" +
+  // Every status color below reads `diffStatusColor(status)` — the SAME token the card edge and the
+  // woven bar use — so no hex is hand-copied anywhere in the diff palette (docs/039 R-GI/D7, review nit).
+  `.rt-diff-stat-added{color:${diffStatusColor("added")};font-weight:600;}` +
+  `.rt-diff-stat-removed{color:${diffStatusColor("removed")};font-weight:600;}` +
+  `.rt-diff-stat-moved{color:${diffStatusColor("moved")};font-weight:600;}` +
+  `.rt-diff-stat-changed{color:${diffStatusColor("changed")};font-weight:600;}` +
   ".rt-diff-stat-clean{color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);}" +
   // The change card — a status left-bar + a faint wash. The header tag names the change; the body
   // holds the content. This is what makes a change scannable against bare unchanged context.
   ".rt-diff-card{border-left:3px solid transparent;border-radius:0 6px 6px 0;margin:0.55rem 0;padding-bottom:0.1rem;}" +
-  ".rt-diff-card-added{border-left-color:var(--color-success, #16a34a);background:color-mix(in oklab, var(--color-success, #16a34a) 6%, transparent);}" +
-  ".rt-diff-card-removed{border-left-color:var(--color-error, #dc2626);background:color-mix(in oklab, var(--color-error, #dc2626) 6%, transparent);}" +
-  ".rt-diff-card-changed{border-left-color:var(--color-info, #0ea5e9);background:color-mix(in oklab, var(--color-info, #0ea5e9) 5%, transparent);}" +
-  ".rt-diff-card-moved{border-left-color:var(--color-warning, #d97706);background:color-mix(in oklab, var(--color-warning, #d97706) 6%, transparent);}" +
+  // The card's status LEFT-EDGE color is the ONE shared token (docs/039 R-GI/D7): the diff-view card
+  // edge and the woven gutter bar both read `diffStatusColor(status)`, so there is no second palette to
+  // drift. The faint wash is derived from the same color.
+  `.rt-diff-card-added{border-left-color:${diffStatusColor("added")};background:color-mix(in oklab, ${diffStatusColor("added")} 6%, transparent);}` +
+  `.rt-diff-card-removed{border-left-color:${diffStatusColor("removed")};background:color-mix(in oklab, ${diffStatusColor("removed")} 6%, transparent);}` +
+  `.rt-diff-card-changed{border-left-color:${diffStatusColor("changed")};background:color-mix(in oklab, ${diffStatusColor("changed")} 5%, transparent);}` +
+  `.rt-diff-card-moved{border-left-color:${diffStatusColor("moved")};background:color-mix(in oklab, ${diffStatusColor("moved")} 6%, transparent);}` +
   ".rt-diff-card-body{padding:0.05rem 0.8rem 0.1rem;}" +
   // A removed TEXT block is struck through (clearly deleted, still readable); a removed
   // object/table is dimmed (a grid cannot be struck).
@@ -174,14 +188,14 @@ export const RICH_TEXT_DIFF_CSS =
   ".rt-diff-tag{display:flex;align-items:baseline;gap:0.35em;font-size:0.66em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:0.3rem 0.8rem 0.1rem;}" +
   ".rt-diff-tag-icon{font-weight:400;}" +
   ".rt-diff-tag-detail{text-transform:none;font-weight:500;opacity:0.75;letter-spacing:0;}" +
-  ".rt-diff-tag-added{color:var(--color-success, #16a34a);}" +
-  ".rt-diff-tag-removed{color:var(--color-error, #dc2626);}" +
-  ".rt-diff-tag-changed{color:var(--color-info, #0ea5e9);}" +
-  ".rt-diff-tag-moved{color:var(--color-warning, #d97706);}" +
+  `.rt-diff-tag-added{color:${diffStatusColor("added")};}` +
+  `.rt-diff-tag-removed{color:${diffStatusColor("removed")};}` +
+  `.rt-diff-tag-changed{color:${diffStatusColor("changed")};}` +
+  `.rt-diff-tag-moved{color:${diffStatusColor("moved")};}` +
   // Inline track-changes: insert = colored underline + faint tint (reads as new text, not a chip);
   // delete = strikethrough, muted (the removed text stays readable).
-  ".rt-diff-ins{text-decoration:underline;text-decoration-color:var(--color-success, #16a34a);text-decoration-thickness:2px;text-underline-offset:2px;background:color-mix(in oklab, var(--color-success, #16a34a) 9%, transparent);border-radius:2px;}" +
-  ".rt-diff-del{text-decoration:line-through;text-decoration-color:color-mix(in oklab, var(--color-error, #dc2626) 60%, currentColor);color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);}" +
+  `.rt-diff-ins{text-decoration:underline;text-decoration-color:${diffStatusColor("added")};text-decoration-thickness:2px;text-underline-offset:2px;background:color-mix(in oklab, ${diffStatusColor("added")} 9%, transparent);border-radius:2px;}` +
+  `.rt-diff-del{text-decoration:line-through;text-decoration-color:color-mix(in oklab, ${diffStatusColor("removed")} 60%, currentColor);color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);}` +
   // A mark whose presence/attrs changed over surviving text — a dotted info underline.
   ".rt-diff-mark{text-decoration-line:underline;text-decoration-style:dotted;text-decoration-color:var(--color-info, #0ea5e9);text-underline-offset:3px;}" +
   // A change nested inside a changed container decorates inline (no nested card): a thin bar+wash.

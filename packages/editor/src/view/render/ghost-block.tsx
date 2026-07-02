@@ -48,10 +48,12 @@ import { visuallyHiddenStyle } from "../styles";
 // (it carries `data-engine-block-id`, docs/039 R-GI), the same bar every other change wears. A hidden
 // label keeps the status announced for assistive tech since the word is no longer painted (R-NL).
 const GHOST_BOX: CSSProperties = {
-  // Vertical spacing lives in PADDING, not margin (docs/038 §5.2): the ResizeObserver reads
-  // `borderBoxSize`, which excludes margin, so a margined ghost would leak height from the treap's
-  // aggregate total. Padding is inside the border box, so the treap measures the full footprint.
-  padding: "0.3rem 0",
+  // Match the live text block's inset (`blockStyle`, styles.ts: 5px/8px) so a removed paragraph's struck
+  // text lines up EXACTLY with the surrounding live prose — otherwise the ghost sat 8px further left than
+  // its neighbours (the visible indent mismatch). Spacing lives in PADDING, not margin (docs/038 §5.2):
+  // the ResizeObserver reads `borderBoxSize` (margin-excluded), so a margined ghost would leak height
+  // from the treap's aggregate total; padding is inside the border box, so it measures the full footprint.
+  padding: "5px 8px",
   // Inert: the caret cannot enter and no text selection lands here, so the block reads as an atomic
   // widget (docs/038 §3). Position relative so geometry reads a stable rect and the gutter bar anchors.
   pointerEvents: "none",
@@ -79,8 +81,13 @@ export function GhostBlock(props: {
   const { node, registerBlock } = props;
   const text = ghostText(node);
   return (
+    // NOT aria-hidden (docs/039 R-NL/§14 AX): an `aria-hidden` box would also hide the sr-only label
+    // below, so the removal would announce NOTHING. Instead the box stays in the a11y tree as an inert
+    // (`contentEditable=false`, `pointer-events:none`, caret skips it via `store.order`) region: a
+    // screen reader reads the sr-only "removed {type}" status the visual bar drops, then the `<del>`
+    // (implicit `role="deletion"`) content. The block is never a geometry-counted leaf, so this is
+    // AX-only and touches no offset math.
     <div
-      aria-hidden="true"
       contentEditable={false}
       data-engine-block-id={node.id}
       data-engine-ghost={node.type}
@@ -88,8 +95,8 @@ export function GhostBlock(props: {
       style={GHOST_BOX}
     >
       {/* Announced, never painted (docs/039 R-NL): the red gutter bar carries the visual status. */}
-      <span style={visuallyHiddenStyle}>removed {node.type}</span>
-      {text ? <span style={GHOST_TEXT}>{text}</span> : null}
+      <span style={visuallyHiddenStyle}>removed {node.type}: </span>
+      {text ? <del style={GHOST_TEXT}>{text}</del> : null}
     </div>
   );
 }

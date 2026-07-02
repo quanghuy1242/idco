@@ -2,6 +2,7 @@ import type { Story, StoryDefault } from "@ladle/react";
 import { useMemo, useRef, useState } from "react";
 import {
   applyProposalToStore,
+  blockDiffIndex,
   createDefaultBlockRegistry,
   createEditorStore,
   createIdAllocator,
@@ -12,6 +13,8 @@ import {
   nodeDiffRendererResolver,
   OwnedModelEditor,
   proposalAttribution,
+  revertLiveProposalApplication,
+  revertLiveProposalBlock,
   REVIEW_INDICATOR_CSS,
   ReviewCursorSurface,
   ReviewElementDetail,
@@ -25,6 +28,7 @@ import {
   type OwnedModelEditorHandle,
   type Proposal,
   type ProposalAuthor,
+  type SnapshotDiff,
   type Step,
 } from "../packages/editor/src";
 import {
@@ -66,6 +70,25 @@ const CODE_AFTER =
 const codeDef = createDefaultBlockRegistry().require("code-block");
 const codeData = (source: string) =>
   codeDef.normalizeData({ code: source, language: "ts" }).data;
+
+/** Project the diff down to the one block under the cursor (docs/039 §6 T3) — a scoped drill-in. */
+function scopedTo(diff: SnapshotDiff, id: NodeId): SnapshotDiff {
+  const block = blockDiffIndex(diff).get(id);
+  if (!block) return diff;
+  const stats = { added: 0, changed: 0, moved: 0, removed: 0 };
+  if (block.status === "added") stats.added = 1;
+  else if (block.status === "removed") stats.removed = 1;
+  else if (block.status === "moved") stats.moved = 1;
+  else stats.changed = 1;
+  return {
+    base: diff.base,
+    blocks: [block],
+    collections: [],
+    settingsChanged: false,
+    stats,
+    target: diff.target,
+  };
+}
 
 /** Build the reviewed document as a snapshot (the pre-proposal baseline). */
 function buildBaseline(): {
@@ -189,7 +212,10 @@ function authorProposal(
     ops.push(...committed.steps),
   );
 
-  // 1. A text edit (id-anchored, so it reads as inline track-changes, not a whole-block rewrite).
+  // 1. A text edit with BOTH an insert and an inline DELETE (id-anchored → inline track-changes): a
+  //    prepended insert, then a substitution so R-T1's insert-wash AND struck delete-ghost both render
+  //    (a pure insert would never exercise the inline delete-ghost + geometry-skip path). The second
+  //    op reads the CURRENT (post-prepend) text to locate the word, so the offsets stay correct.
   authoring.dispatch(
     authoring.transaction().replaceText({
       at: 0,
@@ -198,6 +224,18 @@ function authorProposal(
       removed: "",
     }),
   );
+  const introText = authoring.requireTextNode(ids.intro).content.text;
+  const subAt = introText.indexOf("small edits");
+  if (subAt >= 0) {
+    authoring.dispatch(
+      authoring.transaction().replaceText({
+        at: subAt,
+        inserted: "targeted revisions",
+        node: ids.intro,
+        removed: "small edits",
+      }),
+    );
+  }
   // 2. Re-color the table cell's fill (→ ring → chip).
   authoring.command({
     key: "backgroundColor",
@@ -230,7 +268,7 @@ function authorProposal(
 }
 
 export const ReviewAnAgentProposal: Story = () => {
-  const [{ baseline, ids, proposal, store }] = useState(() => {
+  const [{ application, baseline, proposal, store }] = useState(() => {
     const built = buildBaseline();
     const prop = authorProposal(built.snapshot, built.ids);
     const reviewer = createEditorStore({
@@ -241,17 +279,22 @@ export const ReviewAnAgentProposal: Story = () => {
       pendingOps: prop.ops.length,
       proposalId: prop.id,
     });
-    applyProposalToStore(reviewer, prop);
+    // The optimistic apply's result — the per-op inverses reject replays (docs/039 §16, J6). Kept so
+    // "Reject all" / "Reject block" actually REVERT the proposal, not just end the mode.
+    const app = applyProposalToStore(reviewer, prop);
     return {
+      application: app,
       baseline: built.snapshot,
-      ids: built.ids,
       proposal: prop,
       store: reviewer,
     };
   });
 
   const [reviewing, setReviewing] = useState(true);
-  const [showDiff, setShowDiff] = useState(false);
+  const [viewDiffId, setViewDiffId] = useState<NodeId | null>(null);
+  const [resolved, setResolved] = useState<ReadonlySet<NodeId>>(
+    () => new Set(),
+  );
   const editorRef = useRef<OwnedModelEditorHandle>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const getNodeDiff = useMemo(() => nodeDiffRendererResolver(), []);
@@ -277,6 +320,26 @@ export const ReviewAnAgentProposal: Story = () => {
     store.endReviewMode();
     setReviewing(false);
   };
+  // Accept-all keeps the optimistically-applied content and exits (§16). Reject-all REVERTS it: replay
+  // the reviewer's in-review edits, then invert the proposal's optimistic apply, then exit — so the doc
+  // returns to the baseline, visibly different from accept (the finding: reject was a no-op).
+  const acceptAll = finish;
+  const rejectAll = () => {
+    store.revertReviewEdits();
+    revertLiveProposalApplication(store, application);
+    finish();
+  };
+  // Per-block resolution (§16, the DoD's "accept/reject WHOLE AND per block"): reject-block inverts just
+  // that block's ops in place (a hard segment boundary); accept-block keeps its content. Both clear the
+  // block from the pending set so its marker resolves.
+  const resolveBlock = (id: NodeId, revert: boolean) => {
+    if (resolved.has(id)) return;
+    store.markReviewResolutionBoundary();
+    if (revert) revertLiveProposalBlock(store, application, id);
+    const next = new Set(resolved).add(id);
+    setResolved(next);
+    store.setReviewPendingOps(Math.max(0, proposal.ops.length - next.size));
+  };
 
   return (
     <div style={{ maxWidth: 960 }}>
@@ -297,10 +360,12 @@ export const ReviewAnAgentProposal: Story = () => {
             attribution={attribution}
             cursor={cursor}
             focusEditor={() => editorRef.current?.getEditorHandle().focus()}
-            onAcceptAll={finish}
+            onAcceptAll={acceptAll}
+            onAcceptBlock={(id) => resolveBlock(id, false)}
             onExit={finish}
-            onRejectAll={finish}
-            onViewDiff={() => setShowDiff(true)}
+            onRejectAll={rejectAll}
+            onRejectBlock={(id) => resolveBlock(id, true)}
+            onViewDiff={(id) => setViewDiffId(id)}
             rootRef={rootRef}
           />
           {/* The ring affordance: click a re-colored cell or the code block's ring for its detail. */}
@@ -311,7 +376,7 @@ export const ReviewAnAgentProposal: Story = () => {
           />
         </>
       ) : null}
-      {showDiff && diff ? (
+      {viewDiffId && diff ? (
         <div
           style={{
             background: "var(--color-base-100, #fff)",
@@ -321,31 +386,34 @@ export const ReviewAnAgentProposal: Story = () => {
             padding: 16,
           }}
         >
-          <button onClick={() => setShowDiff(false)} type="button">
+          <button onClick={() => setViewDiffId(null)} type="button">
             Close diff
           </button>
-          {/* The T3 drill-in: the SAME reader `<DiffView>` renders the whole-document diff with the same
-              node-diff resolver, proving the woven overlay and the diff view share one library. */}
+          {/* The T3 drill-in, SCOPED to the change under the cursor (docs/039 §6 T3, R-EX): the same reader
+              `<DiffView>` renders just that block's before/after (a top-level code block gets its own line
+              diff here even though it took the bar, not a ring). One block, projected — no second diff. */}
           <DiffView
             context="focused"
-            diff={diff}
+            diff={scopedTo(diff, viewDiffId)}
             embedStyles={false}
             getNodeDiffRenderer={getNodeDiff}
           />
         </div>
       ) : null}
       <p style={{ font: "12px ui-sans-serif", marginTop: 12, opacity: 0.7 }}>
-        docs/039 — one end-to-end review. The intro paragraph shows inline{" "}
-        <strong>red/green track-changes</strong>; the removed paragraph is a
-        struck <strong>ghost</strong> with a red gutter bar (no card, no tick).
-        Click the re-colored cell&rsquo;s ring for its{" "}
-        <strong>fill chip</strong>, or the code block&rsquo;s ring for its{" "}
-        <strong>line-diff band</strong>. Step changes with the surface;{" "}
-        <strong>View diff</strong> opens the same reader{" "}
-        <code>&lt;DiffView&gt;</code>. Save is{" "}
+        docs/039 — one end-to-end review. The intro shows inline{" "}
+        <strong>red/green track-changes</strong> (an insert AND a struck
+        delete); the removed paragraph is a struck <strong>ghost</strong> with a
+        red gutter bar (no card, no tick). The change under the cursor gets an{" "}
+        <strong>active halo</strong> so &ldquo;Change N of M&rdquo; maps to a
+        block. Click the re-colored cell&rsquo;s ring for its{" "}
+        <strong>fill chip</strong> or the code block&rsquo;s ring for its{" "}
+        <strong>line-diff band</strong>; <strong>View diff</strong> opens the
+        same reader <code>&lt;DiffView&gt;</code> scoped to that change.{" "}
+        <strong>Accept</strong> keeps a change; <strong>Reject</strong> reverts
+        it (whole or per block). {resolved.size} resolved; save is{" "}
         <strong>{store.canSaveSnapshot ? "open" : "blocked"}</strong> while
-        reviewing. Ids: {Object.values(ids).length} anchored changes; author{" "}
-        <strong>{attribution.label}</strong>.
+        reviewing; author <strong>{attribution.label}</strong>.
       </p>
     </div>
   );

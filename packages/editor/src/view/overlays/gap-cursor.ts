@@ -68,6 +68,99 @@ export function gapMarkerRect(args: {
   return { height, left, top, width };
 }
 
+/**
+ * Correct a gap's flanking edges AND scope bottom for review GHOSTS in the flow (docs/039 R-GI).
+ *
+ * The gap cursor's coordinate is a STORE index, so `gapOverlayRect` flanks the marker with the rects
+ * of `children[index-1]` / `children[index]` — the store siblings — and pins an edge gap to the
+ * scope's own box. But during review a REMOVED block renders as an inert `GhostBlock` mounted in the
+ * flow, a block `childrenOf` never lists AND (on the virtualized path) whose height is not in the
+ * scope's virtual total — so the ghost's neighbours overflow the scope box. Two failures follow, both
+ * observed as "gap cursor completely off in review", corrected here from the ACTUAL mounted geometry:
+ *
+ *   - INTERIOR gap: the raw store-gap `[prevBottom, nextTop]` SPANS the ghost, so `gapMarkerRect`
+ *     centers the marker in the ghost's middle — half a ghost-height from where the user clicked. The
+ *     bottom edge stays `nextTop`; the top edge rises to the bottom of the lowest occupant inside the
+ *     store-gap (the ghost closest to `next`), landing the marker in the thin real gap above `next`.
+ *   - EDGE gap (no `next`): the scope box can be SHORTER than its content (the ghost's uncounted
+ *     height pushes the last block past the box bottom), so a trailing marker pinned to the raw box
+ *     bottom sits ABOVE the last block, mid-document. `scopeBottom` is clamped up to the true content
+ *     bottom (the lowest block in the scope), so an end marker always sits at/below the last block;
+ *     and if a removed LAST block trails `prev`, the bottom edge drops to its top so the end marker
+ *     sits above the removed block, not below it.
+ *
+ * `occupants` are every mounted block rect in the scope's flow (store children AND ghosts). Outside
+ * review there are no ghosts, the box already encloses the content, and nothing falls inside a
+ * store-gap — so this returns the inputs unchanged, a pure no-op on the normal editing path.
+ * Framework-free like the rest of this file; the overlay supplies the measured client rects.
+ */
+export function gapVisualAnchors(args: {
+  readonly prevBottom: number | null;
+  readonly nextTop: number | null;
+  readonly scopeTop: number;
+  readonly scopeBottom: number;
+  readonly scopeLeft: number;
+  readonly scopeRight: number;
+  readonly occupants: readonly RectLike[];
+}): { prevBottom: number | null; nextTop: number | null; scopeBottom: number } {
+  const {
+    prevBottom,
+    nextTop,
+    scopeTop,
+    scopeBottom,
+    scopeLeft,
+    scopeRight,
+    occupants,
+  } = args;
+  const EPS = 0.5;
+  // A block from another column/scope must not be mistaken for content of THIS scope: require
+  // horizontal overlap with the scope's content box (for a body gap the box is the whole surface, so
+  // every block overlaps; for a nested scope only the container's own blocks qualify) and a top at or
+  // below the scope top (so a block ABOVE a nested scope is excluded from its content extent).
+  const inScope = (r: RectLike) =>
+    r.right > scopeLeft + EPS &&
+    r.left < scopeRight - EPS &&
+    r.top >= scopeTop - EPS;
+  // The scope's TRUE content bottom: the lowest block within it, or the box bottom when the box
+  // already encloses everything (the non-virtualized / no-ghost case, where this stays `scopeBottom`).
+  let contentBottom = scopeBottom;
+  for (const r of occupants) {
+    if (inScope(r) && r.bottom > contentBottom) contentBottom = r.bottom;
+  }
+  // Interior gap: raise the top edge past any ghost between prev and next.
+  if (prevBottom !== null && nextTop !== null) {
+    let bottom = prevBottom;
+    for (const r of occupants) {
+      if (r.right <= scopeLeft + EPS || r.left >= scopeRight - EPS) continue;
+      // An occupant STRICTLY inside the store-gap: it starts at/below `prev` and ends at/above
+      // `next`. `prev`/`next` themselves fail this (prev starts above, next ends below), so only a
+      // ghost occupying the gap qualifies; keep the lowest one (closest to `next`).
+      if (
+        r.top >= prevBottom - EPS &&
+        r.bottom <= nextTop + EPS &&
+        r.bottom > bottom
+      ) {
+        bottom = r.bottom;
+      }
+    }
+    return { nextTop, prevBottom: bottom, scopeBottom: contentBottom };
+  }
+  // Trailing gap: lower the bottom edge to the top of the highest ghost below `prev` (a removed last
+  // block); otherwise the marker pins to the clamped content bottom below.
+  if (prevBottom !== null && nextTop === null) {
+    let top: number | null = null;
+    for (const r of occupants) {
+      if (r.right <= scopeLeft + EPS || r.left >= scopeRight - EPS) continue;
+      if (r.top >= prevBottom - EPS && r.bottom <= contentBottom + EPS) {
+        top = top === null ? r.top : Math.min(top, r.top);
+      }
+    }
+    return { nextTop: top, prevBottom, scopeBottom: contentBottom };
+  }
+  // Leading gap (no prev): pinned to the scope top, nothing to correct but the clamped bottom.
+  return { nextTop, prevBottom, scopeBottom: contentBottom };
+}
+
 export type GapCandidate = {
   /** The `{scope, index}` slot this candidate represents. */
   readonly index: number;

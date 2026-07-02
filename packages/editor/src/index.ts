@@ -465,6 +465,10 @@ export {
 // result. The result-shape types are the contract every consumer reads.
 // ============================================================================
 export { diffSnapshots } from "./core";
+// `blockDiffIndex` (docs/039 §11): an id → `BlockDiff` index over the recursive diff tree, so a woven
+// surface resolves a nested element's (a cell's) sub-diff in O(1) — used by the ring affordance and the
+// scoped-diff band drill-in.
+export { blockDiffIndex } from "./core";
 export type {
   AttrDiff,
   BlockDiff,

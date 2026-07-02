@@ -157,11 +157,23 @@ export function elementDisclosure(
   block: ReaderBlockDiff,
   getRenderer?: (type: string) => NodeDiffRenderer | undefined,
 ): "chip" | "band" {
+  const type = block.node?.type;
   if (block.object) {
-    return hasNodeRenderer(block.node?.type, getRenderer) ? "band" : "chip";
+    // The object's disclosure is `tierOf`'s decision (object.field → band iff the node ships a
+    // renderDiff, object.opaque → always band). Delegating keeps `tierOf` the single classifier both
+    // surfaces read (§6.1) rather than a second copy of the same rule.
+    return tierOf("object.field", type, getRenderer) === "band"
+      ? "band"
+      : "chip";
   }
   if (block.attrs) {
-    return hasStructuredAttr(block.attrs) ? "band" : "chip";
+    // A structured attr value (a `colWidths` array) routes to the band — the one case `tierOf` cannot
+    // see (it has no value), so `elementDisclosure` decides it; a scalar attr is `tierOf`'s
+    // `attr.element` → `marked` → chip.
+    if (hasStructuredAttr(block.attrs)) return "band";
+    return tierOf("attr.element", type, getRenderer) === "band"
+      ? "band"
+      : "chip";
   }
   return "chip";
 }

@@ -24,6 +24,7 @@
  */
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -60,14 +61,26 @@ const CARD: CSSProperties = {
   zIndex: 61,
 };
 
+/** Escape a node id for a CSS attribute selector (node ids are safe today; this keeps it robust). */
+function escapeId(id: string): string {
+  return id.replace(/["\\]/g, "\\$&");
+}
+
 /** Project the full diff into a one-block `SnapshotDiff` for the band (docs/039 §7.7) — no re-diff. */
 function scopedDiff(diff: SnapshotDiff, block: BlockDiff): SnapshotDiff {
+  // Real per-block stats (not a hardcoded `changed:1`): harmless while the band forces `showStats:false`,
+  // but correct if a caller ever shows them.
+  const stats = { added: 0, changed: 0, moved: 0, removed: 0 };
+  if (block.status === "added") stats.added = 1;
+  else if (block.status === "removed") stats.removed = 1;
+  else if (block.status === "moved") stats.moved = 1;
+  else stats.changed = 1;
   return {
     base: diff.base,
     blocks: [block],
     collections: [],
     settingsChanged: false,
-    stats: { added: 0, changed: 1, moved: 0, removed: 0 },
+    stats,
     target: diff.target,
   };
 }
@@ -88,11 +101,10 @@ export function ReviewElementDetail(props: {
   readonly getNodeDiffRenderer?: (type: string) => NodeDiffRenderer | undefined;
 }) {
   const { diff, rootRef, getNodeDiffRenderer } = props;
-  const [focused, setFocused] = useState<{
-    id: string;
-    top: number;
-    left: number;
-  } | null>(null);
+  // Store only the focused id; the position is RE-MEASURED from the live ring element each layout pass
+  // (docs/039 R-RG), so the popover tracks its anchor on scroll/resize instead of freezing at the click
+  // rect over unrelated content. It also self-dismisses when its ring disappears (the change resolved).
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const index = useMemo(() => (diff ? blockDiffIndex(diff) : null), [diff]);
 
   useEffect(() => {
@@ -104,28 +116,53 @@ export function ReviewElementDetail(props: {
       if (ring instanceof HTMLElement) {
         const id = ring.getAttribute("data-engine-block-id");
         if (id) {
-          const rect = ring.getBoundingClientRect();
-          // Below the ring, clamped into the viewport (the card is ~360px, capped to 60vh, scrolls).
-          setFocused({
-            id,
-            left: Math.min(rect.left, Math.max(8, window.innerWidth - 380)),
-            top: Math.min(
-              rect.bottom + 8,
-              Math.max(8, window.innerHeight - 80),
-            ),
-          });
+          setFocusedId(id);
           return;
         }
       }
       // A click outside a ring and outside the open card dismisses it.
-      if (!target?.closest?.("[data-engine-review-detail]")) setFocused(null);
+      if (!target?.closest?.("[data-engine-review-detail]")) setFocusedId(null);
     };
     root.addEventListener("click", onClick);
     return () => root.removeEventListener("click", onClick);
   }, [rootRef]);
 
-  if (!focused || !diff || !index) return null;
-  const block = index.get(focused.id as NodeId);
+  // Re-measure on scroll/resize (the same `tick` pattern the cursor surface uses) so the card follows
+  // its ring; the position is derived below from the live ring rect, never captured once at click time.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    window.addEventListener("scroll", bump, true);
+    window.addEventListener("resize", bump);
+    return () => {
+      window.removeEventListener("scroll", bump, true);
+      window.removeEventListener("resize", bump);
+    };
+  }, []);
+
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!focusedId) {
+      setPos(null);
+      return;
+    }
+    const root: ParentNode = rootRef.current ?? document;
+    const ring = root.querySelector(
+      `[data-engine-review-ring][data-engine-block-id="${escapeId(focusedId)}"]`,
+    );
+    const rect = ring?.getBoundingClientRect();
+    if (!rect) {
+      setPos(null); // the ring is gone (resolved / scrolled out of a virtualized window) → dismiss
+      return;
+    }
+    setPos({
+      left: Math.min(rect.left, Math.max(8, window.innerWidth - 380)),
+      top: Math.min(rect.bottom + 8, Math.max(8, window.innerHeight - 80)),
+    });
+  }, [focusedId, tick, rootRef]);
+
+  if (!focusedId || !pos || !diff || !index) return null;
+  const block = index.get(focusedId as NodeId);
   if (!block) return null;
   const band = elementDisclosure(block, getNodeDiffRenderer) === "band";
   return (
@@ -133,8 +170,8 @@ export function ReviewElementDetail(props: {
       data-engine-review-detail=""
       style={{
         ...CARD,
-        left: focused.left,
-        top: focused.top,
+        left: pos.left,
+        top: pos.top,
         width: band ? 440 : 320,
       }}
     >

@@ -28,6 +28,7 @@
  * @categoryDefault Diff View
  */
 import { type RefObject, useEffect, useMemo } from "react";
+import { diffStatusColor } from "@quanghuy1242/idco-reader";
 import {
   diffSnapshots,
   type EditorDocumentSnapshot,
@@ -361,14 +362,17 @@ export function useReviewChangeIndicator(options: {
  * ghost already relies on.
  */
 export const REVIEW_INDICATOR_CSS = `
-[data-engine-review-changed]{position:relative;--rev-bar:var(--color-info, #0ea5e9);}
-[data-engine-review-changed="added"]{--rev-bar:var(--color-success, #16a34a);}
-[data-engine-review-changed="moved"]{--rev-bar:var(--color-warning, #d97706);}
-[data-engine-review-changed="changed"]{--rev-bar:var(--color-info, #0ea5e9);}
-[data-engine-review-changed="removed"]{--rev-bar:var(--color-error, #dc2626);}
-[data-engine-review-changed]::after{content:"";position:absolute;left:-9px;top:4px;bottom:4px;width:3px;pointer-events:none;background:var(--rev-bar);}
-[data-engine-review-ring]{--rev-ring:var(--color-info, #0ea5e9);outline:2px solid var(--rev-ring);outline-offset:-1px;box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--rev-ring), #000 40%),inset 0 0 0 3px color-mix(in oklab, var(--rev-ring), #fff 55%);}
-[data-engine-review-ring="moved"]{--rev-ring:var(--color-warning, #d97706);}
-[data-engine-review-op="insert"]{text-decoration:underline;text-decoration-color:var(--color-success, #16a34a);text-decoration-thickness:2px;text-underline-offset:2px;background:color-mix(in oklab, var(--color-success, #16a34a) 12%, transparent);border-radius:2px;}
-[data-engine-ghost-run]{text-decoration:line-through;text-decoration-color:color-mix(in oklab, var(--color-error, #dc2626) 60%, currentColor);color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);user-select:none;}
+[data-engine-review-changed]{position:relative;--rev-bar:${diffStatusColor("changed")};}
+[data-engine-review-changed="added"]{--rev-bar:${diffStatusColor("added")};}
+[data-engine-review-changed="moved"]{--rev-bar:${diffStatusColor("moved")};}
+[data-engine-review-changed="changed"]{--rev-bar:${diffStatusColor("changed")};}
+[data-engine-review-changed="removed"]{--rev-bar:${diffStatusColor("removed")};}
+[data-engine-review-changed]::after{content:"";position:absolute;left:-9px;top:4px;bottom:4px;width:3px;pointer-events:none;background:var(--rev-bar);border-radius:1px;}
+[data-engine-review-active]{box-shadow:0 0 0 2px color-mix(in oklab, var(--rev-bar), transparent 62%);border-radius:3px;}
+[data-engine-review-active]::after{width:5px;left:-10px;}
+[data-engine-review-ring]{--rev-ring:${diffStatusColor("changed")};cursor:pointer;outline:2px solid var(--rev-ring);outline-offset:-1px;box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--rev-ring), #000 40%),inset 0 0 0 3px color-mix(in oklab, var(--rev-ring), #fff 55%);}
+[data-engine-review-ring="moved"]{--rev-ring:${diffStatusColor("moved")};}
+[data-engine-review-op="insert"]{text-decoration:underline;text-decoration-color:${diffStatusColor("added")};text-decoration-thickness:2px;text-underline-offset:2px;background:color-mix(in oklab, ${diffStatusColor("added")} 12%, transparent);border-radius:2px;}
+[data-engine-review-op="mark"]{text-decoration-line:underline;text-decoration-style:dotted;text-decoration-color:${diffStatusColor("changed")};text-underline-offset:3px;}
+[data-engine-ghost-run]{text-decoration:line-through;text-decoration-color:color-mix(in oklab, ${diffStatusColor("removed")} 60%, currentColor);color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);user-select:none;pointer-events:none;}
 `;

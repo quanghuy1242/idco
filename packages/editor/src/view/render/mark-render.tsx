@@ -332,6 +332,13 @@ export function renderReviewLeafMarks(
   const out: ReactNode[] = [];
   partitionTextRuns(textDiff).forEach((slice, index) => {
     if (slice.op === "delete") {
+      // The inline deleted run is silent-in-prose (docs/039 §14): `aria-hidden` so a screen reader reads
+      // the PROPOSED text (with insertions marked) and does not stumble over removed words mid-sentence.
+      // DELIBERATE ASYMMETRY, do not "fix" it: a whole-block removal ANNOUNCES (a `<del>` + sr-only label
+      // in `GhostBlock`, because losing a paragraph is worth hearing), while an inline word-level deletion
+      // stays out of the read (hearing it interleaved with the new text is noise). Inert
+      // (`contentEditable=false`) and geometry-skipped (`data-engine-ghost-run`): display-only, never a
+      // counted text node, so the R-T1 caret invariant holds.
       out.push(
         <span
           aria-hidden="true"
@@ -353,17 +360,24 @@ export function renderReviewLeafMarks(
       linkMode,
       from,
     );
-    const op =
-      slice.op === "insert" ? "insert" : slice.markChanged ? "mark" : null;
-    out.push(
-      op ? (
-        <span data-engine-review-op={op} key={`${slice.op}.${index}`}>
+    if (slice.op === "insert") {
+      // A real `<ins>` (implicit `role="insertion"`) so the proposed text announces as an insertion, not
+      // as accepted prose (docs/039 §14 AX). Geometry-neutral like a mark's `<strong>` — it wraps the
+      // same counted text nodes.
+      out.push(
+        <ins data-engine-review-op="insert" key={`i.${index}`}>
           {inner}
-        </span>
-      ) : (
-        <span key={`k.${index}`}>{inner}</span>
-      ),
-    );
+        </ins>,
+      );
+    } else if (slice.markChanged) {
+      out.push(
+        <span data-engine-review-op="mark" key={`m.${index}`}>
+          {inner}
+        </span>,
+      );
+    } else {
+      out.push(<span key={`k.${index}`}>{inner}</span>);
+    }
   });
   return out;
 }

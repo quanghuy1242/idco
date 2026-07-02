@@ -25,7 +25,7 @@ import {
   type TextLeafNode,
 } from "../../core";
 import { blockTypeRole } from "../spi";
-import { gapMarkerRect } from "./gap-cursor";
+import { gapMarkerRect, gapVisualAnchors, type RectLike } from "./gap-cursor";
 import { getNodeView } from "../spi";
 import { getStructuralView } from "../spi";
 import {
@@ -248,11 +248,38 @@ function gapOverlayRect(
   // prose column), else the scope's padded content box.
   const left = anchorRect ? anchorRect.left : scopeRect.left + padLeft;
   const right = anchorRect ? anchorRect.right : scopeRect.right - padRight;
-  const marker = gapMarkerRect({
-    height: 2,
+  // Correct the flanking edges for any review GHOST mounted inside this store-gap (docs/039 R-GI). A
+  // removed block renders in the flow but is not a store child, so the raw store-gap
+  // [prev.bottom, next.top] would span it and center the marker in the ghost's middle — up to half a
+  // ghost-height from where the user clicked. `gapVisualAnchors` snaps the edges to the real gap using
+  // the measured geometry of every mounted block; it is a no-op when no ghost sits in the gap (the
+  // normal editing path), so this never changes non-review placement.
+  const occupants: RectLike[] = [];
+  for (const el of blockRefs.values()) {
+    const r = el.getBoundingClientRect();
+    occupants.push({
+      bottom: r.bottom,
+      left: r.left,
+      right: r.right,
+      top: r.top,
+    });
+  }
+  const edges = gapVisualAnchors({
     nextTop: nextRect?.top ?? null,
+    occupants,
     prevBottom: prevRect?.bottom ?? null,
     scopeBottom: scopeRect.bottom - padBottom,
+    scopeLeft: scopeRect.left + padLeft,
+    scopeRight: scopeRect.right - padRight,
+    scopeTop: scopeRect.top + padTop,
+  });
+  const marker = gapMarkerRect({
+    height: 2,
+    nextTop: edges.nextTop,
+    prevBottom: edges.prevBottom,
+    // `edges.scopeBottom` is clamped to the true content bottom, so a trailing gap can never pin
+    // above the last block when a review ghost makes the virtualized scope box under-report its height.
+    scopeBottom: edges.scopeBottom,
     scopeLeft: left,
     scopeRight: right,
     scopeTop: scopeRect.top + padTop,

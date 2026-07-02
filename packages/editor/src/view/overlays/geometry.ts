@@ -316,7 +316,13 @@ export function robustCaretRect(
 ): DOMRect | null {
   const length = hostTextLength(host);
   if (length === 0 && textNodesOf(host).length === 0) return null;
-  const text = host.textContent ?? "";
+  // Build the probe text from the COUNTED text nodes, not `host.textContent` (docs/039 R-T1): a review
+  // deleted-run ghost (`[data-engine-ghost-run]`) is skipped by `textNodesOf`, so this string equals the
+  // store text and stays index-aligned with the model `offset`. Reading `host.textContent` would splice
+  // the ghost's base text in, shifting every `text[at]` `\n` probe past a deletion to the wrong branch.
+  const text = textNodesOf(host)
+    .map((node) => node.textContent ?? "")
+    .join("");
   const at = clampOffset(offset, length);
 
   if (at > 0 && text[at - 1] === "\n") {

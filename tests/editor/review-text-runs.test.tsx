@@ -14,7 +14,12 @@ import {
   type TextLeafDiff,
 } from "../../packages/editor/src/core";
 import { renderReviewLeafMarks } from "../../packages/editor/src/view/render/mark-render";
-import { textNodesOf } from "../../packages/editor/src/view/overlays/geometry";
+import {
+  hostTextLength,
+  modelOffsetFromDom,
+  resolveOffsetToDom,
+  textNodesOf,
+} from "../../packages/editor/src/view/overlays/geometry";
 
 const alloc = createIdAllocator("idco_client_reviewtext");
 
@@ -49,8 +54,13 @@ describe("renderReviewLeafMarks (docs/039 R-T1)", () => {
     expect(insert?.textContent).toBe("very ");
     const ghost = container.querySelector("[data-engine-ghost-run]");
     expect(ghost?.textContent).toBe("brown ");
-    // The ghost is inert (not editable, hidden from AT).
+    // The inline delete is silent-in-prose (aria-hidden) and inert; geometry-skipped (proven below).
     expect(ghost?.getAttribute("aria-hidden")).toBe("true");
+    expect(ghost?.getAttribute("contenteditable")).toBe("false");
+    // The inserted run announces as an insertion via a real <ins> (role=insertion).
+    expect(
+      container.querySelector("ins[data-engine-review-op='insert']"),
+    ).toBeTruthy();
   });
 
   it("geometry SKIPS the ghost so counted text == store text (the R-T1 invariant)", () => {
@@ -64,6 +74,32 @@ describe("renderReviewLeafMarks (docs/039 R-T1)", () => {
       .join("");
     expect(counted).toBe("The very quick fox");
     expect(counted).not.toContain("brown");
+  });
+
+  it("maps a store offset PAST the deletion to the right DOM node and back — the caret invariant", () => {
+    // The layout-free half of the §14/P4 caret-after-deletion proof: pixel rects need a browser, but the
+    // load-bearing thing — a MODEL offset after a deletion mapping to the correct COUNTED DOM position and
+    // round-tripping to the SAME offset (the ghost length never added in) — is pure DOM-node math and runs
+    // in jsdom. If this drifts, every caret/click past a woven deletion is off by the ghost's length.
+    const { container } = render(
+      <div>{renderReviewLeafMarks(node, diff)}</div>,
+    );
+    const host = container.firstChild as HTMLElement;
+    expect(hostTextLength(host)).toBe("The very quick fox".length);
+    // Offset 16 is inside "fox" — the run that renders AFTER the delete-ghost in DOM order (the ghost's
+    // targetOffset is 15, "fox" starts at 15). This is the offset a broken skip WOULD mis-map: counting
+    // the ghost's 6 chars would push "fox" to store offset 21, so the round-trip below only holds while
+    // `textNodesOf`/`modelOffsetFromDom` actually skip the ghost. (An offset in "quick", before the ghost,
+    // would pass even against a broken skip — the reviewer's catch.)
+    const at = 16;
+    const dom = resolveOffsetToDom(host, at);
+    expect(dom).not.toBeNull();
+    // `resolveOffsetToDom` walks `textNodesOf`, so it can never land in the ghost's (uncounted) node.
+    expect(
+      dom!.node.parentElement?.closest("[data-engine-ghost-run]"),
+    ).toBeNull();
+    // Round-trip: the DOM position maps back to the SAME store offset — no ghost length spliced in.
+    expect(modelOffsetFromDom(host, dom!.node, dom!.offset)).toBe(at);
   });
 
   it("flags a keep run under a changed mark with a dotted cue, no insert/delete", () => {

@@ -225,6 +225,23 @@ export function ReviewCursorSurface(props: {
     });
   }, [currentId, tick, rootRef]);
 
+  // Stamp the ACTIVE change (docs/039 R-GI active-state, the user's "Change 3 of 7 — but which one?"
+  // gap): mark the current change's OWN element (its `id`, not the reveal neighbour `revealId` — for a
+  // removal that is the ghost) so `REVIEW_INDICATOR_CSS` gives it the thicker bar + halo that separates
+  // it from the other same-colored bars. Re-stamps on scroll (`tick`) so it survives a virtualization
+  // remount; the cleanup clears the previous element as the cursor moves.
+  const activeId = current?.id ?? null;
+  useLayoutEffect(() => {
+    if (!activeId) return;
+    const root: ParentNode = rootRef?.current ?? document;
+    const el = root.querySelector(
+      `[data-engine-block-id="${escapeId(activeId)}"]`,
+    );
+    if (!(el instanceof HTMLElement)) return;
+    el.setAttribute("data-engine-review-active", "");
+    return () => el.removeAttribute("data-engine-review-active");
+  }, [activeId, tick, rootRef]);
+
   if (!current || !pos) return null;
   const style: CSSProperties = {
     ...CARD,
