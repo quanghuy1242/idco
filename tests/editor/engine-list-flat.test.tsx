@@ -32,6 +32,7 @@ import {
   pointAtOffset,
   type EditorDocumentSnapshot,
   type EditorNode,
+  type NodeId,
   type OwnedModelEditorViewHandle,
   type RichTextCompatNode,
 } from "../../packages/editor/src";
@@ -131,7 +132,7 @@ describe("§2.10 render-time ordinals from body-order adjacency", () => {
       null,
       "number",
     ]);
-    const meta = computeWindowListMeta(store, store.order, 0);
+    const meta = computeWindowListMeta(store, store.order, store.order, 0);
     const at = (i: number) => meta.get(blocks[i]!.id);
 
     expect(at(0)).toMatchObject({
@@ -166,7 +167,7 @@ describe("§2.10 render-time ordinals from body-order adjacency", () => {
     // A window that starts at the 3rd item (index 2) must still report ordinal 3,
     // not 1 — the bug a CSS counter would produce under virtualization.
     const windowIds = store.order.slice(2);
-    const meta = computeWindowListMeta(store, windowIds, 2);
+    const meta = computeWindowListMeta(store, store.order, windowIds, 2);
     expect(meta.get(blocks[2]!.id)).toMatchObject({
       ordinal: 3,
       firstInRun: false,
@@ -174,6 +175,43 @@ describe("§2.10 render-time ordinals from body-order adjacency", () => {
     expect(meta.get(blocks[3]!.id)).toMatchObject({
       ordinal: 4,
       lastInRun: true,
+    });
+  });
+
+  it("keeps list numbering continuous across a ghost (removed item) in a review order (docs/038 J0, H1)", () => {
+    // The live store holds four surviving numbered items (A, B, D, E). The inline-review MERGED
+    // order splices a ghost id — the item removed since baseline (C) — between B and D. A ghost is
+    // not in the store, so it must be run-NEUTRAL: the surviving items renumber to the target
+    // document's numbering (A=1, B=2, D=3, E=4), NOT reset after the removal. This is the H1 case the
+    // paragraph-only spike story masked; without the fix the ghost reset the run and D became 1.
+    const { blocks, store } = listStore([
+      "number",
+      "number",
+      "number",
+      "number",
+    ]);
+    const ghostId = "idco_client_list_flat::ghost-removed" as NodeId;
+    expect(store.getNode(ghostId)).toBeUndefined(); // truly absent — a ghost
+    const merged = [
+      blocks[0]!.id,
+      blocks[1]!.id,
+      ghostId,
+      blocks[2]!.id,
+      blocks[3]!.id,
+    ];
+    const meta = computeWindowListMeta(store, merged, merged, 0);
+    expect(meta.get(blocks[0]!.id)).toMatchObject({ ordinal: 1 });
+    expect(meta.get(blocks[1]!.id)).toMatchObject({ ordinal: 2 });
+    // The ghost carries no list meta …
+    expect(meta.get(ghostId)).toBeUndefined();
+    // … and the surviving items after it continue the run (3, 4), not reset to 1.
+    expect(meta.get(blocks[2]!.id)).toMatchObject({
+      firstInRun: false,
+      ordinal: 3,
+    });
+    expect(meta.get(blocks[3]!.id)).toMatchObject({
+      lastInRun: true,
+      ordinal: 4,
     });
   });
 });

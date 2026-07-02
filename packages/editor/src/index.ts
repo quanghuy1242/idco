@@ -274,6 +274,15 @@ export {
   type ReviewChangedBlock,
   type ReviewDeletionAnchor,
 } from "./view";
+// The woven inline overlay's ReviewModel (docs/038 §5, R6-J J0): project a `SnapshotDiff` into the
+// merged top-level order + ghost node map (`buildReviewOrder`), and the opt-in hook that derives it
+// live from a captured baseline (`useReviewGhostPlan`). Feed the plan to the editor view's
+// `reviewOrder`/`reviewGhosts` props to render removed blocks as inert ghosts in place.
+export {
+  buildReviewOrder,
+  useReviewGhostPlan,
+  type ReviewGhostPlan,
+} from "./view";
 export { EditorToolbar } from "./view";
 export {
   FindBar,

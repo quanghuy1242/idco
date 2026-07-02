@@ -19,6 +19,7 @@
  * `from "../render"` so the folder is the unit.
  */
 export * from "./block-dispatch";
+export * from "./ghost-block";
 export * from "./text-block";
 export * from "./object-block";
 export * from "./object-config";

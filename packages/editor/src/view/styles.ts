@@ -512,26 +512,41 @@ function listFlavourOf(
  */
 export function computeWindowListMeta(
   store: EditorStore,
+  order: readonly NodeId[],
   windowIds: readonly NodeId[],
   windowStartIndex: number,
 ): Map<NodeId, ListItemMeta> {
-  const order = store.order;
   const meta = new Map<NodeId, ListItemMeta>();
-  // Seed the running ordinal from the run that may continue into the window.
-  let runFlavour: "bullet" | "number" | null =
-    windowStartIndex > 0
-      ? listFlavourOf(store, order[windowStartIndex - 1]!)
-      : null;
+  // `order` is the order the window was sliced from — `store.order` on the shipped path, or the
+  // inline-review MERGED order (with removed ghost ids interleaved) when reviewing (docs/038 J0).
+  // Taking it as a parameter, rather than reading `store.order`, is what keeps `windowStartIndex`
+  // and this order in the same coordinate space; reading `store.order` here while the window index
+  // came from the merged order was the H1 misalignment.
+  //
+  // A ghost id (a removed block not in the store) is run-NEUTRAL: it neither counts toward nor
+  // breaks a list run, so surviving items renumber to the *target* document's numbering across a
+  // removal (`1,2,[removed],3` — not a reset). A live non-list block still breaks the run. On the
+  // shipped path every id resolves in the store, so `isGhost` is always false and the behaviour is
+  // identical to before.
+  const isGhost = (id: NodeId | undefined): boolean =>
+    id === undefined ? false : !store.getNode(id);
+
+  // Seed the running ordinal from the run that may continue into the window, walking back past
+  // ghosts (they do not break the run) and stopping at the first live non-list block / flavour flip.
+  let runFlavour: "bullet" | "number" | null = null;
   let runOrdinal = 0;
-  if (runFlavour) {
-    runOrdinal = 1;
-    for (let k = windowStartIndex - 2; k >= 0; k--) {
-      if (listFlavourOf(store, order[k]!) !== runFlavour) break;
-      runOrdinal++;
-    }
+  for (let k = windowStartIndex - 1; k >= 0; k--) {
+    const id = order[k]!;
+    if (isGhost(id)) continue;
+    const flavour = listFlavourOf(store, id);
+    if (!flavour) break;
+    if (runFlavour === null) runFlavour = flavour;
+    else if (flavour !== runFlavour) break;
+    runOrdinal++;
   }
   for (let wi = 0; wi < windowIds.length; wi++) {
     const id = windowIds[wi]!;
+    if (isGhost(id)) continue; // neutral: keep the run intact across a removal
     const flavour = listFlavourOf(store, id);
     if (!flavour) {
       runFlavour = null;
@@ -544,10 +559,14 @@ export function computeWindowListMeta(
       runFlavour = flavour;
       runOrdinal = 1;
     }
-    const globalIndex = windowStartIndex + wi;
-    const nextId = order[globalIndex + 1];
-    const lastInRun =
-      nextId === undefined || listFlavourOf(store, nextId) !== flavour;
+    // `lastInRun` looks at the next LIVE (non-ghost) block in the same order.
+    let lastInRun = true;
+    for (let j = windowStartIndex + wi + 1; j < order.length; j++) {
+      const nextId = order[j]!;
+      if (isGhost(nextId)) continue;
+      lastInRun = listFlavourOf(store, nextId) !== flavour;
+      break;
+    }
     meta.set(id, {
       firstInRun: runOrdinal === 1,
       lastInRun,

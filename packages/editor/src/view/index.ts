@@ -32,6 +32,11 @@ export {
 } from "./overlays";
 export { useReviewSnapshot } from "./store-hooks";
 export {
+  buildReviewOrder,
+  useReviewGhostPlan,
+  type ReviewGhostPlan,
+} from "./review-model";
+export {
   getNodeView,
   listInsertableNodes,
   registerNode,

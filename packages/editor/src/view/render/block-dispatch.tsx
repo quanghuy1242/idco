@@ -124,7 +124,12 @@ export function EngineBlock(props: {
   // but also a callout holding list items — so a nested numbered list renders as
   // `N.`, not bullets. Containers with no list items get an empty map (paragraphs
   // are unaffected). Without this, nested items fell back to the bullet default.
-  const childListMeta = computeWindowListMeta(store, node.children, 0);
+  const childListMeta = computeWindowListMeta(
+    store,
+    node.children,
+    node.children,
+    0,
+  );
   const children = node.children.map((childId) => (
     <EngineBlock
       beginDrag={beginDrag}

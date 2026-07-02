@@ -39,6 +39,7 @@ import {
 } from "react";
 import {
   createEngineScheduler,
+  type EditorNode,
   type EditorStore,
   type EngineScheduler,
   type NodeId,
@@ -54,7 +55,7 @@ import {
   SURFACE_PADDING,
 } from "./styles";
 import { cancelFrame, requestFrame } from "./raf";
-import { EngineBlock } from "./render";
+import { EngineBlock, GhostBlock } from "./render";
 import type { EditorPlaceholder } from "./overlays";
 import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
@@ -196,6 +197,22 @@ export type OwnedModelEditorViewProps = {
    * dock.
    */
   readonly overlayPanelHost?: PanelHost;
+  /**
+   * Inline-review merged order (docs/038 §5, R6-J J0). When present, the view windows THIS order
+   * — the diff's top-level merged spine (live ids + removed ghost ids at their slot, from
+   * `buildReviewOrder`/`useReviewGhostPlan`) — instead of the plain body order, so removed blocks
+   * appear in place. Omitted (the shipped path): the view uses `store.order` and this whole branch
+   * is inert. An id present in `reviewGhosts` renders as an inert `GhostBlock`; every other id
+   * renders as its normal live block, keyed by id so a live block keeps its instance (and its
+   * EditContext host) when a neighbouring ghost splices in.
+   */
+  readonly reviewOrder?: readonly NodeId[];
+  /**
+   * Inline-review ghost nodes (docs/038 §5, R6-J J0): the base-side `EditorSnapshotNode` for each
+   * removed id in `reviewOrder`. An id here renders as an inert `GhostBlock`. Ignored unless
+   * `reviewOrder` is also set.
+   */
+  readonly reviewGhosts?: ReadonlyMap<NodeId, EditorNode>;
 };
 
 /** The bare engine view: renders the document as windowed blocks with caret, selection, and virtualization, with no toolbar or chrome. */
@@ -220,6 +237,8 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     documentIndexStore,
     overlayAuthorityRef,
     overlayPanelHost,
+    reviewOrder,
+    reviewGhosts,
   } = props;
   const localSchedulerRef = useRef<EngineScheduler | null>(null);
   if (!providedScheduler && !localSchedulerRef.current) {
@@ -234,7 +253,13 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   const authorityRef = overlayAuthorityRef ?? localAuthorityRef;
   const refs = useViewRefs(documentIndexStore);
   const { registryRef, rootRef, contentRef, goalColumnRef } = refs;
-  const order = useEditorOrder(store);
+  // Inline-review (docs/038 §5, R6-J J0): when a review plan is supplied, window the diff's
+  // merged spine (live ids + removed ghost ids at their slot) instead of the plain body order,
+  // so ghosts appear in place. `useEditorOrder` stays subscribed unconditionally (hooks rule); it
+  // is simply not the windowed order while reviewing. The shipped path passes no `reviewOrder`, so
+  // `order === liveOrder` and every downstream (windowing, placeholder, list numbering) is unchanged.
+  const liveOrder = useEditorOrder(store);
+  const order = reviewOrder && reviewOrder.length > 0 ? reviewOrder : liveOrder;
 
   // Block-registry wiring (docs/020 §4.3): tiny ref-setters the dispatcher uses
   // to register mounted block elements, input backends, render counts, and live
@@ -500,10 +525,25 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // though a numbered item mounted alone could not from a CSS counter.
   const listMetaForWindow = computeWindowListMeta(
     store,
+    order,
     windowRange.ids,
     windowRange.startIndex,
   );
   const blocks = windowRange.ids.map((id, positionInWindow) => {
+    /*
+     * Inline-review ghost (docs/038 §5, R6-J J0): a removed id is not in the store, so it renders
+     * from its base-side node as an inert `GhostBlock` rather than the store-resolving `EngineBlock`
+     * (which would return null for an absent id). It carries `data-engine-block-id`, so the
+     * ResizeObserver measures it and the offset model virtualizes it exactly like a live block. This
+     * short-circuits before the fling placeholder below (that path does `store.getNode(id)`, null
+     * for a ghost).
+     */
+    const ghostNode = reviewGhosts?.get(id);
+    if (ghostNode) {
+      return (
+        <GhostBlock key={id} node={ghostNode} registerBlock={registerBlock} />
+      );
+    }
     /*
      * Velocity-gated mount (docs/025 §5.5): during a fling, render a cheap
      * height-preserving placeholder for RESTING object blocks instead of
