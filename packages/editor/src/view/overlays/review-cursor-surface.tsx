@@ -43,6 +43,7 @@ import {
   type RefObject,
 } from "react";
 import type { NodeId } from "../../core";
+import type { SuggestionAttribution } from "../../core/suggestions";
 import type { ReviewCursor, ReviewCursorEntry } from "../review-cursor";
 
 /** Card footprint + gap used to choose a placement that does not cover the change (right gutter first). */
@@ -94,6 +95,16 @@ const STATUS_CHIP: CSSProperties = {
   textTransform: "uppercase",
 };
 
+const AUTHOR_CHIP: CSSProperties = {
+  alignItems: "center",
+  borderRadius: "999px",
+  display: "inline-flex",
+  fontSize: "0.72rem",
+  fontWeight: 600,
+  gap: "0.25rem",
+  padding: "0.1rem 0.45rem",
+};
+
 const ROW: CSSProperties = {
   alignItems: "center",
   display: "flex",
@@ -135,6 +146,8 @@ export function ReviewCursorSurface(props: {
   readonly onRejectAll?: () => void;
   /** Open the full diff for this block (§6 T3 drill-in) — a host wires it to a scoped `DiffView`. */
   readonly onViewDiff?: (id: NodeId) => void;
+  /** Session-level proposal attribution (docs/038 §18, R6-J J7). */
+  readonly attribution?: SuggestionAttribution;
   /** Leave review mode (the ✕). */
   readonly onExit?: () => void;
   /**
@@ -153,6 +166,7 @@ export function ReviewCursorSurface(props: {
     onAcceptAll,
     onRejectAll,
     onViewDiff,
+    attribution,
     onExit,
     focusEditor,
   } = props;
@@ -249,13 +263,32 @@ export function ReviewCursorSurface(props: {
       style={style}
     >
       <div style={HEADER}>
-        <span>
+        <span
+          style={{
+            alignItems: "center",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "0.35rem",
+          }}
+        >
           <strong>
             Change {cursor.index + 1} of {cursor.count}
           </strong>{" "}
           <span style={STATUS_CHIP}>
             {STATUS_LABEL[current.status] ?? current.status}
           </span>
+          {attribution ? (
+            <span
+              data-engine-review-author={attribution.author.id}
+              style={{
+                ...AUTHOR_CHIP,
+                background: `color-mix(in srgb, ${attribution.hue} 16%, transparent)`,
+                color: attribution.hue,
+              }}
+            >
+              {attribution.label}
+            </span>
+          ) : null}
         </span>
         {onExit ? (
           <Button

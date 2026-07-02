@@ -71,6 +71,7 @@ import {
 import type { BlockRegistry } from "../registry";
 import { createEditorStore, type EditorStore } from "../store";
 import type {
+  LiveProposalApplication,
   Proposal,
   ProposalApplication,
   ProposalConflict,
@@ -137,6 +138,58 @@ export function applyProposalBlock(
 ): ProposalApplication {
   const ops = groupProposalOps(proposal.ops).byBlock.get(blockId) ?? [];
   return applyOps(current, ops, documentMoved(current, proposal), options);
+}
+
+/**
+ * Optimistically apply a proposal into a live store for woven review mode (docs/038 §13–§16).
+ *
+ * This is the stateful sibling of {@link applyProposal}: it resolves the same identity anchors, then
+ * dispatches each resolvable op through the live store with `origin:"suggested"`,
+ * `recordHistory:false`, and `interactive:false`. That keeps the proposal out of undo/persistence and
+ * prevents programmatic apply from stealing focus. Before a removal lands, the store performs the
+ * focused-block-protection handshake so an EditContext host is not silently unmounted under the caret.
+ */
+export function applyProposalToStore(
+  store: EditorStore,
+  proposal: Proposal,
+): LiveProposalApplication {
+  const focusProtection = store.protectSelectionFromRemoval(
+    removedRoots(proposal.ops),
+  );
+  const moved = proposal.baseVersion !== (store.toSnapshot().revision ?? 0);
+  return applyOpsToStore(store, proposal.ops, moved, focusProtection);
+}
+
+/** Revert a live optimistic proposal apply, after any review-local edits have been unwound. */
+export function revertLiveProposalApplication(
+  store: EditorStore,
+  application: Pick<LiveProposalApplication, "inverse">,
+): void {
+  if (application.inverse.length === 0) return;
+  store.dispatch(
+    {
+      origin: "suggested",
+      steps: application.inverse,
+    },
+    { interactive: false, recordHistory: false },
+  );
+}
+
+/** Revert one block's optimistic proposal ops using the grouped inverse captured during live apply. */
+export function revertLiveProposalBlock(
+  store: EditorStore,
+  application: Pick<LiveProposalApplication, "inverseByBlock">,
+  blockId: NodeId,
+): void {
+  const inverse = application.inverseByBlock.get(blockId) ?? [];
+  if (inverse.length === 0) return;
+  store.dispatch(
+    {
+      origin: "suggested",
+      steps: inverse,
+    },
+    { interactive: false, recordHistory: false },
+  );
 }
 
 /**
@@ -258,6 +311,44 @@ function applyOps(
   return { applied, conflicts, snapshot: store.toSnapshot() };
 }
 
+function applyOpsToStore(
+  store: EditorStore,
+  ops: readonly Step[],
+  moved: boolean,
+  focusProtection: LiveProposalApplication["focusProtection"],
+): LiveProposalApplication {
+  const applied: Step[] = [];
+  const conflicts: ProposalConflict[] = [];
+  const inverse: Step[] = [];
+  const inverseByBlock = new Map<NodeId, Step[]>();
+  for (const op of ops) {
+    try {
+      const resolved = resolveOp(store, op, moved);
+      if (!resolved.ok) {
+        conflicts.push({ node: resolved.node, op, reason: resolved.reason });
+        continue;
+      }
+      const committed = store.dispatch(
+        { origin: "suggested", steps: [resolved.step] },
+        { interactive: false, recordHistory: false },
+      );
+      if (committed) {
+        inverse.unshift(...committed.inverse);
+        const blockId = targetBlockOf(op);
+        if (blockId) {
+          const group = inverseByBlock.get(blockId) ?? [];
+          group.unshift(...committed.inverse);
+          inverseByBlock.set(blockId, group);
+        }
+      }
+      applied.push(op);
+    } catch {
+      conflicts.push({ node: targetBlockOf(op), op, reason: "apply-failed" });
+    }
+  }
+  return { applied, conflicts, focusProtection, inverse, inverseByBlock };
+}
+
 function resolveOp(store: EditorStore, op: Step, moved: boolean): Resolution {
   switch (op.type) {
     case "replace-text":
@@ -318,6 +409,15 @@ function resolveOp(store: EditorStore, op: Step, moved: boolean): Resolution {
       // Changes pane is a view concern, docs/038 §17).
       return { ok: true, step: op };
   }
+}
+
+function removedRoots(ops: readonly Step[]): NodeId[] {
+  const out: NodeId[] = [];
+  for (const op of ops) {
+    if (op.type === "remove-node") out.push(op.node.id);
+    else if (op.type === "move-node") out.push(op.node);
+  }
+  return out;
 }
 
 function resolveReplaceText(

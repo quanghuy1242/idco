@@ -40,6 +40,8 @@ export type OwnedEditorHandle = {
   getDocument(): RichTextCompatDocument;
   /** The authoritative owned-model snapshot. */
   getEditorSnapshot(): EditorDocumentSnapshot;
+  /** Whether a public save may serialize the live store now. False during proposal review mode. */
+  canSave(): boolean;
   /** Whether the document changed since creation or the last `markClean`. */
   isDirty(): boolean;
   /** Reset the dirty baseline (call after a successful save). */
@@ -113,6 +115,9 @@ export function createOwnedEditorHandle(
     deactivateObject() {
       store.deactivateObject();
     },
+    canSave() {
+      return store.canSaveSnapshot;
+    },
     dispatch(command) {
       store.command(command);
     },
@@ -126,6 +131,7 @@ export function createOwnedEditorHandle(
       return compatFromEditorStore(store, options.registry);
     },
     getEditorSnapshot() {
+      store.assertCanSaveSnapshot();
       return store.toSnapshot();
     },
     getSelection() {

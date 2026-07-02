@@ -50,6 +50,7 @@ function structuralEntry(id: string): CommittedTransaction {
   // A non-text step never coalesces, so each `record` pushes a distinct entry.
   return {
     inverse: [],
+    interactive: true,
     origin: "local",
     selectionAfter: null,
     selectionBefore: null,

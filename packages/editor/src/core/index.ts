@@ -162,6 +162,7 @@ export type {
   Step,
   StoreDirty,
   TransactionDraft,
+  TransactionOrigin,
 } from "./model";
 export type {
   EnginePerformanceDashboard,
@@ -225,6 +226,9 @@ export {
   type HistoryOverflow,
   type NodeBody,
   type PendingFormat,
+  type ReviewFocusProtection,
+  type ReviewModeOptions,
+  type ReviewModeState,
   type SchemaProfile,
 } from "./store";
 export { diffSnapshots } from "./diff";
@@ -264,13 +268,20 @@ export {
   anchorlessChanges,
   applyProposal,
   applyProposalBlock,
+  applyProposalToStore,
+  attributionForTextRun,
   groupProposalOps,
+  proposalAttribution,
+  revertLiveProposalApplication,
+  revertLiveProposalBlock,
   targetBlockOf,
   type ProposalApplyOptions,
+  type SuggestionAttribution,
 } from "./suggestions";
 export type {
   AnchorlessChange,
   AnchorlessChangeKind,
+  LiveProposalApplication,
   Proposal,
   ProposalApplication,
   ProposalAuthor,

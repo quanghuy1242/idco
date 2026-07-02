@@ -18,6 +18,9 @@ export {
   type PendingFormat,
   type EditorSubscriber,
   type EditorCommitSubscriber,
+  type ReviewFocusProtection,
+  type ReviewModeOptions,
+  type ReviewModeState,
 } from "./editor-store";
 export { collectSelectionText, orderedTextLeaves } from "./selection";
 export {

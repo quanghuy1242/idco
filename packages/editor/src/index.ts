@@ -390,6 +390,9 @@ export {
   createOwnedEditorHandle,
   type EditorStore,
   type EditorStoreOptions,
+  type ReviewFocusProtection,
+  type ReviewModeOptions,
+  type ReviewModeState,
   type SchemaProfile,
   type EditorSubscriber,
   type EditorCommitSubscriber,
@@ -435,6 +438,7 @@ export {
   type JsonValue,
   type ParentEntry,
   type CommittedTransaction,
+  type TransactionOrigin,
 } from "./core";
 export {
   resolveLeafMarks,
@@ -477,13 +481,20 @@ export {
   anchorlessChanges,
   applyProposal,
   applyProposalBlock,
+  applyProposalToStore,
+  attributionForTextRun,
   groupProposalOps,
+  proposalAttribution,
+  revertLiveProposalApplication,
+  revertLiveProposalBlock,
   targetBlockOf,
   type ProposalApplyOptions,
+  type SuggestionAttribution,
 } from "./core";
 export type {
   AnchorlessChange,
   AnchorlessChangeKind,
+  LiveProposalApplication,
   Proposal,
   ProposalApplication,
   ProposalAuthor,

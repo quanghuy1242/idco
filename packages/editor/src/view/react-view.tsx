@@ -472,9 +472,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // toolbar returns focus via `focusEditor`, but a bare `store.command` delete (a
   // host button, a programmatic edit) does not, so the engine must re-home it.
   //
-  // The trigger is the commit, not a focus event: only a *local structural* commit
-  // can orphan the user's own focus (a remote/collaborative edit must never grab
-  // focus; a pure text edit never unmounts the host). We re-check on the next frame
+  // The trigger is the commit, not a focus event: only an *interactive structural* commit
+  // can orphan the user's own focus. Review-mode typing is `origin:"suggested"` so persistence can
+  // block it, but it is still human input and must reclaim; programmatic optimistic apply/revert is
+  // non-interactive and must not grab focus. We re-check on the next frame
   // — the same "let focus settle" deferral the focus-within gate uses, here across
   // the view's structural re-render — and reclaim only when focus actually fell to
   // body, the selection's block is mounted, and a focus-taking overlay is not
@@ -483,7 +484,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // `blockRefs.has` guard fails and nothing is reclaimed.
   useEffect(() => {
     return store.subscribeCommit((committed) => {
-      if (committed.origin !== "local" || !committed.structureChanged) return;
+      if (!committed.interactive || !committed.structureChanged) return;
       requestFrame(() => {
         if (store.isReclaimSuspended()) return;
         const sel = store.selection;

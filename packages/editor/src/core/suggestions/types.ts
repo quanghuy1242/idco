@@ -102,6 +102,26 @@ export type ProposalApplication = {
 };
 
 /**
+ * The result of optimistically applying a proposal into a live `EditorStore` (docs/038 §13–§16).
+ *
+ * `inverse` reverts the programmatic optimistic apply. It does not include reviewer edits made during
+ * review mode; reject-all first asks the store to replay the review-local segment, then dispatches
+ * this inverse.
+ */
+export type LiveProposalApplication = {
+  readonly applied: readonly Step[];
+  readonly conflicts: readonly ProposalConflict[];
+  readonly inverse: readonly Step[];
+  /** Revert steps for each block's optimistic op group, in dispatch-ready reverse order. */
+  readonly inverseByBlock: ReadonlyMap<NodeId, readonly Step[]>;
+  readonly focusProtection: {
+    readonly relocated: boolean;
+    readonly from: NodeId | null;
+    readonly to: NodeId | null;
+  };
+};
+
+/**
  * A proposal's ops grouped by the block they act on (docs/036 §7.5) — the substrate for per-block
  * accept/reject.
  *

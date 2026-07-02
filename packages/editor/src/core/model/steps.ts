@@ -17,8 +17,9 @@
  *   document snapshots.
  * - `from`/`to` fields are not decorative; dispatch checks them against live
  *   state so stale commands fail instead of corrupting history.
- * - `origin` is always `"local"` now, but it is present from day one so future
- *   collaboration does not require a history-layer rewrite.
+ * - `origin` separates ordinary local edits from proposed-review edits. It is an
+ *   attribution/persistence tag, not a focus-reclaim signal; the store also marks
+ *   whether a commit came from an interactive entry point.
  */
 import type {
   CollectionItem,
@@ -170,11 +171,14 @@ export type Step =
   | SetSettingsStep
   | SetCollectionStep;
 
+/** Where a transaction came from for attribution/persistence policy. */
+export type TransactionOrigin = "local" | "suggested";
+
 /** A command-produced transaction before dispatch captures inverses. */
 export type TransactionDraft = {
   readonly steps: readonly Step[];
   readonly selectionAfter?: EditorSelection;
-  readonly origin: "local";
+  readonly origin: TransactionOrigin;
 };
 
 /** A transaction after dispatch, with inverse steps and dirty metadata. */
@@ -186,7 +190,15 @@ export type CommittedTransaction = {
   readonly touched: ReadonlySet<NodeId>;
   readonly settingsChanged: boolean;
   readonly structureChanged: boolean;
-  readonly origin: "local";
+  readonly origin: TransactionOrigin;
+  /**
+   * True when a human-facing entry point initiated the commit (typing, commands, undo/redo).
+   *
+   * Review mode tags reviewer edits as `origin:"suggested"` so they stay out of persistence until
+   * resolved. Focus reclaim still needs to run for those human edits, while programmatic optimistic
+   * proposal apply/revert must not grab focus. The view keys reclaim on this flag, not on `origin`.
+   */
+  readonly interactive: boolean;
 };
 
 /** Per-subscriber dirty summary; no full-document invalidation on text edits. */

@@ -62,6 +62,11 @@ export function useAutosave(
     const runSave = async () => {
       if (savingRef.current) return; // a save is in flight; the token guard re-runs
       if (!handle.isDirty()) return;
+      if (!handle.canSave()) {
+        setState((prev) => ({ ...prev, isDirty: true, isSaving: false }));
+        schedule();
+        return;
+      }
       const token = tokenRef.current;
       savingRef.current = true;
       setState((prev) => ({ ...prev, isSaving: true }));

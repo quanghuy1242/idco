@@ -33,6 +33,7 @@ import {
   makeObjectNode,
   makeStructuralNode,
   makeTextNode,
+  pointAtOffset,
   replaceTextContent,
   resolvePointOffset,
   selectionsEqual,
@@ -88,6 +89,7 @@ import {
   type Step,
   type StoreDirty,
   type TransactionDraft,
+  type TransactionOrigin,
 } from "../model";
 import { marksCoveringCaret } from "./history";
 import { HistoryPool, type HistoryConfig } from "./history-pool";
@@ -197,6 +199,29 @@ export type EditorSubscriber = (dirty: StoreDirty) => void;
 /** Callback notified once per committed transaction with the transaction that landed. */
 export type EditorCommitSubscriber = (committed: CommittedTransaction) => void;
 
+/** Public snapshot of the current proposal-review mode, or `null` when ordinary editing is active. */
+export type ReviewModeState = {
+  /** Host/source proposal id under review. */
+  readonly proposalId: string;
+  /** Number of proposal ops still unresolved in the live store. Zero means save may resume. */
+  readonly pendingOps: number;
+  /** Document revision when the mode was entered, useful for diagnostics/stories. */
+  readonly startedAtRevision: number;
+};
+
+/** Options for entering review mode. */
+export type ReviewModeOptions = {
+  readonly proposalId: string;
+  readonly pendingOps: number;
+};
+
+/** Result of moving the selection away from a block that review-mode apply is about to remove. */
+export type ReviewFocusProtection = {
+  readonly relocated: boolean;
+  readonly from: NodeId | null;
+  readonly to: NodeId | null;
+};
+
 type MutableDispatchState = {
   readonly touched: Set<NodeId>;
   /**
@@ -213,6 +238,13 @@ type MutableDispatchState = {
   structureChanged: boolean;
   /** A `set-collection` step ran; drives the commit's collections-changed flag. */
   collectionsChanged: boolean;
+};
+
+type MutableReviewMode = {
+  readonly proposalId: string;
+  pendingOps: number;
+  readonly startedAtRevision: number;
+  readonly history: HistoryPool;
 };
 
 /**
@@ -356,6 +388,14 @@ export class EditorStore {
   // stacks, the typing-coalesce bookkeeping, and the depth/byte cap. Registered with the
   // memory arbiter below.
   readonly #history: HistoryPool;
+  /*
+   * Review-local history (docs/038 §15, R6-J J6). This is deliberately a SECOND HistoryPool, not a
+   * barrier inside the main pool: reject-all replays these inverses, so letting the main budget evict
+   * the oldest in-review entry would corrupt reject. The pool is transient, single-proposal-scoped,
+   * unbounded, and never registered with the memory arbiter. While it exists, normal history is frozen:
+   * user edits record here, programmatic optimistic apply/revert records nowhere.
+   */
+  #reviewMode: MutableReviewMode | null = null;
   // The memory budget arbiter (docs/030 §7.6 D6, SLP-4): caps the summed bytes of its
   // registered pools (history here; the view registers the bake cache; the body pool lands
   // with paging) and rebalances under pressure. Inert until a finite `memoryBudget` is set.
@@ -912,7 +952,171 @@ export class EditorStore {
    * activation, so a typing run never coalesces across those.
    */
   breakUndoCoalescing(): void {
+    this.#activeHistory().breakCoalescing();
+  }
+
+  #activeHistory(): HistoryPool {
+    return this.#reviewMode?.history ?? this.#history;
+  }
+
+  /** Whether a proposal is currently applied into the live store for in-place review. */
+  get isReviewMode(): boolean {
+    return this.#reviewMode !== null;
+  }
+
+  /** The active review-mode state, or `null` during ordinary editing. */
+  get reviewMode(): ReviewModeState | null {
+    const mode = this.#reviewMode;
+    return mode
+      ? {
+          pendingOps: mode.pendingOps,
+          proposalId: mode.proposalId,
+          startedAtRevision: mode.startedAtRevision,
+        }
+      : null;
+  }
+
+  /**
+   * Enter proposal review mode (docs/038 §12–§15).
+   *
+   * The caller should optimistically apply the proposal ops with `recordHistory:false` before or
+   * immediately after this call. From this point, human edits record into the review-local segment and
+   * get `origin:"suggested"`; saves stay blocked until the caller resolves every pending op and exits.
+   */
+  beginReviewMode(options: ReviewModeOptions): void {
+    if (this.#reviewMode) {
+      throw new Error("A proposal is already under review");
+    }
+    this.#reviewMode = {
+      history: new HistoryPool(),
+      pendingOps: Math.max(0, options.pendingOps),
+      proposalId: options.proposalId,
+      startedAtRevision: this.#revision,
+    };
     this.#history.breakCoalescing();
+  }
+
+  /** Update the unresolved proposal-op count; save may resume once it reaches zero and mode exits. */
+  setReviewPendingOps(count: number): void {
+    if (!this.#reviewMode) return;
+    this.#reviewMode.pendingOps = Math.max(0, count);
+  }
+
+  /**
+   * Mark a block-level accept/reject boundary inside review mode (docs/038 §15).
+   *
+   * A block resolution removes only a subset of proposal/reviewer edits from a linear segment. Cutting
+   * the coalescing boundary here prevents a later Ctrl+Z from crossing into a segment whose dependency
+   * shape changed under it.
+   */
+  markReviewResolutionBoundary(): void {
+    this.#reviewMode?.history.breakCoalescing();
+  }
+
+  /**
+   * Leave proposal review mode.
+   *
+   * This discards the transient review history segment. Callers that reject should first call
+   * `revertReviewEdits()`; callers that accept keep the live document state and may push their own
+   * host-level lifecycle event. The store does not infer host proposal status.
+   */
+  endReviewMode(): void {
+    if (!this.#reviewMode) return;
+    this.#reviewMode = null;
+    this.#history.breakCoalescing();
+  }
+
+  /**
+   * Replay every in-review edit inverse and clear the transient segment.
+   *
+   * Reject-all uses this before reverting the proposal's optimistic ops. The method does not push to
+   * the redo side: the segment is a temporary review-mode truth, not ordinary undo history, and after a
+   * reject the proposal mode ends. Keeping redo entries here would let a user redo rejected suggested
+   * edits after the proposal has gone away.
+   */
+  revertReviewEdits(): readonly CommittedTransaction[] {
+    const mode = this.#reviewMode;
+    if (!mode) return [];
+    const reverted: CommittedTransaction[] = [];
+    while (mode.history.canUndo) {
+      const entry = mode.history.takeUndo();
+      if (!entry) break;
+      const committed = this.#commit(
+        {
+          origin: "suggested",
+          selectionAfter: entry.selectionBefore ?? undefined,
+          steps: entry.inverse,
+        },
+        { interactive: false, recordHistory: false },
+      );
+      reverted.push(committed);
+    }
+    mode.history.breakCoalescing();
+    return reverted;
+  }
+
+  /** True when public persistence may serialize the live document. */
+  get canSaveSnapshot(): boolean {
+    return !this.#reviewMode;
+  }
+
+  /** Throw the review-mode save gate error used by public save paths. */
+  assertCanSaveSnapshot(): void {
+    if (this.canSaveSnapshot) return;
+    throw new Error(
+      "Cannot save while a proposal is under review; accept or reject it first.",
+    );
+  }
+
+  /**
+   * Move the current selection out of subtrees a programmatic review operation will remove.
+   *
+   * Optimistic apply/reject can delete the very text leaf that owns the EditContext host. On mobile
+   * that unmount causes the keyboard-flicker class docs/038 §13 calls out. The handshake is explicit:
+   * before applying such a proposal, relocate the caret to a surviving neighbour, then let the
+   * programmatic mutation run. This does not promise zero host swaps; it turns a silent mid-typing
+   * unmount into a deliberate review-mode transition the host can announce.
+   */
+  protectSelectionFromRemoval(
+    rootIds: readonly NodeId[],
+  ): ReviewFocusProtection {
+    const selectionNode =
+      this.#selection?.type === "text"
+        ? this.#selection.focus.node
+        : this.#selection?.type === "node"
+          ? this.#selection.node
+          : null;
+    if (!selectionNode || rootIds.length === 0) {
+      return { from: selectionNode, relocated: false, to: null };
+    }
+    const roots = new Set(rootIds);
+    const isRemoved = (id: NodeId): boolean => {
+      let current: NodeId | null = id;
+      while (current && current !== ROOT_NODE_ID) {
+        if (roots.has(current)) return true;
+        current = this.#parentOf.get(current)?.parent ?? null;
+      }
+      return false;
+    };
+    if (!isRemoved(selectionNode)) {
+      return { from: selectionNode, relocated: false, to: null };
+    }
+    const target = this.#nearestSurvivingText(selectionNode, isRemoved);
+    if (!target) return { from: selectionNode, relocated: false, to: null };
+    const focus = pointAtOffset(
+      target.id,
+      target.content,
+      target.content.text.length,
+    );
+    this.dispatch(
+      {
+        origin: "local",
+        selectionAfter: { anchor: focus, focus, type: "text" },
+        steps: [],
+      },
+      { interactive: false, recordHistory: false },
+    );
+    return { from: selectionNode, relocated: true, to: target.id };
   }
 
   #isCollapsedTextCaret(): boolean {
@@ -957,12 +1161,23 @@ export class EditorStore {
    */
   dispatch(
     transaction: TransactionBuilder | TransactionDraft,
-    options?: { readonly recordHistory?: boolean },
+    options?: {
+      readonly recordHistory?: boolean;
+      readonly interactive?: boolean;
+      readonly origin?: TransactionOrigin;
+    },
   ): CommittedTransaction | null {
-    const draft =
+    const built =
       transaction instanceof TransactionBuilder
         ? transaction.build()
         : transaction;
+    const recordHistory = options?.recordHistory ?? built.steps.length > 0;
+    const draft: TransactionDraft = {
+      ...built,
+      origin:
+        options?.origin ??
+        (this.#reviewMode && recordHistory ? "suggested" : built.origin),
+    };
     if (draft.steps.length === 0 && !draft.selectionAfter) return null;
     // A content-free transaction (every click and arrow key dispatches one with
     // empty `steps`) is non-historic: recording it would make undo step back
@@ -974,9 +1189,11 @@ export class EditorStore {
     // resolve lifecycle (docs/026 §7.2/§14.6): a background snapshot refresh or an
     // unresolved/invalid status change must not enter undo and must not clear redo,
     // exactly like a caret move.
-    const recordHistory = options?.recordHistory ?? draft.steps.length > 0;
-    const committed = this.#commit(draft, { recordHistory });
-    if (recordHistory) this.#history.clearRedo();
+    const committed = this.#commit(draft, {
+      interactive: options?.interactive ?? recordHistory,
+      recordHistory,
+    });
+    if (recordHistory) this.#activeHistory().clearRedo();
     return committed;
   }
 
@@ -1016,12 +1233,12 @@ export class EditorStore {
 
   /** Whether there is an applied transaction to undo (toolbar enablement). */
   get canUndo(): boolean {
-    return this.#history.canUndo;
+    return this.#activeHistory().canUndo;
   }
 
   /** Whether there is an undone transaction to redo (toolbar enablement). */
   get canRedo(): boolean {
-    return this.#history.canRedo;
+    return this.#activeHistory().canRedo;
   }
 
   /** Apply the latest inverse transaction and restore its stored selection. */
@@ -1029,36 +1246,38 @@ export class EditorStore {
     // takeUndo pops the done stack (faulting one cold-stored entry back first under
     // `overflow: "cold-store"`) and re-breaks coalescing; it returns null when nothing is
     // reachable — undo stops cleanly at the cap under `overflow: "drop"` (docs/030 §7.6).
-    const entry = this.#history.takeUndo();
+    const history = this.#activeHistory();
+    const entry = history.takeUndo();
     if (!entry) return null;
     // Undo/redo drop a pending format so the next edit starts a fresh group (docs/011 §7.5).
     this.#pendingFormat = null;
     const committed = this.#commit(
       {
-        origin: "local",
+        origin: this.#reviewMode ? "suggested" : "local",
         selectionAfter: entry.selectionBefore ?? undefined,
         steps: entry.inverse,
       },
-      { recordHistory: false },
+      { interactive: true, recordHistory: false },
     );
-    this.#history.pushUndone(entry);
+    history.pushUndone(entry);
     return committed;
   }
 
   /** Re-apply the latest undone transaction and restore its selection. */
   redo(): CommittedTransaction | null {
-    const entry = this.#history.takeRedo();
+    const history = this.#activeHistory();
+    const entry = history.takeRedo();
     if (!entry) return null;
     this.#pendingFormat = null;
     const committed = this.#commit(
       {
-        origin: "local",
+        origin: this.#reviewMode ? "suggested" : "local",
         selectionAfter: entry.selectionAfter ?? undefined,
         steps: entry.steps,
       },
-      { recordHistory: false },
+      { interactive: true, recordHistory: false },
     );
-    this.#history.pushDone(entry);
+    history.pushDone(entry);
     return committed;
   }
 
@@ -1286,7 +1505,10 @@ export class EditorStore {
 
   #commit(
     draft: TransactionDraft,
-    options: { readonly recordHistory: boolean },
+    options: {
+      readonly interactive: boolean;
+      readonly recordHistory: boolean;
+    },
   ): CommittedTransaction {
     const inverses: Step[] = [];
     const state: MutableDispatchState = {
@@ -1342,6 +1564,7 @@ export class EditorStore {
       steps: draft.steps,
       structureChanged: state.structureChanged,
       touched: new Set(state.touched),
+      interactive: options.interactive,
     };
     // Advance the persisted document revision (docs/036 D15) once per step-bearing commit —
     // including a `recordHistory:false` data change (an object resolve/re-bake), which is still a
@@ -1349,7 +1572,7 @@ export class EditorStore {
     // edit. Kept out of `toSnapshot()` when 0 and out of `diffSnapshots`, so the bump is invisible
     // to equality/parity and to the change indicator; it only labels staleness for proposals.
     if (draft.steps.length > 0) this.#revision += 1;
-    if (options.recordHistory) this.#history.record(committed);
+    if (options.recordHistory) this.#activeHistory().record(committed);
     // Keep the persisted block map in lockstep with `#nodes` (docs/030 §7.4, SLP-1). Runs
     // for every commit — including a `recordHistory:false` resolve/SWR data change — so the
     // snapshot reflects genuine data changes while leaving untouched keys alone.
@@ -1872,6 +2095,51 @@ export class EditorStore {
       });
     };
     visit(ROOT_NODE_ID, this.#order);
+  }
+
+  #nearestSurvivingText(
+    from: NodeId,
+    isRemoved: (id: NodeId) => boolean,
+  ): TextLeafNode | null {
+    const topAncestor = (() => {
+      let current = from;
+      let parent = this.#parentOf.get(current)?.parent;
+      while (parent && parent !== ROOT_NODE_ID) {
+        current = parent;
+        parent = this.#parentOf.get(current)?.parent;
+      }
+      return current;
+    })();
+    const topIndex = this.#order.indexOf(topAncestor);
+    const candidateIds: NodeId[] = [];
+    for (let i = topIndex + 1; i < this.#order.length; i += 1) {
+      candidateIds.push(this.#order[i]!);
+    }
+    for (let i = topIndex - 1; i >= 0; i -= 1) {
+      candidateIds.push(this.#order[i]!);
+    }
+    for (const id of candidateIds) {
+      if (isRemoved(id)) continue;
+      const found = this.#firstTextLeaf(id, isRemoved);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  #firstTextLeaf(
+    id: NodeId,
+    isRemoved: (id: NodeId) => boolean,
+  ): TextLeafNode | null {
+    if (isRemoved(id)) return null;
+    const node = this.getNode(id);
+    if (!node) return null;
+    if (node.kind === "text") return node;
+    if (node.kind !== "structural") return null;
+    for (const child of node.children) {
+      const found = this.#firstTextLeaf(child, isRemoved);
+      if (found) return found;
+    }
+    return null;
   }
 
   #pathOf(id: NodeId): readonly number[] {

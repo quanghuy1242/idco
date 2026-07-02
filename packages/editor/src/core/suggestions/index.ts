@@ -9,10 +9,18 @@
 export {
   applyProposal,
   applyProposalBlock,
+  applyProposalToStore,
   groupProposalOps,
+  revertLiveProposalApplication,
+  revertLiveProposalBlock,
   targetBlockOf,
   type ProposalApplyOptions,
 } from "./apply-proposal";
+export {
+  attributionForTextRun,
+  proposalAttribution,
+  type SuggestionAttribution,
+} from "./attribution";
 export { anchorlessChanges } from "./changes-routing";
 export type { AnchorlessChange, AnchorlessChangeKind } from "./changes-routing";
 export type {
@@ -24,4 +32,5 @@ export type {
   ProposalConflictReason,
   ProposalOpGroups,
   ProposalStatus,
+  LiveProposalApplication,
 } from "./types";

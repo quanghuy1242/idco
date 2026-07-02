@@ -98,6 +98,7 @@ export function mergeTypingEntries(
 ): CommittedTransaction {
   return {
     inverse: [...next.inverse, ...previous.inverse],
+    interactive: previous.interactive || next.interactive,
     origin: previous.origin,
     selectionAfter: next.selectionAfter,
     selectionBefore: previous.selectionBefore,
