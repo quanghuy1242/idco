@@ -1,6 +1,6 @@
 {
   "name": "@quanghuy1242/idco-editor-legacy",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "type": "module",
   "sideEffects": false,
   "publishConfig": {
