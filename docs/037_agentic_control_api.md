@@ -20,6 +20,7 @@
 > - `docs/024_command_surface_spi.md` — the command-surface SPI (ribbon/menu/flyout); the agentic API is a peer consumer of the same command descriptors.
 > - `docs/033_consumer_integration_contract.md` — the consumer integration contract; the transports extend it.
 > - `docs/036_snapshot_diff_and_document_history_review.md` — the suggested-edits system. `037` is the **producer** of proposals; `036` is where they land and are reviewed. Propose-by-default (§7) targets `036`'s `Proposal`/`SuggestionSource`.
+> - `docs/038_woven-overlay-design.md` — the **woven inline diff overlay** design system: the live in-editor surface where a proposal from an agent (this doc) is reviewed in place and accepted/rejected. It is the concrete rendering-and-resolution home for `037` option-A propose-by-default — `038` the consumer, `037` the producer.
 > - `docs/006_editor_toolbar_redesign_plan.md` — §4.7 the AI tab and the "propose review change" output mode.
 > - `docs/027_review_tab_side_panel_and_document_insight.md` — §2.2 the derived document index (`buildDocumentIndex`) the read/query layer reuses.
 >

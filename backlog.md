@@ -6,7 +6,7 @@ Seven tracks that came out of a design discussion, each grounded against the cur
 
 Three rules cut across every item: each feature round-trips editor↔reader (the snapshot-parity oracle, `[[reader-convergence-028]]`); none pulls product or runtime deps into `packages/editor` or `packages/ui` (the shared-package boundary); and the native `EditorDocumentSnapshot` (`core/model/model.ts:305`) is the single source of truth, with markdown and every export a projection of it.
 
-Two tracks grew their own implementation-grade docs: #6 (diff, inline review, and suggested edits) is `docs/036_snapshot_diff_and_document_history_review.md`, and #7 (the agentic control API) is `docs/037_agentic_control_api.md`. The two reference each other and stay separate: `037` produces proposals, `036` reviews them. The rest are small-to-medium.
+Two tracks grew their own implementation-grade docs: #6 (diff, inline review, and suggested edits) is `docs/036_snapshot_diff_and_document_history_review.md` — with the **woven inline diff overlay** design system split into `docs/038_woven-overlay-design.md` — and #7 (the agentic control API) is `docs/037_agentic_control_api.md`. The three reference each other and stay separate: `037` produces proposals, `036`/`038` review them. The rest are small-to-medium.
 
 | # | Track | Status | Size |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Two tracks grew their own implementation-grade docs: #6 (diff, inline review, an
 | 3 | Virtualization: object-render lag + selection scroll-desync | done (2026-07-02, note.md §7) | small–medium |
 | 4 | Columns container (discrete, per-column selection) | decided; ready to scope | small–medium |
 | 5 | Math: block node, then inline atom | block ready; inline is a model extension | small (block) + medium (inline) |
-| 6 | Snapshot diff + inline review + suggested edits | design doc `docs/036` | large |
+| 6 | Snapshot diff + inline review + suggested edits | R6-A..I shipped; woven overlay = R6-J phase, designed in `docs/038` | large |
 | 7 | Agentic control API | design doc `docs/037` | medium–large |
 
 ## 1. Reflowable EPUB3 + PDF export
@@ -95,11 +95,11 @@ Size: block small; inline medium. Node SPI lineage (`docs/016`); inline touches 
 The full implementation-grade plan is `docs/036`. Headlines:
 
 - **Identity diff, not text diff.** Text leaves are one string + run-encoded character ids (the durable coordinate for marks and points), and every node has a stable NodeId. For two versions of the same document you match nodes by NodeId and characters by CharacterId, so insert/delete/move/edit come out clean instead of as delete-plus-insert noise. A framework-free core `diffSnapshots(base, target): SnapshotDiff` (`core/diff/**`).
-- **Two display surfaces on the reader L1.** A dedicated **diff view** (two saved versions, unified or side-by-side) and a live **inline overlay** (changes rendered in place over the editor). Both reuse the reader's pure per-node render, inheriting editor↔reader parity.
-- **Suggested edits (Model A, ship now).** A proposal is an attributed **op-log branch** (`{ id, author, baseVersion, ops, status, threadId }`), stored host-side through a new `SuggestionSource` SPI (sibling of `CommentSource`). The inline overlay is the derived diff; **accept applies the ops, reject drops them**, at whole-proposal or per-block granularity (per-run is deferred). Attribution is nearly free (`origin` + `CharacterId.client`). The discussion, dock pane, and accept/reject affordance reuse the comment system and the overlay authority; the change content is ops, the conversation is a comment thread — kept separate.
+- **Two display surfaces on the reader L1.** A dedicated **diff view** (two saved versions, unified or side-by-side; shipped R6-F..H) and a live **woven inline overlay** (changes rendered in place over the editor; the change indicator shipped in R6-I, the full woven surface is the single R6-J phase, designed in `docs/038`, starting at its ghost-render spike J0). Both reuse the reader's pure per-node render, inheriting editor↔reader parity.
+- **Suggested edits (Model A, ship now).** A proposal is an attributed **op-log branch** (`{ id, author, baseVersion, ops, status, threadId }`), stored host-side through a new `SuggestionSource` SPI (sibling of `CommentSource`). The inline overlay is the derived diff; **accept applies the ops, reject drops them**, at whole-proposal or per-block granularity (per-run is deferred). Attribution is nearly free (`origin` + `CharacterId.client`). The discussion, dock pane, and accept/reject affordance reuse the comment system and the overlay authority; the change content is ops, the conversation is a comment thread — kept separate. The full woven-overlay design system that renders and resolves this (single-proposal review, the `ReviewModel`/`GhostBlock` ghost pipeline, the passive-marker + review-cursor split, caret-intent reclaim, saves blocked in review mode, and a separate arbiter-exempt in-review undo segment) is `docs/038`.
 - **Model B (concurrent tombstones) reserved.** Inline suggestions with tombstoned deletions for many concurrent authors is the collaboration-era upgrade; it shares Model A's review wrapper and ops, and its net-new (tombstones + convergence) is the CRDT work collaboration needs anyway (`docs/014 §7`). Model A stored as op-logs is what keeps A→B a reuse, not a rewrite.
 
-Size: large. The producer of proposals is `docs/037`; this doc is where they land and are reviewed.
+Size: large. R6-A..I have shipped; the woven overlay + Model-A suggested edits are the single **R6-J phase** (steps J0–J8, ghost-render spike first), design-complete in `docs/038`. The producer of proposals is `docs/037`; `036`/`038` are where they land and are reviewed.
 
 ## 7. Agentic control API — `docs/037`
 
