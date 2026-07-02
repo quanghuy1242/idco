@@ -304,6 +304,21 @@ export type CollectionItem = JsonObject & { readonly id: string };
 /** JSON-serializable owned-model persistence shape, not the mutable store. */
 export type EditorDocumentSnapshot = {
   readonly version: 1;
+  /**
+   * Monotonic document revision (docs/036 D15, §3.3), bumped once per committed
+   * step-bearing transaction. NOT `version` (that is the schema literal `1`) and
+   * NOT the handle's in-memory dirty counter (`editor-handle.ts`, which resets per
+   * session): this is the *persisted* revision a suggested-edit proposal names as
+   * its `baseVersion` to label staleness ("made against N, the document is now
+   * N+7") and to order proposals — it is a staleness signal, not a rebase key
+   * (apply is identity-anchored, docs/036 §7.3). Added additively: optional, and
+   * `toSnapshot()` OMITS it when 0, so a document that never bumped serializes
+   * byte-identically to before this field existed and a legacy snapshot without it
+   * reads as revision 0. It is deliberately excluded from `diffSnapshots` (which
+   * compares body/settings/collections only), so a revision bump alone is never a
+   * reported change — the live change indicator and woven overlay stay quiet.
+   */
+  readonly revision?: number;
   readonly body: {
     readonly order: readonly NodeId[];
     readonly blocks: Readonly<Record<NodeId, EditorSnapshotNode>>;

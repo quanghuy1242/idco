@@ -406,6 +406,14 @@ export class EditorStore {
   #collections: Record<string, readonly CollectionItem[]> = {};
   #pendingFormat: PendingFormat | null = null;
   #markCounter = 0;
+  // The persisted, monotonic document revision (docs/036 D15, §3.3). Seeded from the loaded
+  // snapshot (legacy/absent → 0) and bumped once per committed step-bearing transaction in
+  // `#commit`, so it advances on real content changes but not on caret-only commits. It is the
+  // `baseVersion` a suggested-edit proposal is made against — a staleness label, not a rebase key
+  // — and is deliberately kept OUT of `toSnapshot()` when 0 and out of `diffSnapshots` entirely, so
+  // it never perturbs byte-identity or the change indicator. Distinct from `editor-handle.ts`'s
+  // in-memory dirty counter, which also happens to be named "revision" but resets per session.
+  #revision = 0;
   // The incrementally-maintained persisted block map (docs/030 §7.4 D4, SLP-1). Kept in
   // lockstep with `#nodes` (minus ROOT) so `toSnapshot()` is O(changed) instead of
   // rebuilding the whole map each save. `#snapshotBlocksPublished` drives copy-on-write:
@@ -438,6 +446,9 @@ export class EditorStore {
     this.#nodes.set(ROOT_NODE_ID, root);
     if (options.snapshot) {
       this.#settings = options.snapshot.settings;
+      // Continue the loaded document's revision line (docs/036 D15); a legacy snapshot without the
+      // field reads as 0, so a fresh document and a pre-revision stored one both start at 0.
+      this.#revision = options.snapshot.revision ?? 0;
       // Single-pass ingest (docs/030 §7.5 D5, SLP-2). Two costs the old load paid before
       // first paint are dev-only tripwires gated off in production: `freezeNode`
       // self-gates (model.ts), and `assertParentInvariant` is skipped below. The third
@@ -1113,12 +1124,17 @@ export class EditorStore {
       Object.keys(this.#collections).length > 0
         ? { collections: this.#collections }
         : {};
+    // Include `revision` only when it has advanced past 0 (docs/036 D15), mirroring the
+    // `collections` omission above: a document that never bumped serializes byte-identically to
+    // before this field existed, so existing snapshots and equality assertions are unaffected.
+    const revision = this.#revision > 0 ? { revision: this.#revision } : {};
     return {
       body: {
         blocks,
         order: [...this.#order],
       },
       ...collections,
+      ...revision,
       settings: this.#settings,
       version: 1,
     };
@@ -1327,6 +1343,12 @@ export class EditorStore {
       structureChanged: state.structureChanged,
       touched: new Set(state.touched),
     };
+    // Advance the persisted document revision (docs/036 D15) once per step-bearing commit —
+    // including a `recordHistory:false` data change (an object resolve/re-bake), which is still a
+    // genuine content change — but NOT on a stepless caret-only commit, which is navigation, not an
+    // edit. Kept out of `toSnapshot()` when 0 and out of `diffSnapshots`, so the bump is invisible
+    // to equality/parity and to the change indicator; it only labels staleness for proposals.
+    if (draft.steps.length > 0) this.#revision += 1;
     if (options.recordHistory) this.#history.record(committed);
     // Keep the persisted block map in lockstep with `#nodes` (docs/030 §7.4, SLP-1). Runs
     // for every commit — including a `recordHistory:false` resolve/SWR data change — so the

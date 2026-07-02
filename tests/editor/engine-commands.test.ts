@@ -19,6 +19,7 @@ import {
   makeTextNode,
   pointAtOffset,
   resolveBoundaryOffset,
+  type EditorDocumentSnapshot,
   type EditorSelection,
   type IdAllocator,
   type NodeId,
@@ -29,6 +30,17 @@ import {
 } from "../../packages/editor/src/core";
 
 const CLIENT = "idco_client_phase55";
+
+/**
+ * A snapshot's CONTENT, without the monotonic `revision` counter (docs/036 D15), which advances on
+ * every commit — including an undo/redo — and so is deliberately not restored by inversion. The
+ * "…and inverts" cases below assert content restoration, so they compare through this.
+ */
+function sansRevision(s: EditorDocumentSnapshot): EditorDocumentSnapshot {
+  const copy = { ...s };
+  delete (copy as { revision?: number }).revision;
+  return copy;
+}
 
 /** Build a store whose body is a flat list of paragraphs from the given strings. */
 function paragraphStore(texts: readonly string[]): {
@@ -118,7 +130,7 @@ describe("owned-model commands (Phase 5.5)", () => {
     expect(sel.focus.offset).toBe(0);
 
     store.undo();
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
     store.redo();
     expect(store.order).toHaveLength(2);
     expect(textOf(store, store.order[1]!)).toBe(" world");
@@ -236,7 +248,7 @@ describe("owned-model commands (Phase 5.5)", () => {
     expect(sel.focus.offset).toBe(5);
 
     store.undo();
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
   });
 
   it("delete-forward at end of a block merges the next block (AC1)", () => {
@@ -287,7 +299,7 @@ describe("owned-model commands (Phase 5.5)", () => {
     expect(sel.focus.offset).toBe(5);
 
     store.undo();
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
   });
 
   it("deletes a selection that spans two blocks and inverts (delete AC1)", () => {
@@ -303,7 +315,7 @@ describe("owned-model commands (Phase 5.5)", () => {
     expect(sel.focus.offset).toBe(3);
 
     store.undo();
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
   });
 
   it("delete-backward removes one grapheme, including astral clusters", () => {
@@ -484,7 +496,7 @@ describe("list editing: indent / outdent (Phase 5.5 AC6)", () => {
     expect(store.requireTextNode(list.children[1]!).content.text).toBe("Third");
 
     store.undo();
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
   });
 
   it("indents into an existing sublist when the previous item already nests", () => {
@@ -518,7 +530,7 @@ describe("list editing: indent / outdent (Phase 5.5 AC6)", () => {
     expect(wrapper.children).toHaveLength(1); // just "First", sublist removed
 
     store.undo();
-    expect(store.toSnapshot()).toEqual(afterIndent);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(afterIndent));
   });
 
   it("Enter on an empty list item outdents it (AC6)", () => {
@@ -559,7 +571,7 @@ describe("attribute indent fallback (flat blocks, no list container)", () => {
     // Back to flush-left: the indent attr is cleared, not left at 0, so the doc
     // round-trips deep-equal (docs/010 §14).
     expect(store.requireNode(ids[0]!).attrs?.indent).toBeUndefined();
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
   });
 
   it("outdenting a flat list item at zero indent drops it to a paragraph", () => {

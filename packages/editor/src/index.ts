@@ -440,6 +440,30 @@ export type {
   TextRunDiff,
 } from "./core";
 // ============================================================================
+// Suggested edits — Model A (docs/036 §7, docs/038, R6-J J1). A proposal is an
+// attributed op-log branch; `applyProposal` folds it into a document by identity
+// (node ids + character ids), so applying to a document that moved is a merge, not
+// an offset rebase — a deleted anchor is surfaced as a conflict, never mis-applied.
+// The proposed document diffs against the current one to render the woven review.
+// ============================================================================
+export {
+  applyProposal,
+  applyProposalBlock,
+  groupProposalOps,
+  targetBlockOf,
+  type ProposalApplyOptions,
+} from "./core";
+export type {
+  Proposal,
+  ProposalApplication,
+  ProposalAuthor,
+  ProposalAuthorKind,
+  ProposalConflict,
+  ProposalConflictReason,
+  ProposalOpGroups,
+  ProposalStatus,
+} from "./core";
+// ============================================================================
 // Snapshot lifecycle & performance (docs/030 §7.4–§7.6, SLP). Incremental save is
 // internal to the store; these are the host-configurable knobs and the building
 // blocks for the deferred body-paging follow-on: the memory arbiter and its pool

@@ -166,7 +166,7 @@ describe("owned-model editor core", () => {
 
     store.undo();
     store.undo();
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
     store.redo();
     store.redo();
     expect((store.requireNode(node.id) as TextLeafNode).content.text).toBe(
@@ -180,7 +180,9 @@ describe("owned-model editor core", () => {
       const before = testCase.store.toSnapshot();
       testCase.store.dispatch({ origin: "local", steps: [testCase.step] });
       testCase.store.undo();
-      expect(testCase.store.toSnapshot()).toEqual(before);
+      expect(sansRevision(testCase.store.toSnapshot())).toEqual(
+        sansRevision(before),
+      );
     }
   });
 
@@ -215,11 +217,11 @@ describe("owned-model editor core", () => {
     for (let index = 0; index < generatedTextEdits().length; index += 1) {
       store.undo();
     }
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
     for (let index = 0; index < generatedTextEdits().length; index += 1) {
       store.redo();
     }
-    expect(store.toSnapshot()).toEqual(after);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(after));
   });
 
   it("restores marks a deletion destroys or clamps when the edit is undone", () => {
@@ -266,10 +268,12 @@ describe("owned-model editor core", () => {
     const afterDeleteSnapshot = store.toSnapshot();
 
     store.undo();
-    expect(store.toSnapshot()).toEqual(before);
+    expect(sansRevision(store.toSnapshot())).toEqual(sansRevision(before));
 
     store.redo();
-    expect(store.toSnapshot()).toEqual(afterDeleteSnapshot);
+    expect(sansRevision(store.toSnapshot())).toEqual(
+      sansRevision(afterDeleteSnapshot),
+    );
   });
 
   it("projects format range marks through compat split text nodes losslessly", () => {
@@ -650,6 +654,20 @@ function snapshot(nodes: readonly EditorNode[]): EditorDocumentSnapshot {
     settings: {},
     version: 1,
   };
+}
+
+/**
+ * A snapshot's CONTENT, without the monotonic `revision` counter (docs/036 D15).
+ *
+ * `revision` advances on every commit — including an undo/redo, whose inverse is itself a commit — so
+ * it is deliberately NOT restored by inversion (a version counter is not document content; step
+ * invertibility is about content). These undo/invert suites assert content restoration, so they
+ * compare snapshots through this, not raw `toEqual`.
+ */
+function sansRevision(s: EditorDocumentSnapshot): EditorDocumentSnapshot {
+  const copy = { ...s };
+  delete (copy as { revision?: number }).revision;
+  return copy;
 }
 
 function invertibleStepCases(): Array<{

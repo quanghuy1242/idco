@@ -261,6 +261,23 @@ export type {
   TextRunDiff,
 } from "./diff";
 export {
+  applyProposal,
+  applyProposalBlock,
+  groupProposalOps,
+  targetBlockOf,
+  type ProposalApplyOptions,
+} from "./suggestions";
+export type {
+  Proposal,
+  ProposalApplication,
+  ProposalAuthor,
+  ProposalAuthorKind,
+  ProposalConflict,
+  ProposalConflictReason,
+  ProposalOpGroups,
+  ProposalStatus,
+} from "./suggestions";
+export {
   TEXT_FORMAT,
   compatFromEditorStore,
   compatFromSnapshot,
