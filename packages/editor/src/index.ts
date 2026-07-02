@@ -187,6 +187,12 @@ export {
   type CommentSnapshot,
   type CommentSource,
   type Thread,
+  registerSuggestionSource,
+  getSuggestionSource,
+  listSuggestionSources,
+  activeSuggestionSource,
+  unregisterSuggestionSource,
+  type SuggestionSource,
   type Command,
   type CommandKind,
   type CommandContext,
@@ -468,6 +474,7 @@ export type {
 // The proposed document diffs against the current one to render the woven review.
 // ============================================================================
 export {
+  anchorlessChanges,
   applyProposal,
   applyProposalBlock,
   groupProposalOps,
@@ -475,6 +482,8 @@ export {
   type ProposalApplyOptions,
 } from "./core";
 export type {
+  AnchorlessChange,
+  AnchorlessChangeKind,
   Proposal,
   ProposalApplication,
   ProposalAuthor,

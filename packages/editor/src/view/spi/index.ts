@@ -38,3 +38,4 @@ export * from "./toolbar-layout";
 export * from "./side-panel-registry";
 export * from "./document-collection-registry";
 export * from "./comment-source-registry";
+export * from "./suggestion-source-registry";

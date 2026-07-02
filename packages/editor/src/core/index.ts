@@ -261,6 +261,7 @@ export type {
   TextRunDiff,
 } from "./diff";
 export {
+  anchorlessChanges,
   applyProposal,
   applyProposalBlock,
   groupProposalOps,
@@ -268,6 +269,8 @@ export {
   type ProposalApplyOptions,
 } from "./suggestions";
 export type {
+  AnchorlessChange,
+  AnchorlessChangeKind,
   Proposal,
   ProposalApplication,
   ProposalAuthor,

@@ -31,7 +31,7 @@
         "packages/ui/src/nav-icons.tsx"
       ],
       "reason": "Detector false positive. The editor barrel's long alphabetically-sorted re-export identifier list structurally resembles nav-icons' sorted lucide-react import/map list. They share no logic and there is nothing to deduplicate.",
-      "fingerprint": "a446ad90fd7ccb34"
+      "fingerprint": "681aa78d2a3f82fa"
     },
     {
       "files": [

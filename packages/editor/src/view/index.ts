@@ -194,6 +194,17 @@ export {
   type CommentSource,
   type Thread,
 } from "./spi";
+// Suggestion Source SPI (docs/036 §7.3, docs/038 §17, R6-J J5): the comment-source sibling for
+// host-owned proposals. A deployment registers one source; the editor owns the woven review + the
+// Changes pane, the host owns the op-log branches. No source = no Changes pane.
+export {
+  activeSuggestionSource,
+  getSuggestionSource,
+  listSuggestionSources,
+  registerSuggestionSource,
+  unregisterSuggestionSource,
+  type SuggestionSource,
+} from "./spi";
 export { sanitizeHtmlToCompat } from "./paste-html";
 // Markdown I/O (docs/030 MIO). `snapshotToMarkdown` (lossy export) and the native fragment
 // clipboard are parser-free and on the public surface; `markdownToNodes` (the markdown-it

@@ -13,6 +13,8 @@ export {
   targetBlockOf,
   type ProposalApplyOptions,
 } from "./apply-proposal";
+export { anchorlessChanges } from "./changes-routing";
+export type { AnchorlessChange, AnchorlessChangeKind } from "./changes-routing";
 export type {
   Proposal,
   ProposalApplication,

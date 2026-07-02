@@ -35,6 +35,7 @@ import {
 } from "../../../core";
 import {
   activeCommentSource,
+  activeSuggestionSource,
   getDocumentCollection,
   registerCommand,
   registerDocumentCollection,
@@ -46,6 +47,7 @@ import {
 import {
   AccessibilityPane,
   BrokenRefsPane,
+  ChangesPane,
   CommentAddPopover,
   CommentsPane,
   GlossaryAddPopover,
@@ -688,6 +690,32 @@ export function registerBuiltInCommands(): void {
     render: (ctx) => <CommentAddPopover ctx={ctx} />,
     slot: "review.panels",
     surfaces: { flyout: "primary", ribbon: "primary" },
+  });
+
+  // --- Review: Changes (docs/036 §7.3, docs/038 §17, R6-J J5) -----------------
+  // Host-owned like Comments: everything gates on a registered `SuggestionSource` (§7.3). The editor
+  // ships none, so by default there is no Changes tab — a deployment (or docs/037's agent host)
+  // registers a source to light up the pane. The pane carries the proposal list, the woven-change
+  // jumps, and — its unique job — the anchorless remainder (conflicts/settings/collections, §17).
+  registerSidePanel({
+    iconName: "ListChecks",
+    id: "changes",
+    isAvailable: () => activeSuggestionSource() !== undefined,
+    render: ({ focusId, reveal, store }) => (
+      <ChangesPane focusId={focusId} reveal={reveal} store={store} />
+    ),
+    title: "Changes",
+  });
+  registerCommand({
+    group: "panel",
+    icon: "ListChecks",
+    id: "review.changes",
+    isAvailable: () => activeSuggestionSource() !== undefined,
+    kind: "button",
+    label: "Changes",
+    run: (ctx) => ctx.panelHost?.toggle("changes"),
+    slot: "review.panels",
+    surfaces: { ribbon: "primary" },
   });
 
   // --- Review: document health (docs/027 §9.5/§9.6) ---------------------------
