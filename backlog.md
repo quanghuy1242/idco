@@ -6,7 +6,7 @@ Seven tracks that came out of a design discussion, each grounded against the cur
 
 Three rules cut across every item: each feature round-trips editor↔reader (the snapshot-parity oracle, `[[reader-convergence-028]]`); none pulls product or runtime deps into `packages/editor` or `packages/ui` (the shared-package boundary); and the native `EditorDocumentSnapshot` (`core/model/model.ts:305`) is the single source of truth, with markdown and every export a projection of it.
 
-Two tracks grew their own implementation-grade docs: #6 (diff, inline review, and suggested edits) is `docs/036_snapshot_diff_and_document_history_review.md` — with the **woven inline diff overlay** design system split into `docs/038_woven-overlay-design.md` — and #7 (the agentic control API) is `docs/037_agentic_control_api.md`. The three reference each other and stay separate: `037` produces proposals, `036`/`038` review them. The rest are small-to-medium.
+Two tracks grew their own implementation-grade docs: #6 (diff, inline review, and suggested edits) is `docs/036_snapshot_diff_and_document_history_review.md` — with the **woven inline diff overlay** design system split into `docs/038_woven-overlay-design.md` and the **presentation-layer consolidation** (one shared renderer for the diff view and the woven overlay) in `docs/039_unified_change_presentation_layer.md` — and #7 (the agentic control API) is `docs/037_agentic_control_api.md`. The three reference each other and stay separate: `037` produces proposals, `036`/`038`/`039` review them. The rest are small-to-medium.
 
 | # | Track | Status | Size |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Two tracks grew their own implementation-grade docs: #6 (diff, inline review, an
 | 3 | Virtualization: object-render lag + selection scroll-desync | done (2026-07-02, note.md §7) | small–medium |
 | 4 | Columns container (discrete, per-column selection) | decided; ready to scope | small–medium |
 | 5 | Math: block node, then inline atom | block ready; inline is a model extension | small (block) + medium (inline) |
-| 6 | Snapshot diff + inline review + suggested edits | R6-A..I shipped; woven overlay = R6-J phase, designed in `docs/038` | large |
+| 6 | Snapshot diff + inline review + suggested edits | R6-A..I shipped; woven overlay = R6-J phase (`docs/038`); presentation-layer consolidation = `docs/039` (design-only, backlog P1–P6) | large |
 | 7 | Agentic control API | design doc `docs/037` | medium–large |
 
 ## 1. Reflowable EPUB3 + PDF export
@@ -100,6 +100,8 @@ The full implementation-grade plan is `docs/036`. Headlines:
 - **Model B (concurrent tombstones) reserved.** Inline suggestions with tombstoned deletions for many concurrent authors is the collaboration-era upgrade; it shares Model A's review wrapper and ops, and its net-new (tombstones + convergence) is the CRDT work collaboration needs anyway (`docs/014 §7`). Model A stored as op-logs is what keeps A→B a reuse, not a rewrite.
 
 Size: large. R6-A..I have shipped; the woven overlay + Model-A suggested edits are the single **R6-J phase** (steps J0–J8, ghost-render spike first), design-complete in `docs/038`. The producer of proposals is `docs/037`; `036`/`038` are where they land and are reviewed.
+
+**Presentation-layer consolidation (`docs/039`, design-only).** J0–J8 shipped two divergent renderers: the reader `DiffView` is a mature track-changes surface, while the woven overlay never wove text edits (only a gutter bar + a count), invented a second marker vocabulary, baked a card-shaped `GhostBlock`, and left a vestigial deletion tick. `docs/039` makes the **reader the single presentation library** (the editor consumes it upward — the only legal shared home given `editor → reader`), so one renderer drives both surfaces. It resolves every open decision: text renders as real red/green track changes in the live editor (shared `partitionTextRuns`, the deleted-run ghost is skipped by `geometry.ts` so the EditContext offset↔DOM invariant holds); one global status-hued gutter bar on both surfaces; removed content is always read-only, struck, no card; status is carried by color and shape, never a "REMOVED"/"EDITED" word; opaque and custom nodes render a real diff through an injected read-only `NodeDefinition.renderDiff` seam (code block → a Myers line diff), while `diffData` stays the serializable summary a `037` agent reads. Backlog P1–P6 (reader atoms → diff-view refactor → `renderDiff` SPI → woven redesign → engine helpers → one end-to-end story replacing the seven scattered `engine-review-*`/`engine-diff*` stories).
 
 ## 7. Agentic control API — `docs/037`
 
