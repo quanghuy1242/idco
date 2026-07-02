@@ -26,6 +26,7 @@ export {
   changedElements,
   deletionAnchors,
   REVIEW_INDICATOR_CSS,
+  ReviewCursorSurface,
   useReviewChangeIndicator,
   type ReviewBlockStatus,
   type ReviewChangedBlock,
@@ -41,6 +42,14 @@ export {
   type ReviewModel,
   type ReviewModelOptions,
 } from "./review-model";
+export {
+  reviewCursorEntries,
+  reviewEntryDetail,
+  useReviewCursor,
+  type ReviewCursor,
+  type ReviewCursorEntry,
+  type ReviewCursorOptions,
+} from "./review-cursor";
 export {
   getNodeView,
   listInsertableNodes,

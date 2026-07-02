@@ -28,3 +28,4 @@ export * from "./geometry";
 export * from "./overlay-anchor";
 export * from "./gap-cursor";
 export * from "./review-change-indicator";
+export * from "./review-cursor-surface";

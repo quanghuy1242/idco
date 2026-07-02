@@ -75,6 +75,7 @@ await import("./editor/engine-snapshot-revision.test");
 await import("./editor/engine-review-model.test");
 await import("./editor/engine-review-indicator.test");
 await import("./editor/engine-review-decoration.test");
+await import("./editor/engine-review-cursor.test");
 await import("./editor/engine-incremental-save.test");
 await import("./editor/engine-load-perf.test");
 await import("./editor/engine-bake-lru.test");

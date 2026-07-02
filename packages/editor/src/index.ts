@@ -291,6 +291,19 @@ export {
   type ReviewModel,
   type ReviewModelOptions,
 } from "./view";
+// The review cursor (docs/038 §7, R6-J J4): the headless controller that steps a single active
+// surface through the diff's changed top-level blocks (`useReviewCursor` — next/prev/goTo + scroll-to-
+// block reveal), plus its pure stops/detail derivation (`reviewCursorEntries`, `reviewEntryDetail`).
+// `ReviewCursorSurface` is the anchored control that rides it.
+export {
+  ReviewCursorSurface,
+  reviewCursorEntries,
+  reviewEntryDetail,
+  useReviewCursor,
+  type ReviewCursor,
+  type ReviewCursorEntry,
+  type ReviewCursorOptions,
+} from "./view";
 export { EditorToolbar } from "./view";
 export {
   FindBar,
