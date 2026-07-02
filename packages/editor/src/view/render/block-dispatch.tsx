@@ -10,7 +10,9 @@ import type { RefObject } from "react";
 import type { EditorStore, NodeId, TextPoint } from "../../core";
 import { EngineObjectBlock } from "./object-block";
 import { getStructuralView, isNodeTypeAllowed } from "../spi";
+import { GhostBlock } from "./ghost-block";
 import { QuarantineBlock } from "./quarantine-block";
+import { useReviewRender } from "./review-context";
 import { useEditorNode } from "../store-hooks";
 import { EngineTextBlock } from "./text-block";
 import {
@@ -54,8 +56,17 @@ export function EngineBlock(props: {
     focusRoot,
     listMeta,
   } = props;
+  // Inline review (docs/038 §4–§5, R6-J J2): a ghost id (removed at any depth) resolves from the
+  // diff's base side, not the store. The context is consulted here so the SAME dispatch handles a
+  // top-level ghost AND a removed child spliced into a container's assembly below — one render path,
+  // not the J0 top-level-only short-circuit. Both hooks run unconditionally (hooks rule), then branch.
+  const review = useReviewRender();
   const node = useEditorNode(store, id);
   onRender(id);
+  const ghostNode = review?.ghosts.get(id);
+  if (ghostNode) {
+    return <GhostBlock node={ghostNode} registerBlock={registerBlock} />;
+  }
   // The node was removed in the same tick (merge/delete); render nothing until
   // the order change unmounts this block.
   if (!node) return null;
@@ -124,13 +135,14 @@ export function EngineBlock(props: {
   // but also a callout holding list items — so a nested numbered list renders as
   // `N.`, not bullets. Containers with no list items get an empty map (paragraphs
   // are unaffected). Without this, nested items fell back to the bullet default.
-  const childListMeta = computeWindowListMeta(
-    store,
-    node.children,
-    node.children,
-    0,
-  );
-  const children = node.children.map((childId) => (
+  // In review, a container with removed children maps its MERGED child order (live children in
+  // target order + removed ghosts spliced at their base slots, docs/038 §5) instead of `store`
+  // children, so a removed row/item renders in place; otherwise the live children (the shipped path).
+  // `computeWindowListMeta` is already ghost-aware — a store-absent id is run-neutral — so list
+  // numbering renumbers to the target across a removed item (the J0 H1 fix, one level down).
+  const childIds = review?.childOrder.get(node.id) ?? node.children;
+  const childListMeta = computeWindowListMeta(store, childIds, childIds, 0);
+  const children = childIds.map((childId) => (
     <EngineBlock
       beginDrag={beginDrag}
       focusRoot={focusRoot}

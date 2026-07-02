@@ -259,29 +259,37 @@ export {
   renderLeafMarks,
   type RestingDocumentProps,
 } from "./view";
-// The live in-editor review affordance (docs/036 §6.2.1, R6-I): the per-block change indicator
-// (`useReviewChangeIndicator` + `REVIEW_INDICATOR_CSS`, its pure `changedBlockIds` core and DOM
-// `applyReviewIndicators`), plus the commit-coalesced snapshot hook it diffs a baseline against
-// (`useReviewSnapshot`). Review detail is the diff view; the indicator only flags which blocks changed.
+// The live in-editor review affordance (docs/036 §6.2.1, R6-I + docs/038 §7–§9, R6-J J3): the change
+// indicator (`useReviewChangeIndicator` + `REVIEW_INDICATOR_CSS`, its pure `changedBlockIds` top-level
+// core, the any-depth `changedElements` core, and DOM `applyReviewIndicators`), plus the commit-
+// coalesced snapshot hook it diffs a baseline against (`useReviewSnapshot`). Review detail is the diff
+// view; the indicator only flags where — a gutter bar on top-level blocks, a ring on nested elements.
 export {
   applyReviewIndicators,
   changedBlockIds,
+  changedElements,
   deletionAnchors,
   REVIEW_INDICATOR_CSS,
   useReviewChangeIndicator,
   useReviewSnapshot,
   type ReviewBlockStatus,
   type ReviewChangedBlock,
+  type ReviewChangedElement,
   type ReviewDeletionAnchor,
+  type ReviewMarkerKind,
 } from "./view";
-// The woven inline overlay's ReviewModel (docs/038 §5, R6-J J0): project a `SnapshotDiff` into the
-// merged top-level order + ghost node map (`buildReviewOrder`), and the opt-in hook that derives it
-// live from a captured baseline (`useReviewGhostPlan`). Feed the plan to the editor view's
-// `reviewOrder`/`reviewGhosts` props to render removed blocks as inert ghosts in place.
+// The woven inline overlay's ReviewModel (docs/038 §5, R6-J J0+J2): project a `SnapshotDiff` into the
+// render plan — the merged top-level order, the ghost nodes (all depths), the per-container merged
+// child orders, and the per-container collapsed-ghost budget (`buildReviewModel`) — plus the opt-in
+// hook that derives it live from a captured baseline (`useReviewModel`). Feed the model to the editor
+// view's `review` prop to render removed blocks as inert ghosts in place, at the top level and inside
+// containers.
 export {
-  buildReviewOrder,
-  useReviewGhostPlan,
-  type ReviewGhostPlan,
+  buildReviewModel,
+  DEFAULT_CONTAINER_GHOST_BUDGET,
+  useReviewModel,
+  type ReviewModel,
+  type ReviewModelOptions,
 } from "./view";
 export { EditorToolbar } from "./view";
 export {

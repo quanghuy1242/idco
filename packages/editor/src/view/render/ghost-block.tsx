@@ -28,10 +28,14 @@
  * per-block EditContext ever binds to it — which is what keeps splicing ghosts around the focused
  * block from tearing that block's EditContext host (the J0 no-tear proof).
  *
- * SCOPE (J0): top-level text/object/structural ghosts render here; a removed leaf shows its base
- * text struck through, a removed object/container shows a labelled band. Faithful reader-parity
- * ghost content and removed-*child* recursion inside a surviving container are the J2/J3 refinement
- * (docs/038 §5) — the point of J0 is that a ghost renders, measures, and virtualizes in the flow.
+ * SCOPE: a removed leaf shows its base text struck through; a removed object/container shows a
+ * labelled band (a removed container is ONE ghost — its subtree is not individually ghosted, so it
+ * under-measures its old height, docs/038 §5.2). Removed-*child* recursion inside a surviving
+ * container is done as of J2 — `block-dispatch` splices this branch into a container's merged child
+ * assembly via `ReviewRenderContext`, so a removed row/item/cell renders in place — this component is
+ * unchanged by that; it renders one node wherever the dispatch mounts it. Faithful reader-parity
+ * ghost content (a removed image showing its figure, a removed code block its source) is the J3
+ * refinement; J2's point is that a ghost renders, measures, and virtualizes at any depth in the flow.
  */
 import type { CSSProperties } from "react";
 import type { EditorNode, NodeId } from "../../core";
@@ -44,9 +48,14 @@ const GHOST_BOX: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "0.15rem",
-  margin: "0.25rem 0",
   opacity: 0.75,
-  padding: "0.4rem 0.75rem",
+  // Vertical spacing lives in PADDING, not margin (docs/038 §5.2, R6-J J2): the ResizeObserver reads
+  // `borderBoxSize`, which excludes margin, so a margined ghost would leak ~8px/ghost from the treap's
+  // aggregate total (a cosmetic scrollbar drift that compounds with many ghosts). Padding is inside
+  // the border box, so the treap measures the ghost's full footprint; the trade is that consecutive
+  // ghosts read as one contiguous removed band rather than separate rounded chips, which is if
+  // anything clearer for a removed region.
+  padding: "0.65rem 0.75rem",
   // Inert: the caret cannot enter and no text selection lands here, so the block
   // reads as an atomic widget (docs/038 §3). Position is relative to match the
   // base block box so geometry reads a stable rect.

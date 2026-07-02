@@ -2,21 +2,27 @@ import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 
 /**
- * J0 ghost-render spike (docs/038 §5, R6-J) — the gate for the woven inline overlay. This spec
- * both ASSERTS the three J0 claims and captures screenshots for reference. Chromium only (the
- * non-`engine-*` file name keeps it off the webkit/firefox projects).
+ * Woven ghost-render spec (docs/038 §5, R6-J) — the J0 top-level gate PLUS the J2 in-container +
+ * per-container-budget claims. Asserts each claim against the real editing surface and captures
+ * screenshots for reference. Chromium only (the non-`engine-*` file name keeps it off webkit/firefox).
  *
- * Claims proven against the real editing surface (`Engine / Review Ghost` story):
- *   1. RENDER    — removed blocks mount in place as inert `[data-engine-ghost]` bands.
- *   2. MEASURE   — a ghost has real layout height and sits in the offset model (scroll height grows).
- *   3. VIRTUALIZE— a ghost below the fold is not mounted at rest and mounts after scrolling to it.
- *   4. NO TEAR   — typing in a live paragraph next to a ghost keeps the caret in that block and the
- *                  ghost in the DOM (the live block's EditContext host is not torn by the splice).
+ * Claims proven against the `Engine / Review Ghost` story:
+ *   1. RENDER (J0)       — removed top-level blocks mount in place as inert `[data-engine-ghost]` bands.
+ *   2. MEASURE (J0)      — a ghost has real layout height and sits in the offset model.
+ *   3. VIRTUALIZE (J0)   — a top-level ghost below the fold is not mounted at rest and mounts on scroll.
+ *   4. NO TEAR (J0)      — typing in a live paragraph next to a ghost keeps the caret and the ghost.
+ *   5. IN-CONTAINER (J2) — a removed list ITEM renders in place as a ghost INSIDE its surviving list
+ *                          (via the ReviewModel's merged child order, not a top-level short-circuit).
+ *   6. BUDGET (J2)       — a deletion-heavy list splices at most the budget of ghost items and drops
+ *                          the surplus (cost bounded; the dropped count is on `ReviewModel.collapsed`,
+ *                          and J3 renders the visible "+N removed" affordance).
+ *   7. TABLE GATE (J2)   — a table with a removed row renders its live rows only, NEVER a `<div>` ghost
+ *                          inside `<table>`/`<tbody>` (faithful `<tr>`/`<td>` ghosts are J3).
  *
  * SCOPE (honest): J0.4 proves NO-TEAR for DESKTOP + printable typing + a STATIC ghost set only. The
  * hard cases the woven design must eventually survive — mobile EditContext-host flicker, cross-block
- * Backspace/merge, and an edit that splices a ghost *newly adjacent* to the caret — are the named J1
- * gate (docs/038 §5.2), not covered here.
+ * Backspace/merge, and an edit that splices a ghost *newly adjacent* to the caret — are the named
+ * hard-no-tear gate (docs/038 §5.2), not covered here.
  */
 const OUT = path.join(process.cwd(), "test-results", "review-ghost");
 const STORY = "/?story=engine--review-ghost--ghost-spike";
@@ -126,4 +132,69 @@ test("J0.4 no tear: typing next to a ghost keeps the caret and the ghost", async
     fullPage: true,
     path: path.join(OUT, "03-typed-next-to-ghost.png"),
   });
+});
+
+// The lists sit below the top-level paragraphs, so they start windowed out; scroll the scroller to
+// the bottom to mount them before asserting their in-container ghosts.
+async function scrollToBottom(page: Page): Promise<void> {
+  const scroller = page.locator("[data-engine-view-root]").first();
+  await scroller.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  await page.waitForTimeout(300);
+}
+
+test("J2.5 in-container: a removed list item renders as a ghost inside its surviving list", async ({
+  page,
+}) => {
+  await openStory(page);
+  await scrollToBottom(page);
+  // A surviving list is a live container; its removed items render in place as ghosts spliced into
+  // the list's own child assembly (the ReviewModel's merged childOrder), NOT the top-level flow.
+  const listGhosts = page.locator(
+    '[data-engine-structural="list"] [data-engine-ghost="listitem"]',
+  );
+  expect(await listGhosts.count()).toBeGreaterThan(0);
+  // The first (numbered) list weaves ghosts BETWEEN live items — it still has surviving items.
+  const numberedList = page.locator('[data-engine-structural="list"]').first();
+  expect(
+    await numberedList
+      .locator("[data-engine-block-id]:not([data-engine-ghost])")
+      .count(),
+  ).toBeGreaterThan(0);
+  expect(
+    await numberedList.locator('[data-engine-ghost="listitem"]').count(),
+  ).toBeGreaterThan(0);
+  await page.screenshot({
+    fullPage: true,
+    path: path.join(OUT, "04-in-container-ghost.png"),
+  });
+});
+
+test("J2.6 budget: a deletion-heavy list splices at most the budget of ghost items (cost bounded)", async ({
+  page,
+}) => {
+  await openStory(page);
+  await scrollToBottom(page);
+  // The bullet list (the 2nd list) removed 6 items with a story budget of 4, so the woven flow mounts
+  // at most 4 ghost items — the surplus is dropped rather than mounting every ghost row (containers do
+  // not internally virtualize, so this cap is the load-bearing bound). The dropped count is recorded
+  // on `ReviewModel.collapsed` (unit-tested); the visible "+N removed" affordance is J3.
+  const bulletList = page.locator('[data-engine-structural="list"]').nth(1);
+  const bulletGhosts = bulletList.locator('[data-engine-ghost="listitem"]');
+  const count = await bulletGhosts.count();
+  expect(count).toBeGreaterThan(0);
+  expect(count).toBeLessThanOrEqual(4);
+});
+
+test("J2.7 table gate: a removed table row renders no invalid ghost inside the table", async ({
+  page,
+}) => {
+  await openStory(page);
+  await scrollToBottom(page);
+  const table = page.locator('[data-engine-structural="table"]');
+  await expect(table).toHaveCount(1); // the table survives as a live block
+  // A `GhostBlock` is a `<div>`, invalid inside `<table>`/`<tbody>`/`<tr>` — J2 gates the table out of
+  // the in-container splice, so the removed row is NOT woven here (faithful `<tr>` ghosts are J3).
+  expect(await table.locator("[data-engine-ghost]").count()).toBe(0);
+  // The table still shows its surviving rows (live cells render normally).
+  expect(await table.locator("table tr").count()).toBeGreaterThan(0);
 });

@@ -216,7 +216,11 @@ export function activateElement(element: HTMLElement): void {
   // Already active — just re-focus the textarea (needed after blur/focus cycles)
   if (activeBinding?.element === element) {
     refocusing = true;
-    activeBinding.hiddenTextarea.element.focus();
+    // `preventScroll`: the hidden textarea lives at the document body (offset 0) until IME bounds
+    // re-home it to the caret, so a bare `focus()` makes the browser scroll it into view — resetting
+    // a virtualized editor's scroll to the top on every click. The native EditContext path already
+    // focuses with `preventScroll` (use-focus-navigation.ts); the polyfill must match it.
+    activeBinding.hiddenTextarea.element.focus({ preventScroll: true });
     refocusing = false;
     return;
   }
@@ -267,7 +271,10 @@ export function activateElement(element: HTMLElement): void {
   element.setAttribute("data-editcontext-active", "");
 
   refocusing = true;
-  hiddenTextarea.element.focus();
+  // `preventScroll`: see the re-focus branch above — the freshly-created hidden textarea sits at the
+  // body origin (offset 0) before IME bounds move it, so a bare `focus()` scrolls it into view and
+  // yanks a virtualized editor to the top on activation (i.e. on click). Match the native path.
+  hiddenTextarea.element.focus({ preventScroll: true });
   refocusing = false;
 
   // With shadow DOM, focusin naturally retargets to the host element,

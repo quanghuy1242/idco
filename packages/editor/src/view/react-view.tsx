@@ -39,7 +39,6 @@ import {
 } from "react";
 import {
   createEngineScheduler,
-  type EditorNode,
   type EditorStore,
   type EngineScheduler,
   type NodeId,
@@ -55,7 +54,12 @@ import {
   SURFACE_PADDING,
 } from "./styles";
 import { cancelFrame, requestFrame } from "./raf";
-import { EngineBlock, GhostBlock } from "./render";
+import { EngineBlock } from "./render";
+import {
+  ReviewRenderContext,
+  type ReviewRender,
+} from "./render/review-context";
+import type { ReviewModel } from "./review-model";
 import type { EditorPlaceholder } from "./overlays";
 import { listOverlayStructuralViews } from "./spi";
 import { listOverlayNodeViews } from "./spi";
@@ -198,21 +202,15 @@ export type OwnedModelEditorViewProps = {
    */
   readonly overlayPanelHost?: PanelHost;
   /**
-   * Inline-review merged order (docs/038 §5, R6-J J0). When present, the view windows THIS order
-   * — the diff's top-level merged spine (live ids + removed ghost ids at their slot, from
-   * `buildReviewOrder`/`useReviewGhostPlan`) — instead of the plain body order, so removed blocks
-   * appear in place. Omitted (the shipped path): the view uses `store.order` and this whole branch
-   * is inert. An id present in `reviewGhosts` renders as an inert `GhostBlock`; every other id
-   * renders as its normal live block, keyed by id so a live block keeps its instance (and its
-   * EditContext host) when a neighbouring ghost splices in.
+   * The woven inline-review render plan (docs/038 §5, R6-J J0+J2), from `buildReviewModel` /
+   * `useReviewModel`. When present, the view windows its `order` (the diff's top-level merged spine —
+   * live ids + removed ghost ids at their slot) instead of `store.order`, renders a `ghosts` id as an
+   * inert `GhostBlock`, maps a `childOrder` container's merged children (so a removed row/item renders
+   * in place), and marks a budget-`collapsed` container. Omitted (the shipped path): the view uses
+   * `store.order` and every review branch is inert. Live blocks stay keyed by id, so a live block
+   * keeps its instance (and its EditContext host) when a neighbouring ghost splices in.
    */
-  readonly reviewOrder?: readonly NodeId[];
-  /**
-   * Inline-review ghost nodes (docs/038 §5, R6-J J0): the base-side `EditorSnapshotNode` for each
-   * removed id in `reviewOrder`. An id here renders as an inert `GhostBlock`. Ignored unless
-   * `reviewOrder` is also set.
-   */
-  readonly reviewGhosts?: ReadonlyMap<NodeId, EditorNode>;
+  readonly review?: ReviewModel;
 };
 
 /** The bare engine view: renders the document as windowed blocks with caret, selection, and virtualization, with no toolbar or chrome. */
@@ -237,8 +235,7 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     documentIndexStore,
     overlayAuthorityRef,
     overlayPanelHost,
-    reviewOrder,
-    reviewGhosts,
+    review,
   } = props;
   const localSchedulerRef = useRef<EngineScheduler | null>(null);
   if (!providedScheduler && !localSchedulerRef.current) {
@@ -256,10 +253,18 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // Inline-review (docs/038 §5, R6-J J0): when a review plan is supplied, window the diff's
   // merged spine (live ids + removed ghost ids at their slot) instead of the plain body order,
   // so ghosts appear in place. `useEditorOrder` stays subscribed unconditionally (hooks rule); it
-  // is simply not the windowed order while reviewing. The shipped path passes no `reviewOrder`, so
+  // is simply not the windowed order while reviewing. The shipped path passes no `review`, so
   // `order === liveOrder` and every downstream (windowing, placeholder, list numbering) is unchanged.
   const liveOrder = useEditorOrder(store);
-  const order = reviewOrder && reviewOrder.length > 0 ? reviewOrder : liveOrder;
+  const order = review && review.order.length > 0 ? review.order : liveOrder;
+  // The per-block review lookups (docs/038 §4–§5, R6-J J2), stable per plan so a scroll re-render
+  // does not churn the context. `EngineBlock`/`block-dispatch` read these to render ghosts and splice
+  // in-container removed children; `null` (the shipped default) makes every review branch inert.
+  const reviewRender = useMemo<ReviewRender | null>(
+    () =>
+      review ? { childOrder: review.childOrder, ghosts: review.ghosts } : null,
+    [review],
+  );
 
   // Block-registry wiring (docs/020 §4.3): tiny ref-setters the dispatcher uses
   // to register mounted block elements, input backends, render counts, and live
@@ -309,6 +314,10 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       order,
       overscan,
       refs,
+      // The base-side nodes for removed ids (docs/038 §5, R6-J J2): a ghost is not in the store, so
+      // the offset model seeds it from its base node's metrics here instead of the coarse global mean
+      // — a removed heading/media sizes right on first frame, no pop-in. Undefined outside review.
+      reviewGhosts: review?.ghosts,
       store,
       // The scroller's top padding (resolveViewStyle) shifts the content origin, so
       // the windowing subtracts it from scrollTop. A consumer `style.padding`
@@ -529,22 +538,14 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
     windowRange.ids,
     windowRange.startIndex,
   );
-  const blocks = windowRange.ids.map((id, positionInWindow) => {
+  const renderedBlocks = windowRange.ids.map((id, positionInWindow) => {
     /*
-     * Inline-review ghost (docs/038 §5, R6-J J0): a removed id is not in the store, so it renders
-     * from its base-side node as an inert `GhostBlock` rather than the store-resolving `EngineBlock`
-     * (which would return null for an absent id). It carries `data-engine-block-id`, so the
-     * ResizeObserver measures it and the offset model virtualizes it exactly like a live block. This
-     * short-circuits before the fling placeholder below (that path does `store.getNode(id)`, null
-     * for a ghost).
-     */
-    const ghostNode = reviewGhosts?.get(id);
-    if (ghostNode) {
-      return (
-        <GhostBlock key={id} node={ghostNode} registerBlock={registerBlock} />
-      );
-    }
-    /*
+     * Inline-review ghost (docs/038 §5, R6-J J2): a removed id renders as an inert `GhostBlock` from
+     * its base-side node. This is now decided inside `EngineBlock` via `ReviewRenderContext` (below),
+     * so the SAME dispatch handles a top-level ghost AND a removed child spliced into a container —
+     * one path, not a top-level-only short-circuit. The fling placeholder below is naturally skipped
+     * for a ghost (its `store.getNode(id)` is null), falling through to the review-aware `EngineBlock`.
+     *
      * Velocity-gated mount (docs/025 §5.5): during a fling, render a cheap
      * height-preserving placeholder for RESTING object blocks instead of
      * hydrating their decorator, so a fast flywheel scroll does no per-frame
@@ -610,6 +611,13 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
       />
     );
   });
+  // Provide the per-block review lookups to every `EngineBlock` (top-level and recursed) in one
+  // place, so both return branches below share it. `null` (the shipped default) is a no-op context.
+  const blocks = (
+    <ReviewRenderContext.Provider value={reviewRender}>
+      {renderedBlocks}
+    </ReviewRenderContext.Provider>
+  );
 
   if (!virtualize) {
     return (

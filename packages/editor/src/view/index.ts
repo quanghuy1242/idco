@@ -23,18 +23,23 @@ export {
 export {
   applyReviewIndicators,
   changedBlockIds,
+  changedElements,
   deletionAnchors,
   REVIEW_INDICATOR_CSS,
   useReviewChangeIndicator,
   type ReviewBlockStatus,
   type ReviewChangedBlock,
+  type ReviewChangedElement,
   type ReviewDeletionAnchor,
+  type ReviewMarkerKind,
 } from "./overlays";
 export { useReviewSnapshot } from "./store-hooks";
 export {
-  buildReviewOrder,
-  useReviewGhostPlan,
-  type ReviewGhostPlan,
+  buildReviewModel,
+  DEFAULT_CONTAINER_GHOST_BUDGET,
+  useReviewModel,
+  type ReviewModel,
+  type ReviewModelOptions,
 } from "./review-model";
 export {
   getNodeView,

@@ -20,13 +20,14 @@ import {
   TreapOffsetModel,
 } from "../../core/offset-model";
 import { rangeFromModel } from "../../core/virtual-range";
-import type { EditorStore, NodeId } from "../../core";
+import type { EditorNode, EditorStore, NodeId } from "../../core";
 import { feedImeBounds } from "../overlays";
 import { requestFrame } from "../raf";
 import { anchorScrollAdjustment, isFlingVelocity } from "./anchor";
 import type { ViewRefs } from "./refs";
 
 const EMPTY_ORDER: readonly NodeId[] = [];
+const EMPTY_GHOST_IDS: ReadonlySet<NodeId> = new Set();
 
 // A scroll faster than this is a fling (docs/025 §5.5). ~2px/ms is ~120px per
 // 60fps frame — a deliberate flick, not a line-by-line read.
@@ -71,6 +72,13 @@ export function useVirtualWindow(args: {
    * inset (note.md §5.9 follow-up).
    */
   readonly surfaceInset: number;
+  /**
+   * Base-side nodes for removed (ghost) ids while reviewing (docs/038 §5, R6-J J2). A ghost is not in
+   * the store, so `seedFor` seeds it from its base node's metrics here — a content-aware seed instead
+   * of the coarse global mean, so a removed heading/media does not pop on first measure. Undefined
+   * outside review; ghost ids are also evicted from the height cache when this clears (review exit).
+   */
+  readonly reviewGhosts?: ReadonlyMap<NodeId, EditorNode>;
 }): VirtualWindowController {
   const {
     refs,
@@ -81,6 +89,7 @@ export function useVirtualWindow(args: {
     fillHeight,
     overscan,
     surfaceInset,
+    reviewGhosts,
   } = args;
   const {
     heightCacheRef,
@@ -171,7 +180,9 @@ export function useVirtualWindow(args: {
     const seedFor = (id: NodeId): number => {
       const cached = heightCacheRef.current.get(id);
       if (cached !== undefined) return cached;
-      const node = store.getNode(id);
+      // A live node from the store, or — while reviewing — a removed id's base-side node (docs/038
+      // §5, R6-J J2), so a ghost seeds from its real content shape rather than the global mean.
+      const node = store.getNode(id) ?? reviewGhosts?.get(id);
       if (node) {
         // Object nodes may declare their own height signal (docs/025 §5.3, backlog
         // §3); resolve the definition so `metricsForNode` can consult it. Text and
@@ -199,7 +210,32 @@ export function useVirtualWindow(args: {
     }
     modelOrderRef.current = order;
     return modelRef.current;
-  }, [virtualize, order, reseedVersion, store, heightCacheRef, estimateRef]);
+  }, [
+    virtualize,
+    order,
+    reseedVersion,
+    store,
+    heightCacheRef,
+    estimateRef,
+    reviewGhosts,
+  ]);
+
+  // Evict ghost heights from the id→height cache when they stop being ghosts (docs/038 §5.2, R6-J
+  // J2). The cache (`heightCacheRef`) is otherwise never pruned — it is `get`/`set`-only — so a
+  // measured ghost height would linger after review exit and, if that id were ever reused, mis-seed
+  // it. Only ids that WERE ghosts and no longer are (review exit, or a re-diff dropped the ghost) are
+  // deleted; live ids keep their measured height as before. The offset model is index-keyed and
+  // rebuilds from `order`, so only this cache needs the prune.
+  const prevGhostIdsRef = useRef<ReadonlySet<NodeId>>(EMPTY_GHOST_IDS);
+  useEffect(() => {
+    const now = reviewGhosts
+      ? new Set<NodeId>(reviewGhosts.keys())
+      : EMPTY_GHOST_IDS;
+    for (const id of prevGhostIdsRef.current) {
+      if (!now.has(id)) heightCacheRef.current.delete(id);
+    }
+    prevGhostIdsRef.current = now;
+  }, [reviewGhosts, heightCacheRef]);
 
   /*
    * Measure the scroller's own height when `fillHeight` stretches it to its flex

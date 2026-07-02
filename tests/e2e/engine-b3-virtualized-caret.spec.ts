@@ -19,6 +19,7 @@ import { expect, test, type Page } from "@playwright/test";
  */
 const SMALL = "engine--owned-model--b3-virtualized-small-doc";
 const EMPTY = "engine--owned-model--b3-virtualized-empty-doc";
+const PHASE5 = "engine--owned-model--phase55000-blocks";
 const API = "__IDCO_ENGINE_VIEW_API__";
 
 type Diag = {
@@ -135,4 +136,33 @@ test("an empty virtualized document shows a caret when focused", async ({
   expect(d.selectionType).toBe("text");
   expect(d.focusWithinRoot).toBe(true);
   expect(await caretCount(page)).toBeGreaterThan(0);
+});
+
+test("clicking in a scrolled virtualized document keeps the scroll position (polyfill focus)", async ({
+  page,
+}) => {
+  // Regression: clicking anywhere in a scrolled document snapped the scroll back to the TOP (the
+  // caret landed correctly, but the view jumped). Cause: the vendored EditContext polyfill focuses
+  // its hidden textarea — which sits at the document body origin (offset 0) until IME bounds re-home
+  // it — WITHOUT `preventScroll`, so the browser scrolled it into view and reset the scroller. The
+  // native path already uses `preventScroll`; the polyfill now matches it (focus-manager.ts). This is
+  // the polyfill (default) path — the native path never reproduced it.
+  await open(page, PHASE5);
+  expect((await diag(page)).virtualized).toBe(true);
+  const scroller = page.locator("[data-engine-view-root]").first();
+  const box = (await scroller.boundingBox())!;
+
+  // Scroll well down the long document with a real wheel gesture, then click a visible block.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 1500);
+  await page.waitForTimeout(300);
+  const before = await scroller.evaluate((el) => el.scrollTop);
+  expect(before).toBeGreaterThan(1000); // actually scrolled
+
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(300);
+  const after = await scroller.evaluate((el) => el.scrollTop);
+
+  // The scroll stays put (a tiny caret-reveal nudge is allowed; a reset would drop it to ~0).
+  expect(after).toBeGreaterThan(before - 150);
 });
