@@ -6,6 +6,7 @@ import {
   Button,
   DockLink,
   Inline,
+  Input,
   MainContent,
   MobileFilterMenu,
   Menu,
@@ -178,6 +179,58 @@ export const TabsAndBreadcrumbs: Story = () => {
         size="sm"
       />
     </Stack>
+  );
+};
+
+// R4 (content-api PV20): the `Tabs` `title` + `actions` slots let a document title
+// and its save/publish actions share the Content/Details tab-strip line instead of
+// stacking above it — folding the editor's "seam" into one row. The title uses the
+// borderless `Input variant="ghost" size="2xl"`, the new page-title scale above
+// DaisyUI's `input-xl` (also R4), so it reads at real document-title weight.
+export const TabsWithTitleAndActions: Story = () => {
+  const [selected, setSelected] = useState("content");
+  const [title, setTitle] = useState("Announcing the 2026 roadmap");
+
+  return (
+    <Panel>
+      <Tabs
+        ariaLabel="Record tabs"
+        items={[
+          {
+            id: "content",
+            label: "Content",
+            content: <Text>Body editor…</Text>,
+          },
+          {
+            id: "details",
+            label: "Details",
+            content: <Text>SEO, slug, org…</Text>,
+          },
+        ]}
+        selectedKey={selected}
+        onSelectionChange={setSelected}
+        title={
+          <Input
+            ariaLabel="Document title"
+            value={title}
+            onChange={setTitle}
+            variant="ghost"
+            size="2xl"
+            placeholder="Untitled"
+          />
+        }
+        actions={
+          <Inline>
+            <Button variant="ghost" size="sm">
+              Preview
+            </Button>
+            <Button variant="primary" size="sm">
+              Publish
+            </Button>
+          </Inline>
+        }
+      />
+    </Panel>
   );
 };
 

@@ -6,10 +6,30 @@ import {
   Checkbox,
   Form,
   HiddenInput,
+  Input,
   RadioGroup,
   Textarea,
   TextInput,
 } from "@idco/ui";
+
+describe("Input document-title scale (R4)", () => {
+  it("renders a borderless 2xl title above DaisyUI's input-xl step", () => {
+    render(
+      <Input
+        ariaLabel="Title"
+        value="Hello"
+        onChange={() => {}}
+        variant="ghost"
+        size="2xl"
+      />,
+    );
+    const input = screen.getByLabelText("Title");
+    // 2xl is a composed utility scale (no `input-xl`), so it reads as a real
+    // page-title weight rather than a sized-up field.
+    expect(input).toHaveClass("input", "input-ghost", "text-3xl", "h-auto");
+    expect(input).not.toHaveClass("input-xl");
+  });
+});
 
 describe("Form", () => {
   it("renders a form element", () => {

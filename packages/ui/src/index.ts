@@ -1,4 +1,5 @@
 export * from "./layout";
+export * from "./focus-ring";
 export * from "./app-shell";
 export * from "./typography";
 export * from "./button";

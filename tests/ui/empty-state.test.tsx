@@ -41,4 +41,23 @@ describe("EmptyState", () => {
     expect(link).toHaveAttribute("href", "/admin/oauth/applications/new");
     expect(link).toHaveClass("btn", "btn-primary");
   });
+
+  it("renders a toned icon chip so empty states are not identical grey blocks (R2)", () => {
+    const { container } = render(
+      <EmptyState icon="FileText" tone="primary" message="No posts yet" />,
+    );
+
+    // The chip is a rounded, tinted box wrapping the registered icon glyph.
+    const chip = container.querySelector("span.rounded-box");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveClass("bg-primary/10", "text-primary");
+    expect(chip?.querySelector("svg")).not.toBeNull();
+  });
+
+  it("defaults to a neutral Inbox chip when no icon/tone is given (R2)", () => {
+    const { container } = render(<EmptyState message="Nothing here" />);
+    const chip = container.querySelector("span.rounded-box");
+    expect(chip).toHaveClass("bg-base-200");
+    expect(chip?.querySelector("svg")).not.toBeNull();
+  });
 });

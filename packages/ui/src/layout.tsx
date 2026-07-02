@@ -5,7 +5,8 @@
  *
  * @categoryDefault Layout
  */
-import type { ReactNode } from "react";
+import { Children, useState, type ReactNode } from "react";
+import { Button } from "./button";
 
 /** Spacing scale token for gaps between children. */
 type Gap = "xs" | "sm" | "md" | "lg";
@@ -15,8 +16,19 @@ type Align = "start" | "center" | "end" | "stretch";
 type Width = "narrow" | "content" | "wide" | "xwide" | "full";
 /** Inner padding scale token for surfaces. */
 type Padding = "none" | "sm" | "md" | "lg";
-/** Surface background tone token, neutral base or muted. */
-type SurfaceTone = "base" | "muted";
+/**
+ * Surface elevation tone — a 3-step scale over DaisyUI's `base-100 / 200 / 300`
+ * (R1 / content-api PV21). The steps read as distinct zones so an inspector rail
+ * separates from the page and the cards on it:
+ * - `base` → `base-100`, the default card / raised content surface.
+ * - `muted` → `base-200`, a recessed shade (the page/backdrop tone).
+ * - `raised` → `base-300`, the most-separated zone for a rail that must not blend
+ *   into the page or the cards it sits beside.
+ *
+ * `base`/`muted` keep their prior meaning so existing `Panel tone` callers are
+ * unchanged; `raised` is the additive third step.
+ */
+type SurfaceTone = "base" | "muted" | "raised";
 
 /** Common base props shared by surface primitives, carrying only their children. */
 type SurfaceProps = {
@@ -151,18 +163,27 @@ export function PageBody({ width = "wide", children }: PageRegionProps) {
 
 /** Props for {@link Panel}. */
 type PanelProps = SurfaceProps & {
-  /** Surface background tone, `base` for the default card or `muted` for a recessed shade. */
+  /**
+   * Surface elevation tone: `base` (`base-100`, the default card), `muted`
+   * (`base-200`, recessed), or `raised` (`base-300`, a distinct rail zone). See
+   * {@link SurfaceTone} for the scale (R1).
+   */
   readonly tone?: SurfaceTone;
   /** Inner padding around the panel's content. */
   readonly padding?: Padding;
 };
 
-/** A bordered DaisyUI card surface with a selectable tone and inner padding. */
+const surfaceToneClass: Record<SurfaceTone, string> = {
+  base: "bg-base-100",
+  muted: "bg-base-200",
+  raised: "bg-base-300",
+};
+
+/** A bordered DaisyUI card surface with a selectable elevation tone and inner padding. */
 export function Panel({ tone = "base", padding = "md", children }: PanelProps) {
-  const toneClass = tone === "muted" ? "bg-base-200" : "bg-base-100";
   return (
     <section
-      className={`card ${toneClass} border border-base-300 shadow-sm ${paddingClass[padding]} w-full`}
+      className={`card ${surfaceToneClass[tone]} border border-base-300 shadow-sm ${paddingClass[padding]} w-full`}
     >
       {children}
     </section>
@@ -267,19 +288,152 @@ export function Grid({ columns = "one", gap = "md", children }: GridProps) {
   );
 }
 
+/** Readable measure applied to the main column, centered so it grows into the gutter (R3). */
+type MainMeasure = "prose" | "content" | "wide" | "none";
+/** Sidebar track width preset (R3). */
+type SidebarWidth = "sm" | "md" | "lg";
+
+// The main column's max-width, centered in its track. `prose`/`content` cap a
+// writing column at a readable measure (~720/768px) and let the freed track width
+// fall to the gutter instead of stretching the text; `wide`/`none` opt out.
+const mainMeasureClass: Record<MainMeasure, string> = {
+  prose: "max-w-[45rem]", // ~720px — a Notion/Word writing measure
+  content: "max-w-3xl", // 768px
+  wide: "max-w-5xl",
+  none: "max-w-none",
+};
+
+// Full static grid-template strings (not interpolated) so Tailwind's JIT scanner
+// can see every arbitrary value. `sm` (20rem) preserves the prior default width;
+// `md` (~360px) is the R3 target that brings a SERP preview near Google's real
+// width; `lg` widens further for a dense inspector.
+const sidebarTrackClass: Record<SidebarWidth, string> = {
+  sm: "lg:grid-cols-[minmax(0,1fr)_20rem]",
+  md: "lg:grid-cols-[minmax(0,1fr)_22.5rem]",
+  lg: "lg:grid-cols-[minmax(0,1fr)_26rem]",
+};
+
 /** Props for {@link Columns}. */
 type ColumnsProps = SurfaceProps & {
   /** Spacing between the main column and the sidebar. */
   readonly gap?: Gap;
+  /**
+   * Cap and center the main (first) column at a readable measure so a writing
+   * column does not stretch edge-to-edge on a wide screen; the freed width falls
+   * to the gutter (R3 / content-api PV22). Defaults to `none` (prior behavior).
+   */
+  readonly mainMaxWidth?: MainMeasure;
+  /** Sidebar (second column) track width preset; defaults to `sm` (the prior 20rem). */
+  readonly sidebarWidth?: SidebarWidth;
+  /**
+   * Show a toggle that collapses the sidebar to an icon rail, letting the main
+   * column reclaim the full width (R3). Uncontrolled unless `collapsed` is passed.
+   */
+  readonly collapsibleSidebar?: boolean;
+  /** Initial collapsed state when `collapsibleSidebar` is used uncontrolled. */
+  readonly defaultCollapsed?: boolean;
+  /** Controlled collapsed state; pair with `onCollapsedChange`. */
+  readonly collapsed?: boolean;
+  /** Called with the next collapsed state whenever the toggle is pressed. */
+  readonly onCollapsedChange?: (collapsed: boolean) => void;
+  /** Accessible label for the collapse toggle; defaults to "sidebar". */
+  readonly sidebarLabel?: string;
 };
 
-/** A two-track main-and-sidebar layout that collapses to a single column on small screens. */
-export function Columns({ gap = "md", children }: ColumnsProps) {
+/**
+ * A two-track main-and-sidebar layout that collapses to a single column on small
+ * screens, with an optional readable main measure and a sized, collapsible sidebar.
+ *
+ * The first child is the main column, the second is the sidebar (positional, as
+ * before). With `collapsibleSidebar`, the second track drops to an icon rail
+ * holding just the expand toggle so the affordance stays reachable in both states
+ * and the main column grows into the freed gutter.
+ */
+export function Columns({
+  gap = "md",
+  mainMaxWidth = "none",
+  sidebarWidth = "sm",
+  collapsibleSidebar,
+  defaultCollapsed,
+  collapsed,
+  onCollapsedChange,
+  sidebarLabel = "sidebar",
+  children,
+}: ColumnsProps) {
+  // Controlled when `collapsed` is provided; otherwise track it locally. The
+  // toggle is React Aria behavior (the package `Button`), never a hand-rolled
+  // control, so keyboard/press/ARIA come for free.
+  const [internalCollapsed, setInternalCollapsed] = useState(
+    defaultCollapsed ?? false,
+  );
+  const isControlled = collapsed !== undefined;
+  const isCollapsed = collapsibleSidebar
+    ? isControlled
+      ? collapsed
+      : internalCollapsed
+    : false;
+  const toggle = () => {
+    const next = !isCollapsed;
+    if (!isControlled) setInternalCollapsed(next);
+    onCollapsedChange?.(next);
+  };
+
+  const items = Children.toArray(children);
+  const mainChild = items[0] ?? null;
+  const sidebarChild = items[1] ?? null;
+
+  // Center the main column at its measure when capped; the wrapper's `w-full`
+  // keeps it fluid below the cap and `mx-auto` sends the slack to the gutter.
+  const main =
+    mainMaxWidth === "none" ? (
+      mainChild
+    ) : (
+      <div className={`w-full ${mainMeasureClass[mainMaxWidth]} mx-auto`}>
+        {mainChild}
+      </div>
+    );
+
+  // When collapsed the sidebar track becomes `auto` so it shrinks to the width of
+  // the expand button and the main column claims the rest.
+  const trackClass = isCollapsed
+    ? "lg:grid-cols-[minmax(0,1fr)_auto]"
+    : sidebarTrackClass[sidebarWidth];
+
   return (
-    <div
-      className={`grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] ${gapClass[gap]}`}
-    >
-      {children}
+    <div className={`grid grid-cols-1 ${trackClass} ${gapClass[gap]}`}>
+      {main}
+      {collapsibleSidebar ? (
+        isCollapsed ? (
+          <div className="flex justify-end lg:justify-center">
+            <Button
+              ariaLabel={`Expand the ${sidebarLabel}`}
+              iconName="PanelRightOpen"
+              onClick={toggle}
+              size="sm"
+              square
+              tooltip={`Expand the ${sidebarLabel}`}
+              variant="ghost"
+            />
+          </div>
+        ) : (
+          <aside className="min-w-0">
+            <div className="mb-2 flex justify-end">
+              <Button
+                ariaLabel={`Collapse the ${sidebarLabel}`}
+                iconName="PanelRightClose"
+                onClick={toggle}
+                size="sm"
+                square
+                tooltip={`Collapse the ${sidebarLabel}`}
+                variant="ghost"
+              />
+            </div>
+            {sidebarChild}
+          </aside>
+        )
+      ) : (
+        sidebarChild
+      )}
     </div>
   );
 }

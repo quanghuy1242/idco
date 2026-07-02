@@ -149,4 +149,46 @@ describe("Tabs", () => {
 
     expect(screen.getByRole("tablist")).toHaveClass("tabs-sm");
   });
+
+  it("renders title and actions on the tab-strip line, keeping tab behavior (R4)", () => {
+    const onSelectionChange = vi.fn<(key: string) => void>();
+    render(
+      <Tabs
+        ariaLabel="Document tabs"
+        items={panelItems}
+        defaultSelectedKey="overview"
+        onSelectionChange={onSelectionChange}
+        title={<h1>My document title</h1>}
+        actions={<button type="button">Save</button>}
+      />,
+    );
+
+    // Both slots render and share the row with the still-functional tab list.
+    expect(
+      screen.getByRole("heading", { name: "My document title" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+
+    const tablist = screen.getByRole("tablist", { name: "Document tabs" });
+    expect(tablist).toHaveClass("grow", "min-w-0");
+    // Title, tablist, and actions live on one flex row.
+    expect(tablist.parentElement).toHaveClass("flex", "items-center");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Members" }));
+    expect(onSelectionChange).toHaveBeenCalledWith("members");
+  });
+
+  it("omits the slot row when neither title nor actions is set (R4)", () => {
+    render(
+      <Tabs
+        ariaLabel="Plain tabs"
+        items={panelItems}
+        defaultSelectedKey="overview"
+      />,
+    );
+    // Without slots the tablist keeps its original markup (no grow wrapper).
+    expect(screen.getByRole("tablist", { name: "Plain tabs" })).not.toHaveClass(
+      "grow",
+    );
+  });
 });

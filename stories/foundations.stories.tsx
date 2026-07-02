@@ -26,6 +26,7 @@ import {
   Stack,
   Text,
   Toolbar,
+  focusRing,
 } from "@idco/ui";
 
 export default { title: "Packages UI / Foundations" } satisfies StoryDefault;
@@ -276,4 +277,143 @@ export const FeedbackAndLoading: Story = () => (
       }
     />
   </Stack>
+);
+
+// R1 (content-api PV21): the 3-step surface-elevation scale + the deliberate
+// focus-ring token. `Panel tone` now reads page / card / raised-rail off DaisyUI's
+// `base-100 / 200 / 300`, so an inspector rail separates from the page and the cards
+// on it instead of every surface being one flat grey. `focusRing` is a shared class
+// token consumers spread onto their own focusable surfaces — a visible ring without
+// a per-app `globals.css` add.
+export const SurfaceElevationAndFocusRing: Story = () => (
+  // The `muted` page tone stands in for the app backdrop so the three panels' tones
+  // read against something recessed.
+  <div className="rounded-box bg-base-200 p-6">
+    <Stack>
+      <Text variant="h3">Elevation scale — page vs card vs raised rail</Text>
+      <Columns sidebarWidth="md" gap="lg">
+        <Stack>
+          <Panel tone="base">
+            <Stack gap="xs">
+              <Text variant="h4">Card — tone=&quot;base&quot; (base-100)</Text>
+              <Text variant="caption">
+                The default content surface, sitting on the recessed page.
+              </Text>
+            </Stack>
+          </Panel>
+          <Panel tone="muted">
+            <Stack gap="xs">
+              <Text variant="h4">
+                Recessed — tone=&quot;muted&quot; (base-200)
+              </Text>
+              <Text variant="caption">A quieter, sunken sub-surface.</Text>
+            </Stack>
+          </Panel>
+        </Stack>
+        <Panel tone="raised">
+          <Stack gap="xs">
+            <Text variant="h4">Rail — tone=&quot;raised&quot; (base-300)</Text>
+            <Text variant="caption">
+              The most-separated zone, for an inspector rail that must not blend
+              into the page or the cards beside it.
+            </Text>
+          </Stack>
+        </Panel>
+      </Columns>
+      <Spacer />
+      <Text variant="h3">Focus-ring token</Text>
+      <Text variant="caption">
+        Tab into the swatch below: `focusRing` is spread onto a plain focusable
+        element and rings consistently — no globals.css authoring.
+      </Text>
+      <div
+        className={`flex h-16 w-48 items-center justify-center rounded-box border border-base-300 bg-base-100 ${focusRing}`}
+        tabIndex={0}
+      >
+        <Text variant="caption">Focusable surface</Text>
+      </div>
+    </Stack>
+  </div>
+);
+
+// R2 (content-api PV21): `EmptyState` gains an optional registered `icon` rendered
+// as a colored chip, plus a `tone`, so the admin's four empty states read as
+// distinct, context-carrying zones instead of identical grey blocks.
+export const EmptyStateTones: Story = () => (
+  <Grid columns="two" gap="md">
+    <Panel>
+      <EmptyState
+        icon="FileText"
+        tone="primary"
+        message="No posts yet — write your first one."
+        cta="New post"
+        onCta={() => {}}
+      />
+    </Panel>
+    <Panel>
+      <EmptyState
+        icon="Image"
+        tone="info"
+        message="Your media library is empty."
+        cta="Upload media"
+        onCta={() => {}}
+      />
+    </Panel>
+    <Panel>
+      <EmptyState
+        icon="ShieldCheck"
+        tone="success"
+        message="No access issues — every binding checks out."
+      />
+    </Panel>
+    <Panel>
+      <EmptyState
+        icon="Bell"
+        tone="warning"
+        message="No scheduled posts. Nothing will publish automatically."
+      />
+    </Panel>
+  </Grid>
+);
+
+// R3 (content-api PV22): `Columns` gains a readable main measure, a sized sidebar,
+// and a collapsible rail. The writing column centers at ~720px and grows into the
+// gutter instead of stretching edge-to-edge; the rail widens to ~360px (near a real
+// SERP width) and collapses to an icon rail so the main column reclaims the space.
+export const RecordLayout: Story = () => (
+  <div className="rounded-box bg-base-200 p-6">
+    <Columns
+      mainMaxWidth="prose"
+      sidebarWidth="md"
+      collapsibleSidebar
+      sidebarLabel="inspector"
+      gap="lg"
+    >
+      <Panel>
+        <Stack gap="sm">
+          <Text variant="h3">Writing column</Text>
+          <Text variant="caption">
+            Capped at a readable measure (~720px) and centered, so it does not
+            stretch on a wide screen — the freed width falls to the gutter.
+            Toggle the rail (top-right of the sidebar) to watch this column
+            reclaim it.
+          </Text>
+          <Text>
+            The quick brown fox jumps over the lazy dog. The quick brown fox
+            jumps over the lazy dog. The quick brown fox jumps over the lazy
+            dog.
+          </Text>
+        </Stack>
+      </Panel>
+      <Panel tone="raised">
+        <Stack gap="xs">
+          <Text variant="h4">Inspector</Text>
+          <Text variant="caption">
+            A ~360px raised rail — wide enough for a SERP preview near
+            Google&apos;s real width. Collapsible via the header toggle.
+          </Text>
+        </Stack>
+      </Panel>
+    </Columns>
+  </div>
 );

@@ -54,6 +54,14 @@ export type TabItem = PanelTabItem | LinkTabItem | ControlTabItem;
 type TabsBaseProps = {
   /** Accessible label for the tab list. */
   readonly ariaLabel: string;
+  /**
+   * Inline content rendered at the start of the tab-strip line, sharing the row
+   * with the tabs (R4 / content-api PV20). Lets a page/document title sit on the
+   * same line as a Content/Details tab strip instead of stacking above it.
+   */
+  readonly title?: ReactNode;
+  /** Inline content pinned to the end of the tab-strip line — a right-actions slot (R4). */
+  readonly actions?: ReactNode;
   /** Selected tab id (controlled). */
   readonly selectedKey?: string;
   /** Initial selected tab id (uncontrolled). */
@@ -105,6 +113,8 @@ function isPanelTabItem(item: TabItem): item is PanelTabItem {
 export function Tabs({
   items,
   ariaLabel,
+  title,
+  actions,
   selectedKey,
   defaultSelectedKey,
   disabledKeys,
@@ -119,6 +129,57 @@ export function Tabs({
   );
   const panelItems = items.filter(isPanelTabItem);
   const hasPanels = panelItems.length > 0;
+  const hasTitle = title !== undefined && title !== null;
+  const hasActions = actions !== undefined && actions !== null;
+  const hasSlots = hasTitle || hasActions;
+
+  const tabList = (
+    <AriaTabList
+      aria-label={ariaLabel}
+      // With slots the list shares a flex row, so it grows and scrolls within its
+      // own track (`min-w-0`) while title/actions keep their intrinsic width.
+      className={`tabs ${variantClass[variant]} ${sizeClass} overflow-x-auto ${
+        hasSlots ? "min-w-0 grow" : ""
+      }`.trim()}
+    >
+      {items.map((item) => {
+        const href = "href" in item ? item.href : undefined;
+        return (
+          <AriaTab
+            key={item.id}
+            id={item.id}
+            href={href}
+            // DaisyUI dims a plain `.tab`, which reads as *disabled* next to the
+            // active one. Give an inactive-but-enabled tab explicit
+            // `text-base-content` so only a genuinely `tab-disabled` tab greys out
+            // (the active tab carries its own emphasis via `tab-active` + the
+            // variant's border/box/lift indicator).
+            className={({ isSelected, isDisabled }) =>
+              `tab ${isSelected ? "tab-active" : ""} ${
+                isDisabled
+                  ? "tab-disabled"
+                  : isSelected
+                    ? ""
+                    : "text-base-content"
+              }`.trim()
+            }
+            render={
+              typeof href === "string"
+                ? (domProps) =>
+                    "href" in domProps ? (
+                      <Link {...domProps} href={href} />
+                    ) : (
+                      <div {...domProps} />
+                    )
+                : undefined
+            }
+          >
+            {item.label}
+          </AriaTab>
+        );
+      })}
+    </AriaTabList>
+  );
 
   return (
     <AriaTabs
@@ -127,47 +188,22 @@ export function Tabs({
       disabledKeys={disabled}
       onSelectionChange={(key) => onSelectionChange?.(String(key))}
     >
-      <AriaTabList
-        aria-label={ariaLabel}
-        className={`tabs ${variantClass[variant]} ${sizeClass} overflow-x-auto`.trim()}
-      >
-        {items.map((item) => {
-          const href = "href" in item ? item.href : undefined;
-          return (
-            <AriaTab
-              key={item.id}
-              id={item.id}
-              href={href}
-              // DaisyUI dims a plain `.tab`, which reads as *disabled* next to the
-              // active one. Give an inactive-but-enabled tab explicit
-              // `text-base-content` so only a genuinely `tab-disabled` tab greys out
-              // (the active tab carries its own emphasis via `tab-active` + the
-              // variant's border/box/lift indicator).
-              className={({ isSelected, isDisabled }) =>
-                `tab ${isSelected ? "tab-active" : ""} ${
-                  isDisabled
-                    ? "tab-disabled"
-                    : isSelected
-                      ? ""
-                      : "text-base-content"
-                }`.trim()
-              }
-              render={
-                typeof href === "string"
-                  ? (domProps) =>
-                      "href" in domProps ? (
-                        <Link {...domProps} href={href} />
-                      ) : (
-                        <div {...domProps} />
-                      )
-                  : undefined
-              }
-            >
-              {item.label}
-            </AriaTab>
-          );
-        })}
-      </AriaTabList>
+      {/* Slots share the tab-strip line: title at the start, tabs growing in the
+          middle, actions pinned to the end (R4). Without slots the list renders
+          alone, so a caller that never used slots gets identical markup. The
+          `AriaTabList` stays a descendant of `AriaTabs`, so React Aria's tab
+          context and roving focus are unchanged whether or not it is wrapped. */}
+      {hasSlots ? (
+        <div className="flex items-center gap-3">
+          {hasTitle ? <div className="shrink-0 min-w-0">{title}</div> : null}
+          {tabList}
+          {hasActions ? (
+            <div className="ml-auto shrink-0">{actions}</div>
+          ) : null}
+        </div>
+      ) : (
+        tabList
+      )}
       {hasPanels ? (
         <AriaTabPanels>
           {panelItems.map((item) => (

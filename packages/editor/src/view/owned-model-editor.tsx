@@ -70,6 +70,17 @@ import { requestFrame } from "./raf";
 export type OwnedModelEditorProps = OwnedModelEditorViewProps & {
   /** Hide the formatting toolbar (default: shown). */
   readonly hideToolbar?: boolean;
+  /**
+   * Pin the formatting ribbon to the top of the scroll container as the document
+   * scrolls (R4 / content-api PV20). Off by default. Applies `position: sticky;
+   * top: 0` to the toolbar so it stays reachable in a page-scrolled mount (the
+   * non-`fillHeight` admin layout, where the whole page scrolls); in `fillHeight`
+   * mode the surface scrolls internally and the toolbar is already static above it,
+   * so this is a no-op there. The `top` offset is 0 (the scroll-container top): a
+   * host with its own sticky app-header should start the editor's scroll container
+   * below that header, since the editor cannot know the host's chrome height.
+   */
+  readonly stickyToolbar?: boolean;
   /** Document-theming class applied to the surface. Defaults to DaisyUI `prose`. */
   readonly proseClassName?: string;
   /** Host upload binding for image config + drag-drop (AC10); inert when absent. */
@@ -149,6 +160,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
     hideToolbar,
     proseClassName = "prose max-w-none",
     renderDock,
+    stickyToolbar,
     store,
     toolbarCapabilities,
     toolbarLayout,
@@ -495,6 +507,10 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
       hideToolbar ? null : (
         <EditorToolbar
           capabilities={capabilities}
+          // Sticky pins the ribbon to the scroll-container top; the toolbar's own
+          // opaque `bg-base-100` + `border-b` keeps content from bleeding through as
+          // it scrolls under. `z-20` sits above the prose but below any host overlay.
+          className={stickyToolbar ? "sticky top-0 z-20" : undefined}
           focusEditor={focusEditor}
           layout={toolbarLayout}
           onFind={openFind}
@@ -508,6 +524,7 @@ export const OwnedModelEditor = forwardRef(function OwnedModelEditor(
       hideToolbar,
       openFind,
       panelHost,
+      stickyToolbar,
       store,
       toolbarLayout,
     ],

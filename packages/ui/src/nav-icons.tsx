@@ -51,6 +51,7 @@ import {
   Highlighter,
   History,
   Image,
+  Inbox,
   Info,
   IndentDecrease,
   IndentIncrease,
@@ -66,6 +67,8 @@ import {
   Minus,
   Network,
   PaintBucket,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Pilcrow,
   Plus,
@@ -148,6 +151,7 @@ const iconMap: Record<string, LucideIcon> = {
   Highlighter,
   History,
   Image,
+  Inbox,
   Info,
   IndentDecrease,
   IndentIncrease,
@@ -163,6 +167,8 @@ const iconMap: Record<string, LucideIcon> = {
   Minus,
   Network,
   PaintBucket,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Pilcrow,
   Plus,
@@ -194,13 +200,15 @@ const iconMap: Record<string, LucideIcon> = {
   X,
 };
 
-/** Size preset for a rendered icon: `sidebar`, `dock`, or `timeline`. */
-type NavIconVariant = "sidebar" | "dock" | "timeline";
+/** Size preset for a rendered icon: `sidebar`, `dock`, `timeline`, or `chip`. */
+type NavIconVariant = "sidebar" | "dock" | "timeline" | "chip";
 
 const sizeMap: Record<NavIconVariant, string> = {
   sidebar: "size-4",
   dock: "size-[1.2em]",
   timeline: "size-2.5",
+  // A larger glyph sized to sit inside a rounded icon chip (e.g. `EmptyState`, R2).
+  chip: "size-6",
 };
 
 /**

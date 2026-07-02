@@ -223,6 +223,34 @@ export const Phase8ToolbarSpiDemo: Story = () => {
   return <OwnedModelEditor forcePolyfill store={store} virtualize={false} />;
 };
 
+/**
+ * R4 (content-api PV20) — `stickyToolbar`. In a page-scrolled mount (the admin's
+ * non-`fillHeight` layout) the formatting ribbon would scroll away with the body;
+ * `stickyToolbar` pins it to the top of the scroll container so it stays reachable.
+ * Here the editor sits in a bounded `overflow-auto` box (that box is the scroll
+ * ancestor) over a tall document — scroll the body and the ribbon holds at the top.
+ */
+export const R4StickyToolbar: Story = () => {
+  const store = useMemo(() => createPhase4Store(40), []);
+  return (
+    <div
+      style={{
+        height: 420,
+        overflow: "auto",
+        border: "1px solid var(--fallback-b3,#d1d5db)",
+        borderRadius: 12,
+      }}
+    >
+      <OwnedModelEditor
+        forcePolyfill
+        stickyToolbar
+        store={store}
+        virtualize={false}
+      />
+    </div>
+  );
+};
+
 // --- B3 repro: virtualized caret persistence (note.md §5.3) ------------------
 // The virtualized path is the one content-api exercised, and no other story
 // combines `virtualize` with a small/empty doc + the toolbar — so these two are

@@ -77,13 +77,17 @@ type BareInputProps = {
   readonly ariaLabel: string;
   /** Input type; defaults to `text`. */
   readonly type?: "email" | "text" | "url";
-  /** Control height; defaults to `md`. `lg`/`xl` suit a hero/title field. */
-  readonly size?: "sm" | "md" | "lg" | "xl";
+  /**
+   * Control height; defaults to `md`. `lg`/`xl` suit a hero field; `2xl` is the
+   * page-title scale above DaisyUI's `input-xl` (R4 / content-api PV20) — a real
+   * document-title weight for the borderless title, not a sized-up subheading.
+   */
+  readonly size?: "sm" | "md" | "lg" | "xl" | "2xl";
   /**
    * Visual frame. `bordered` (default) is the standard boxed field; `ghost`
    * drops the border for a borderless, label-less title input (DaisyUI
-   * `input-ghost`) — pair with `size="xl"` for a Notion/Word-style document title
-   * (R4, note.md §5.10).
+   * `input-ghost`) — pair with `size="xl"` or `size="2xl"` for a Notion/Word-style
+   * document title (R4, note.md §5.10).
    */
   readonly variant?: "bordered" | "ghost";
   readonly placeholder?: string;
@@ -94,11 +98,17 @@ type BareInputProps = {
 };
 
 // DaisyUI 5 input sizes (xs/sm/md/lg/xl); `md` is the default and needs no class.
+// `2xl` has no DaisyUI step, so it composes utilities instead: Tailwind's utility
+// layer overrides DaisyUI's component-layer `input` font-size/height, so `text-3xl`
+// + `h-auto py-1.5` produce a genuine document-title scale (deterministic across
+// the cascade — utilities always win the layer order) rather than fighting a
+// fixed-height `input-xl`.
 const INPUT_SIZE_CLASS: Record<NonNullable<BareInputProps["size"]>, string> = {
   sm: "input-sm",
   md: "",
   lg: "input-lg",
   xl: "input-xl",
+  "2xl": "text-3xl font-semibold leading-tight h-auto py-1.5",
 };
 
 /**
