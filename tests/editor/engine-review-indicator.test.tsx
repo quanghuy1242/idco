@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
- * The R6-I change indicator + object `diffData` seam (docs/036 §5.6/§6.2.1/§6.4). These assert the
- * pure `changedBlockIds` selector, the `applyReviewIndicators` DOM decoration (set on changed
- * blocks, cleared when no longer changed, `removed` skipped since it has no live element), and the
- * code block's `diffData` field-level diff through `nodeDiffResolver` (a code/language change reads
- * as object fields, not a bare block-level "changed"; without the seam, still `changed` but no fields).
+ * The R6-I change indicator + object `diffData` seam (docs/036 §5.6/§6.2.1/§6.4, docs/039 R-GI/D8).
+ * These assert the pure `changedBlockIds` selector, the `applyReviewIndicators` DOM decoration (a
+ * status-hued gutter bar set on changed blocks — incl. a RED bar on a removed block's ghost element —
+ * cleared when no longer changed; the vestigial deletion tick is gone), and the code block's `diffData`
+ * field-level diff through `nodeDiffResolver`.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -12,7 +12,6 @@ import {
   changedBlockIds,
   createDefaultBlockRegistry,
   createIdAllocator,
-  deletionAnchors,
   diffSnapshots,
   type EditorDocumentSnapshot,
   type EditorNode,
@@ -61,13 +60,14 @@ describe("changedBlockIds (docs/036 §6.2.1)", () => {
   });
 });
 
-describe("applyReviewIndicators (DOM decoration, docs/036 §6.2.1)", () => {
-  it("marks present changed blocks, skips removed, and clears stale markers", () => {
+describe("applyReviewIndicators (DOM decoration, docs/036 §6.2.1, docs/039 R-GI/D8)", () => {
+  it("marks changed/added/removed blocks (a removed block's ghost gets the red bar), clears stale", () => {
     const a = "idco_node_a";
     const b = "idco_node_b";
     const d = "idco_node_d";
+    const gone = "idco_node_gone"; // a removed block's GHOST element (docs/039 R-RO)
     const root = document.createElement("div");
-    for (const id of [a, b, d]) {
+    for (const id of [a, b, d, gone]) {
       const el = document.createElement("p");
       el.setAttribute("data-engine-block-id", id);
       root.appendChild(el);
@@ -80,66 +80,27 @@ describe("applyReviewIndicators (DOM decoration, docs/036 §6.2.1)", () => {
     applyReviewIndicators(root, [
       { id: a, status: "changed" },
       { id: d, status: "added" },
-      { id: "idco_node_c", status: "removed" }, // no element — nothing to mark
+      { id: gone, status: "removed" }, // has a live ghost element → gets the red bar
     ]);
     expect(get(a)).toBe("changed");
     expect(get(d)).toBe("added");
+    expect(get(gone)).toBe("removed"); // the ghost carries the removal's red bar, no separate tick
     expect(get(b)).toBeNull(); // unchanged block: no marker
 
-    // Re-apply with a reduced set: a's marker is cleared, d stays.
+    // Re-apply with a reduced set: a's and gone's markers clear, d stays.
     applyReviewIndicators(root, [{ id: d, status: "added" }]);
     expect(get(a)).toBeNull();
+    expect(get(gone)).toBeNull();
     expect(get(d)).toBe("added");
 
-    // Empty clears everything.
+    // Empty clears everything; no deletion-tick attributes are ever set.
     applyReviewIndicators(root, []);
     expect(get(d)).toBeNull();
-  });
-});
-
-describe("deletionAnchors (docs/036 §6.2.1)", () => {
-  it("anchors a removed block's hint to its surviving neighbor (before, or after at the end)", () => {
-    // Merged-order block list: a removed block in the middle hints the FOLLOWING survivor; a removed
-    // block at the very end hints the PRECEDING one. Consecutive removals collapse to one hint.
-    const anchors = deletionAnchors({
-      blocks: [
-        { id: "keep1", status: "unchanged" },
-        { id: "gone1", status: "removed" },
-        { id: "gone2", status: "removed" },
-        { id: "keep2", status: "changed" },
-        { id: "gone3", status: "removed" }, // trailing removal
-      ],
-    });
-    expect(anchors).toEqual([
-      { id: "keep2", side: "before" },
-      { id: "keep2", side: "after" },
-    ]);
-  });
-});
-
-describe("applyReviewIndicators deletion ticks (docs/036 §6.2.1)", () => {
-  it("flags the surviving neighbor of a removed block and clears it when the deletion is gone", () => {
-    const before = "idco_node_before";
-    const root = document.createElement("div");
-    const el = document.createElement("p");
-    el.setAttribute("data-engine-block-id", before);
-    root.appendChild(el);
-    const attr = () => el.getAttribute("data-engine-review-removed-before");
-
-    applyReviewIndicators(root, [], [{ id: before, side: "before" }]);
-    expect(attr()).toBe("");
-    // A block can be both a changed block AND a deletion neighbor.
-    applyReviewIndicators(
-      root,
-      [{ id: before, status: "changed" }],
-      [{ id: before, side: "before" }],
-    );
-    expect(el.getAttribute("data-engine-review-changed")).toBe("changed");
-    expect(attr()).toBe("");
-    // No more deletion beside it → the tick clears (the status marker stays).
-    applyReviewIndicators(root, [{ id: before, status: "changed" }], []);
-    expect(attr()).toBeNull();
-    expect(el.getAttribute("data-engine-review-changed")).toBe("changed");
+    expect(
+      root.querySelector(
+        "[data-engine-review-removed-before],[data-engine-review-removed-after]",
+      ),
+    ).toBeNull();
   });
 });
 

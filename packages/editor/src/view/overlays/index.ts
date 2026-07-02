@@ -29,3 +29,4 @@ export * from "./overlay-anchor";
 export * from "./gap-cursor";
 export * from "./review-change-indicator";
 export * from "./review-cursor-surface";
+export * from "./review-element-detail";

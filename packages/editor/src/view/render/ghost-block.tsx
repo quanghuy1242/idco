@@ -39,43 +39,32 @@
  */
 import type { CSSProperties } from "react";
 import type { EditorNode, NodeId } from "../../core";
+import { visuallyHiddenStyle } from "../styles";
 
+// The ghost is MINIMAL and read-only (docs/039 R-RO, D9): struck base content, inert, and nothing
+// else — no border, no wash, no uppercase "REMOVED" badge. The old `GHOST_BOX` was a mini diff-view
+// card, exactly the card-in-prose docs/038 §1–§2 forbids in the woven surface. The removal's status now
+// reads in the ONE shared language: the passive marker layer paints a RED gutter bar on this element
+// (it carries `data-engine-block-id`, docs/039 R-GI), the same bar every other change wears. A hidden
+// label keeps the status announced for assistive tech since the word is no longer painted (R-NL).
 const GHOST_BOX: CSSProperties = {
-  background:
-    "color-mix(in oklab, var(--color-error, #dc2626) 8%, transparent)",
-  borderInlineStart: "3px solid var(--color-error, #dc2626)",
-  borderRadius: "0.25rem",
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.15rem",
-  opacity: 0.75,
-  // Vertical spacing lives in PADDING, not margin (docs/038 §5.2, R6-J J2): the ResizeObserver reads
-  // `borderBoxSize`, which excludes margin, so a margined ghost would leak ~8px/ghost from the treap's
-  // aggregate total (a cosmetic scrollbar drift that compounds with many ghosts). Padding is inside
-  // the border box, so the treap measures the ghost's full footprint; the trade is that consecutive
-  // ghosts read as one contiguous removed band rather than separate rounded chips, which is if
-  // anything clearer for a removed region.
-  padding: "0.65rem 0.75rem",
-  // Inert: the caret cannot enter and no text selection lands here, so the block
-  // reads as an atomic widget (docs/038 §3). Position is relative to match the
-  // base block box so geometry reads a stable rect.
+  // Vertical spacing lives in PADDING, not margin (docs/038 §5.2): the ResizeObserver reads
+  // `borderBoxSize`, which excludes margin, so a margined ghost would leak height from the treap's
+  // aggregate total. Padding is inside the border box, so the treap measures the full footprint.
+  padding: "0.3rem 0",
+  // Inert: the caret cannot enter and no text selection lands here, so the block reads as an atomic
+  // widget (docs/038 §3). Position relative so geometry reads a stable rect and the gutter bar anchors.
   pointerEvents: "none",
   position: "relative",
   userSelect: "none",
 };
 
-const GHOST_BADGE: CSSProperties = {
-  color: "var(--color-error, #dc2626)",
-  fontSize: "0.7rem",
-  fontWeight: 600,
-  letterSpacing: "0.03em",
-  lineHeight: 1.2,
-  textTransform: "uppercase",
-};
-
 const GHOST_TEXT: CSSProperties = {
-  opacity: 0.85,
+  color:
+    "color-mix(in oklab, var(--color-base-content, currentColor) 60%, transparent)",
   textDecoration: "line-through",
+  textDecorationColor:
+    "color-mix(in oklab, var(--color-error, #dc2626) 55%, currentColor)",
 };
 
 /** The plain text a removed block shows struck; empty for a node with no own text (object/container). */
@@ -98,7 +87,8 @@ export function GhostBlock(props: {
       ref={(element) => registerBlock(node.id, element)}
       style={GHOST_BOX}
     >
-      <span style={GHOST_BADGE}>removed {node.type}</span>
+      {/* Announced, never painted (docs/039 R-NL): the red gutter bar carries the visual status. */}
+      <span style={visuallyHiddenStyle}>removed {node.type}</span>
       {text ? <span style={GHOST_TEXT}>{text}</span> : null}
     </div>
   );

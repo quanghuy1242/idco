@@ -68,6 +68,7 @@ export {
   createDefaultBlockRegistry,
   globalNodeDefinitions,
   nodeDiffResolver,
+  pieceTableText,
   registerGlobalNodeDefinition,
   unregisterGlobalNodeDefinition,
 } from "./registry";
@@ -235,6 +236,7 @@ export { diffSnapshots } from "./diff";
 export {
   BODY_SCOPE_ID,
   attrDiffIsEmpty,
+  blockDiffIndex,
   buildParentIndex,
   countStats,
   diffAttrs,

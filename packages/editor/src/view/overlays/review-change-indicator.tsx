@@ -65,23 +65,10 @@ export type ReviewChangedElement = {
   readonly marker: ReviewMarkerKind;
 };
 
-/**
- * A surviving block that carries a *deletion* hint because a block was removed immediately
- * before/after it. A removed block has no live element of its own to mark (docs/036 §6.2.1), so the
- * hint rides its nearest surviving neighbor — a small red tick at the gap the deletion left.
- */
-export type ReviewDeletionAnchor = {
-  readonly id: string;
-  readonly side: "before" | "after";
-};
-
 /** The DOM attribute the indicator sets on a changed block's element (styled by the CSS below). */
 const REVIEW_ATTR = "data-engine-review-changed";
 /** The DOM attribute set on a changed *nested* element — an on-content two-tone ring (docs/038 §8–§9). */
 const RING_ATTR = "data-engine-review-ring";
-/** The DOM attributes flagging a block that a deletion sits immediately before / after. */
-const REMOVED_BEFORE_ATTR = "data-engine-review-removed-before";
-const REMOVED_AFTER_ATTR = "data-engine-review-removed-after";
 
 /**
  * The top-level blocks that differ from the baseline, with their status (docs/036 §6.2.1) — the
@@ -147,8 +134,9 @@ export function changedElements(diff: {
     for (const block of blocks) {
       if (block.status === "unchanged") continue;
       if (depth === 0) {
-        // Top-level: the left-inset gutter bar (R6-I). `removed` is carried for parity with
-        // `changedBlockIds`; `applyReviewIndicators` skips it (a removed block has no live element).
+        // Top-level: the left-inset gutter bar (R6-I, docs/039 R-GI). A `removed` block gets a RED
+        // bar on its inert `GhostBlock` (which now carries `data-engine-block-id`, docs/039 R-RO), so
+        // the removal reads in the same one-bar language as every other change — no card, no tick.
         out.push({
           id: block.id,
           marker: "bar",
@@ -178,44 +166,6 @@ export function changedElements(diff: {
   return out;
 }
 
-/**
- * Where to hint at a deletion (docs/036 §6.2.1). A removed top-level block has no live element, so
- * the hint attaches to the surviving block that now sits at the gap: the block that FOLLOWS the run
- * of deletions (a "removed above" tick), or — when the deletion was at the very end — the block that
- * PRECEDES it (a "removed below" tick). Consecutive deletions collapse to one hint on the shared
- * neighbor. Reads the same ordered `blocks` shape as {@link changedBlockIds}, so it is pure/testable.
- */
-export function deletionAnchors(diff: {
-  readonly blocks: readonly {
-    readonly id: string;
-    readonly status: string;
-  }[];
-}): ReviewDeletionAnchor[] {
-  const { blocks } = diff;
-  const anchors: ReviewDeletionAnchor[] = [];
-  const seen = new Set<string>();
-  const add = (id: string, side: "before" | "after") => {
-    const key = `${id}:${side}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    anchors.push({ id, side });
-  };
-  blocks.forEach((block, i) => {
-    if (block.status !== "removed") return;
-    let after = i + 1;
-    while (after < blocks.length && blocks[after]!.status === "removed")
-      after += 1;
-    if (after < blocks.length) {
-      add(blocks[after]!.id, "before");
-      return;
-    }
-    let before = i - 1;
-    while (before >= 0 && blocks[before]!.status === "removed") before -= 1;
-    if (before >= 0) add(blocks[before]!.id, "after");
-  });
-  return anchors;
-}
-
 /** Escape a node id for a CSS attribute selector (node ids are safe today; this keeps it robust). */
 function escapeId(id: string): string {
   return id.replace(/["\\]/g, "\\$&");
@@ -240,7 +190,6 @@ function blockIdOf(element: Element): string | null {
 export function applyReviewIndicators(
   root: HTMLElement,
   changed: readonly (ReviewChangedBlock | ReviewChangedElement)[],
-  deletions: readonly ReviewDeletionAnchor[] = [],
 ): void {
   // Partition by carrier: a `bar` sets the gutter attr, a `ring` sets the on-content ring attr. An
   // element with no `marker` field is a bar (a `ReviewChangedBlock` from `changedBlockIds`).
@@ -250,52 +199,28 @@ export function applyReviewIndicators(
     const ring = "marker" in el && el.marker === "ring";
     (ring ? wantRing : wantBar).set(el.id, el.status);
   }
-  const wantBefore = new Set<string>();
-  const wantAfter = new Set<string>();
-  for (const anchor of deletions) {
-    (anchor.side === "before" ? wantBefore : wantAfter).add(anchor.id);
-  }
-  // Clear stale markers: a bar/ring whose element is no longer wanted (or is now `removed`, which has
-  // no live element), and a deletion tick whose neighbor no longer has a deletion beside it.
+  // Clear a marker whose element is no longer wanted. A `removed` block now HAS a live element — its
+  // inert `GhostBlock` (docs/039 R-RO) carries `data-engine-block-id`, so it is decorated with a red
+  // gutter bar like any other block. The vestigial deletion tick on a surviving neighbor is gone
+  // (docs/039 D8): the rendered ghost with its own bar IS the removal's signal.
   const clearStale = (attr: string, want: Map<string, string>) => {
     for (const element of root.querySelectorAll(`[${attr}]`)) {
       const id = blockIdOf(element);
-      if (!id || !want.has(id) || want.get(id) === "removed")
-        element.removeAttribute(attr);
+      if (!id || !want.has(id)) element.removeAttribute(attr);
     }
   };
   clearStale(REVIEW_ATTR, wantBar);
   clearStale(RING_ATTR, wantRing);
-  for (const element of root.querySelectorAll(`[${REMOVED_BEFORE_ATTR}]`)) {
-    const id = blockIdOf(element);
-    if (!id || !wantBefore.has(id))
-      element.removeAttribute(REMOVED_BEFORE_ATTR);
-  }
-  for (const element of root.querySelectorAll(`[${REMOVED_AFTER_ATTR}]`)) {
-    const id = blockIdOf(element);
-    if (!id || !wantAfter.has(id)) element.removeAttribute(REMOVED_AFTER_ATTR);
-  }
   const find = (id: string) =>
     root.querySelector(`[data-engine-block-id="${escapeId(id)}"]`);
   const setStatus = (want: Map<string, string>, attr: string) => {
     for (const [id, status] of want) {
-      if (status === "removed") continue; // no live element for a removed block
       const element = find(id);
       if (element instanceof HTMLElement) element.setAttribute(attr, status);
     }
   };
   setStatus(wantBar, REVIEW_ATTR);
   setStatus(wantRing, RING_ATTR);
-  for (const id of wantBefore) {
-    const element = find(id);
-    if (element instanceof HTMLElement)
-      element.setAttribute(REMOVED_BEFORE_ATTR, "");
-  }
-  for (const id of wantAfter) {
-    const element = find(id);
-    if (element instanceof HTMLElement)
-      element.setAttribute(REMOVED_AFTER_ATTR, "");
-  }
 }
 
 /**
@@ -319,47 +244,45 @@ export function useReviewChangeIndicator(options: {
 }): readonly ReviewChangedBlock[] {
   const { rootRef, store, baseline, enabled = true } = options;
   const current = useReviewSnapshot(store);
-  const { changed, elements, deletions } = useMemo(() => {
+  const { changed, elements } = useMemo(() => {
     if (!(enabled && baseline)) {
       return {
         changed: [] as ReviewChangedBlock[],
-        deletions: [] as ReviewDeletionAnchor[],
         elements: [] as ReviewChangedElement[],
       };
     }
-    // One diff, three projections: `changed` (top-level, the returned count), `elements` (any-depth,
-    // the DOM markers), and `deletions` (the surviving-neighbor ticks). All read the same result.
+    // One diff, two projections: `changed` (top-level, the returned count) and `elements` (any-depth,
+    // the DOM markers — bars incl. the red bar on a removed block's ghost, rings on nested elements).
     const diff = diffSnapshots(baseline, current);
     return {
       changed: changedBlockIds(diff),
-      deletions: deletionAnchors(diff),
       elements: changedElements(diff),
     };
   }, [enabled, baseline, current]);
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    // Re-apply on every mutation burst so a block that remounts under virtualization re-decorates;
-    // coalesced to one frame (childList/subtree only, never `attributes`, so our own writes do not
-    // re-trigger it — no loop). The commit-driven `elements` change re-runs this effect too, so the
-    // non-virtualized case is covered without the observer ever firing.
+    // Re-apply on every mutation burst so a block (or a ghost) that remounts under virtualization
+    // re-decorates; coalesced to one frame (childList/subtree only, never `attributes`, so our own
+    // writes do not re-trigger it — no loop). The commit-driven `elements` change re-runs this effect
+    // too, so the non-virtualized case is covered without the observer ever firing.
     let raf = 0;
     const apply = () => {
       raf = 0;
-      applyReviewIndicators(root, elements, deletions);
+      applyReviewIndicators(root, elements);
     };
     const schedule = () => {
       if (raf === 0) raf = requestAnimationFrame(apply);
     };
-    applyReviewIndicators(root, elements, deletions);
+    applyReviewIndicators(root, elements);
     const observer = new MutationObserver(schedule);
     observer.observe(root, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
       if (raf !== 0) cancelAnimationFrame(raf);
-      applyReviewIndicators(root, [], []);
+      applyReviewIndicators(root, []);
     };
-  }, [rootRef, elements, deletions]);
+  }, [rootRef, elements]);
   return changed;
 }
 
@@ -391,13 +314,13 @@ export function useReviewChangeIndicator(options: {
  * no inset, no radius) and the bar is a clean straight rail like a code editor's changed-line
  * marker. Same status palette as the diff view's cards. Tokens only. A host injects it once.
  *
- * One `::after` composes every case (a block can be `changed` AND have a deletion beside it at once,
- * a common pairing): three background gradient layers — a vertical **status bar** (color per
- * `data-engine-review-changed`) plus a short red horizontal **deletion tick** at the top / bottom
- * edge when `data-engine-review-removed-before` / `-after` is set. Each layer's color is a custom
- * property that defaults transparent, so unset layers simply do not paint and no per-combination rule
- * is needed. A `removed` block has no live element of its own, so the tick rides its surviving
- * neighbor, pointing at the gap the deletion left.
+ * ONE status bar per block (docs/039 R-GI, D8): a vertical `::after` in the left inset, colored per
+ * `data-engine-review-changed` — info (changed), success (added), warning (moved), and ERROR (removed).
+ * A removed block now renders as an inert `GhostBlock` that carries `data-engine-block-id`, so its bar
+ * paints on the ghost itself (docs/039 R-RO); the vestigial deletion tick that rode a surviving neighbor
+ * (from the pre-ghost R6-I era) is gone. The T1 run classes (`data-engine-review-op="insert"` wash +
+ * underline, `data-engine-ghost-run` struck read-only) style the woven text track-changes (docs/039
+ * R-T1) from this same host-injected sheet.
  *
  * The vertical bar is inset ~4px from the block's top and bottom so it **hugs the block's content**
  * rather than spanning its full box: the live surface gives block types uneven vertical space (text
@@ -438,14 +361,14 @@ export function useReviewChangeIndicator(options: {
  * ghost already relies on.
  */
 export const REVIEW_INDICATOR_CSS = `
-[data-engine-review-changed],[data-engine-review-removed-before],[data-engine-review-removed-after]{position:relative;}
-[data-engine-review-changed]{--rev-bar:var(--color-info, #0ea5e9);}
+[data-engine-review-changed]{position:relative;--rev-bar:var(--color-info, #0ea5e9);}
 [data-engine-review-changed="added"]{--rev-bar:var(--color-success, #16a34a);}
 [data-engine-review-changed="moved"]{--rev-bar:var(--color-warning, #d97706);}
 [data-engine-review-changed="changed"]{--rev-bar:var(--color-info, #0ea5e9);}
-[data-engine-review-removed-before]{--rev-del-top:var(--color-error, #dc2626);}
-[data-engine-review-removed-after]{--rev-del-bottom:var(--color-error, #dc2626);}
-[data-engine-review-changed]::after,[data-engine-review-removed-before]::after,[data-engine-review-removed-after]::after{content:"";position:absolute;left:-9px;top:0;bottom:0;width:7px;pointer-events:none;background:linear-gradient(var(--rev-del-top, transparent),var(--rev-del-top, transparent)) 0 0/7px 3px no-repeat,linear-gradient(var(--rev-del-bottom, transparent),var(--rev-del-bottom, transparent)) 0 100%/7px 3px no-repeat,linear-gradient(var(--rev-bar, transparent),var(--rev-bar, transparent)) 0 4px/3px calc(100% - 8px) no-repeat;}
+[data-engine-review-changed="removed"]{--rev-bar:var(--color-error, #dc2626);}
+[data-engine-review-changed]::after{content:"";position:absolute;left:-9px;top:4px;bottom:4px;width:3px;pointer-events:none;background:var(--rev-bar);}
 [data-engine-review-ring]{--rev-ring:var(--color-info, #0ea5e9);outline:2px solid var(--rev-ring);outline-offset:-1px;box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--rev-ring), #000 40%),inset 0 0 0 3px color-mix(in oklab, var(--rev-ring), #fff 55%);}
 [data-engine-review-ring="moved"]{--rev-ring:var(--color-warning, #d97706);}
+[data-engine-review-op="insert"]{text-decoration:underline;text-decoration-color:var(--color-success, #16a34a);text-decoration-thickness:2px;text-underline-offset:2px;background:color-mix(in oklab, var(--color-success, #16a34a) 12%, transparent);border-radius:2px;}
+[data-engine-ghost-run]{text-decoration:line-through;text-decoration-color:color-mix(in oklab, var(--color-error, #dc2626) 60%, currentColor);color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);user-select:none;}
 `;

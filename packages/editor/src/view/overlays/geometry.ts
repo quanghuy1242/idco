@@ -33,15 +33,34 @@ export function firstTextNode(element: HTMLElement): Text | null {
   return textNodesOf(element)[0] ?? null;
 }
 
-/** Every descendant text node of `host`, in document order. */
+/**
+ * Every descendant text node of `host`, in document order — the load-bearing invariant every
+ * offset↔DOM mapping depends on: the concatenation of these nodes equals the leaf's MODEL text
+ * (`segmentText` guarantees the mark segments tile it). Review's deleted-run ghosts break that unless
+ * they are excluded: a `[data-engine-ghost-run]` span (docs/039 R-T1) carries base-side text that is
+ * NOT in the store, so counting it would put every caret and click past a deletion off by the ghost's
+ * length and desync the EditContext buffer from the DOM. So the walk skips a ghost-run subtree. Outside
+ * review no element carries the attribute, so the walk is unchanged (the non-review fast path stands).
+ */
 export function textNodesOf(host: HTMLElement): Text[] {
   const doc = host.ownerDocument;
-  const textNodeType = doc.defaultView?.Node.TEXT_NODE ?? 3;
+  const view = doc.defaultView;
+  const textNodeType = view?.Node.TEXT_NODE ?? 3;
+  const elementNodeType = view?.Node.ELEMENT_NODE ?? 1;
   const nodes: Text[] = [];
   const walk = (node: Node) => {
     for (let child = node.firstChild; child; child = child.nextSibling) {
-      if (child.nodeType === textNodeType) nodes.push(child as Text);
-      else walk(child);
+      if (child.nodeType === textNodeType) {
+        nodes.push(child as Text);
+      } else if (
+        child.nodeType === elementNodeType &&
+        (child as Element).hasAttribute("data-engine-ghost-run")
+      ) {
+        // A review deleted-run ghost: its text is not in the store, so it is not a counted text node.
+        continue;
+      } else {
+        walk(child);
+      }
     }
   };
   walk(host);

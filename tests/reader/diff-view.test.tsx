@@ -842,6 +842,25 @@ describe("DiffView — side-by-side layout (§6.1)", () => {
     // one/two are unchanged anchors, aligned (no card).
     expect(root.querySelectorAll("[data-rt-diff]").length).toBe(2);
   });
+
+  it("renders a gap opposite a removed block so the base line maps to a target gap (docs/039 R-SB)", () => {
+    const { store, ids } = paragraphStore(["keep1", "drop", "keep2"]);
+    const base = store.toSnapshot();
+    const removed = store.getNode(ids[1]!)!;
+    store.dispatch(store.transaction().removeNode(store.bodyId, 1, removed));
+    const { root } = renderDiff(diffSnapshots(base, store.toSnapshot()), {
+      mode: "side-by-side",
+    });
+    // The removed block occupies its base row on the LEFT (struck, still readable); a clean gap sits
+    // opposite it on the RIGHT, so the eye maps the deleted base line to the target gap (R-SB).
+    expect(root.querySelector(".rt-diff-gap")).toBeTruthy();
+    expect(root.textContent).toContain("drop");
+    // No status WORD is painted (R-NL): "Removed" lives only in the visually-hidden label.
+    const visibleWords = Array.from(
+      root.querySelectorAll(".rt-diff-tag > span:not(.rt-diff-sr-only)"),
+    ).map((el) => el.textContent);
+    expect(visibleWords).not.toContain("Removed");
+  });
 });
 
 // --- context folding ---------------------------------------------------------

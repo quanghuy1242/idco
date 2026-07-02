@@ -666,7 +666,16 @@ function pieceTableValue(value: unknown): PieceTable | undefined {
   };
 }
 
-function pieceTableText(value: unknown): string {
+/**
+ * Resolve a piece-table value to its plain string, or `""` when it is not a piece table (docs/039 §8).
+ *
+ * The code block stores its source as a piece table, not a plain string, so a consumer that needs the
+ * flat source — `plainText`/`estimateMetrics`/`diffData` here, and the per-node `renderDiff` line diff
+ * in the view — resolves it through this. Pure and DOM-free, so it is safe in the worker and the diff.
+ *
+ * @category Engine Core — Model
+ */
+export function pieceTableText(value: unknown): string {
   const table = pieceTableValue(value);
   if (!table) return "";
   return table.pieces

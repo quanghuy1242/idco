@@ -21,6 +21,7 @@
  * so a model offset stays a plain index into the visible text.
  */
 import { createElement, type ReactNode } from "react";
+import { partitionTextRuns } from "@quanghuy1242/idco-reader";
 import type { ResolvedMark, TextLeafNode, TextMarkKind } from "../../core";
 import { resolveLeafMarks, safeHref, segmentText } from "../../core";
 import {
@@ -247,6 +248,20 @@ export function renderLeafMarks(
   if (resolved.length === 0) {
     return text.length > 0 ? text : "​";
   }
+  return renderMarkSegments(text, resolved, linkMode, 0);
+}
+
+/**
+ * Render one run of `text` (starting at model offset `base`) with `resolved` marks as nested segment
+ * spans — the shared body of {@link renderLeafMarks} and the review run decorator. `base` offsets the
+ * `data-engine-segment` keys so a per-slice render keeps stable, non-colliding keys.
+ */
+function renderMarkSegments(
+  text: string,
+  resolved: readonly ResolvedMark[],
+  linkMode: LinkMode,
+  base: number,
+): ReactNode {
   const segments = segmentText(text, resolved);
   return segments.map((segment) => {
     let child: ReactNode = segment.text;
@@ -255,17 +270,102 @@ export function renderLeafMarks(
       (a, b) => markNestingRank(b.kind) - markNestingRank(a.kind),
     );
     for (const mark of ordered) {
-      child = wrapMark(mark, child, `${segment.from}:${mark.id}`, linkMode);
+      child = wrapMark(
+        mark,
+        child,
+        `${base + segment.from}:${mark.id}`,
+        linkMode,
+      );
     }
     return (
       <span
-        data-engine-segment={`${segment.from}-${segment.to}`}
-        key={segment.from}
+        data-engine-segment={`${base + segment.from}-${base + segment.to}`}
+        key={base + segment.from}
       >
         {child}
       </span>
     );
   });
+}
+
+/** Clamp resolved marks to a `[from, to)` slice of the leaf and re-base them to slice-local offsets. */
+function clampResolvedMarks(
+  resolved: readonly ResolvedMark[],
+  from: number,
+  to: number,
+): ResolvedMark[] {
+  const out: ResolvedMark[] = [];
+  for (const mark of resolved) {
+    if (mark.from >= to || mark.to <= from) continue;
+    out.push({
+      ...mark,
+      from: Math.max(0, mark.from - from),
+      to: Math.min(to - from, mark.to - from),
+    });
+  }
+  return out;
+}
+
+/**
+ * Render a text leaf as live track-changes during review (docs/039 R-T1, §6.2, P4c) — the editable
+ * half of the woven text diff. Drives off the SHARED `partitionTextRuns` (so "which chars are
+ * inserted / deleted / kept" matches the reader diff view exactly), then builds the EDITOR-specific
+ * spans:
+ *
+ * - a `keep` / `insert` run IS in the live store text, so it renders as real (editable) content with
+ *   its marks — an `insert` wrapped in `data-engine-review-op="insert"` (wash + underline), a `keep`
+ *   under a changed mark tagged `data-engine-review-op="mark"` (dotted underline);
+ * - a `delete` run is NOT in the store, so it renders as an inert `data-engine-ghost-run` span carrying
+ *   the base text struck through — display only.
+ *
+ * The load-bearing invariant (docs/039 R-T1): `geometry.ts`'s text-node walk SKIPS a `ghost-run` span,
+ * so "concat of counted text nodes == store text" still holds and every caret/click past a deletion
+ * lands on the right store offset. The leaf must be off the flat-text fast path when this runs (the
+ * `text-block.tsx` gate), because it renders element spans, not a bare text node.
+ */
+export function renderReviewLeafMarks(
+  node: TextLeafNode,
+  textDiff: Parameters<typeof partitionTextRuns>[0],
+  linkMode: LinkMode = "inert",
+): ReactNode {
+  const resolved = resolveLeafMarks(node);
+  const out: ReactNode[] = [];
+  partitionTextRuns(textDiff).forEach((slice, index) => {
+    if (slice.op === "delete") {
+      out.push(
+        <span
+          aria-hidden="true"
+          contentEditable={false}
+          data-engine-ghost-run=""
+          key={`d.${index}`}
+        >
+          {slice.text}
+        </span>,
+      );
+      return;
+    }
+    // keep / insert: live text, rendered with the slice's own marks (target-space).
+    const from = slice.targetOffset;
+    const to = from + slice.text.length;
+    const inner = renderMarkSegments(
+      slice.text,
+      clampResolvedMarks(resolved, from, to),
+      linkMode,
+      from,
+    );
+    const op =
+      slice.op === "insert" ? "insert" : slice.markChanged ? "mark" : null;
+    out.push(
+      op ? (
+        <span data-engine-review-op={op} key={`${slice.op}.${index}`}>
+          {inner}
+        </span>
+      ) : (
+        <span key={`k.${index}`}>{inner}</span>
+      ),
+    );
+  });
+  return out;
 }
 
 /**

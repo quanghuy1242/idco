@@ -51,14 +51,6 @@ const CARD_W = 320;
 const CARD_H = 150;
 const CARD_GAP = 12;
 
-/** A human label + tone for each change status (drives the surface's status chip). */
-const STATUS_LABEL: Record<string, string> = {
-  added: "Added",
-  changed: "Edited",
-  moved: "Moved",
-  removed: "Removed",
-};
-
 const CARD: CSSProperties = {
   background: "var(--color-base-100, #fff)",
   border: "1px solid var(--color-base-300, #d4d4d4)",
@@ -83,16 +75,6 @@ const HEADER: CSSProperties = {
   display: "flex",
   gap: "0.5rem",
   justifyContent: "space-between",
-};
-
-const STATUS_CHIP: CSSProperties = {
-  background: "var(--color-base-200, #e5e5e5)",
-  borderRadius: "0.35rem",
-  fontSize: "0.7rem",
-  fontWeight: 600,
-  letterSpacing: "0.02em",
-  padding: "0.1rem 0.4rem",
-  textTransform: "uppercase",
 };
 
 const AUTHOR_CHIP: CSSProperties = {
@@ -274,9 +256,8 @@ export function ReviewCursorSurface(props: {
           <strong>
             Change {cursor.index + 1} of {cursor.count}
           </strong>{" "}
-          <span style={STATUS_CHIP}>
-            {STATUS_LABEL[current.status] ?? current.status}
-          </span>
+          {/* No status WORD (docs/039 R-NL): the block's colored gutter bar + the detail line below
+              carry the status. Only the author chip (a session fact) rides the header. */}
           {attribution ? (
             <span
               data-engine-review-author={attribution.author.id}

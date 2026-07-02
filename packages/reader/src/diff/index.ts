@@ -5,6 +5,21 @@
  * imports the editor (which depends on the reader, not the reverse).
  */
 export { DiffView, type DiffViewProps } from "./diff-view";
+export { ChangeDetail } from "./change-detail";
+export { partitionTextRuns, type RunSlice, type RunSliceId } from "./runs";
+export {
+  DIFF_STATUS_TOKENS,
+  diffStatusColor,
+  type DiffStatusKey,
+  type DiffStatusToken,
+} from "./tokens";
+export {
+  elementDisclosure,
+  tierOf,
+  type ChangeKind,
+  type DisclosureTier,
+  type NodeDiffRenderer,
+} from "./vocabulary";
 export type {
   DiffViewMode,
   ReaderAttrDiff,

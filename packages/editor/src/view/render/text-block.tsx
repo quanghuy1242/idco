@@ -23,6 +23,7 @@ import {
   type EditorSelection,
   type EditorStore,
   type NodeId,
+  type TextLeafDiff,
   type TextLeafNode,
   type TextPoint,
 } from "../../core";
@@ -49,7 +50,11 @@ import {
 } from "../overlays";
 import { requestFrame } from "../raf";
 import { activateInsertedObject, listTabHandlers } from "../spi";
-import { leafHasMarks, renderLeafMarks } from "./mark-render";
+import {
+  leafHasMarks,
+  renderLeafMarks,
+  renderReviewLeafMarks,
+} from "./mark-render";
 import { ariaLabelForLeaf } from "../overlays";
 import {
   blockStyleFor,
@@ -85,6 +90,11 @@ export function EngineTextBlock(props: {
   readonly focusRoot: () => void;
   /** Render-time list-run metadata for a `listitem` leaf (docs/018 §2.10). */
   readonly listMeta?: ListItemMeta;
+  /**
+   * This leaf's `TextLeafDiff` during review (docs/039 R-T1): present ⇒ render live track-changes
+   * (inserted runs decorated, deleted runs as inert ghosts) and take the decorated (non-fast) path.
+   */
+  readonly reviewText?: TextLeafDiff;
 }) {
   const {
     node,
@@ -99,9 +109,15 @@ export function EngineTextBlock(props: {
     pageCaret,
     focusRoot,
     listMeta,
+    reviewText,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<TextBlockController | null>(null);
+  // Latest review diff, read from the once-bound EditContext `textupdate` handler (docs/039 R-T1): the
+  // handler's identity is stable, so it reads the current value through this ref rather than a stale
+  // closure. A decorated leaf must skip the flat-text fast path (it renders element spans).
+  const reviewTextRef = useRef(reviewText);
+  reviewTextRef.current = reviewText;
 
   const syncSelectionIntoEditContext = useCallback(() => {
     const controller = controllerRef.current;
@@ -141,8 +157,13 @@ export function EngineTextBlock(props: {
       // the formatting — those leaves re-render from the model instead (AC3). The
       // unformatted common case keeps the fast path.
       const current = store.getNode(node.id);
-      const hasMarks = current?.kind === "text" && leafHasMarks(current);
-      const onBeforeDispatch = hasMarks
+      // A marked OR review-decorated leaf renders element spans, so the flat-text fast path
+      // (`patchHostText`) would wipe the decoration — take the slow (re-render-from-model) path for it,
+      // the same rule marks already follow (docs/039 R-T1 fast-path gate).
+      const decorated =
+        (current?.kind === "text" && leafHasMarks(current)) ||
+        reviewTextRef.current !== undefined;
+      const onBeforeDispatch = decorated
         ? undefined
         : () => {
             patchHostText(hostRef.current, editContext.text);
@@ -315,7 +336,7 @@ export function EngineTextBlock(props: {
     // no-marks leaf (a marked leaf renders React-owned mark spans that
     // `patchHostText`'s flat `textContent` write would flatten), and only on a real
     // mismatch (so the common, already-correct render does not churn the DOM node).
-    if (!leafHasMarks(node)) {
+    if (!leafHasMarks(node) && !reviewTextRef.current) {
       const host = hostRef.current;
       const want = current.length > 0 ? current : "​";
       if (host && host.textContent !== want) {
@@ -776,7 +797,9 @@ export function EngineTextBlock(props: {
       }
       tabIndex={0}
     >
-      {renderLeafMarks(node)}
+      {reviewText
+        ? renderReviewLeafMarks(node, reviewText)
+        : renderLeafMarks(node)}
     </div>
   );
 }

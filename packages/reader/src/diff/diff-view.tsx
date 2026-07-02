@@ -53,6 +53,9 @@ import {
   renderMarkedSpans,
   resolveLeafMarks,
 } from "../reader";
+import { ChangeDetail } from "./change-detail";
+import { partitionTextRuns } from "./runs";
+import type { NodeDiffRenderer } from "./vocabulary";
 import type {
   DiffViewMode,
   ReaderBlockDiff,
@@ -81,6 +84,14 @@ export type DiffViewProps = ReaderOptions & {
   readonly context?: "all" | "focused";
   /** Unchanged blocks to keep as context around each change in `context="focused"` (default 2). */
   readonly contextRadius?: number;
+  /**
+   * Resolve an object node's own diff renderer by type (docs/039 §8, the per-node diff SPI) — the
+   * INJECTED seam so a code block renders a real line diff, a table a cell grid, a custom node its own
+   * diff, instead of the truncated `diffData` field rows. The reader never imports the editor registry,
+   * so a host builds this from its node definitions and passes it here; the same resolver drives the
+   * woven overlay's inline band (docs/039 §7.7). A type without a renderer degrades to the field rows.
+   */
+  readonly getNodeDiffRenderer?: (type: string) => NodeDiffRenderer | undefined;
 };
 
 /** Which column a block is rendered for: unified reads target (base for a removed block). */
@@ -93,6 +104,7 @@ type DiffContext = {
   readonly mode: DiffViewMode;
   readonly context: "all" | "focused";
   readonly radius: number;
+  readonly getNodeDiffRenderer?: (type: string) => NodeDiffRenderer | undefined;
 };
 
 // --- the status tag (the one label component, §6.3 rule 2) -------------------
@@ -104,7 +116,15 @@ const STATUS_ICON: Readonly<Record<string, string>> = {
   moved: "⇅",
 };
 
-/** The single status-tag component every change names itself with, in the card header. */
+/**
+ * The single status-tag component every change names itself with, in the card header.
+ *
+ * The status WORD ("Edited", "Removed") is not painted (docs/039 R-NL): the card's status-colored
+ * left bar and the content treatment (struck delete, tinted insert) already carry the status, so a
+ * word repeats it. The `label` goes into a visually-hidden span so a screen reader still announces it,
+ * and the small status icon stays as a scannable glyph. The `detail` — "Moved from ¶5", "rewritten" —
+ * is NOT the status word and stays visible.
+ */
 function StatusTag({
   status,
   label,
@@ -119,7 +139,7 @@ function StatusTag({
       <span aria-hidden="true" className="rt-diff-tag-icon">
         {STATUS_ICON[status]}
       </span>
-      <span className="rt-diff-tag-label">{label}</span>
+      <span className="rt-diff-sr-only">{label}</span>
       {detail ? <span className="rt-diff-tag-detail">{detail}</span> : null}
     </div>
   );
@@ -233,22 +253,6 @@ function clampMarks(
   return out;
 }
 
-function changedMarkRanges(
-  text: ReaderTextLeafDiff,
-): readonly (readonly [number, number])[] {
-  return text.markChanges
-    .filter((mc) => mc.op !== "removed")
-    .map((mc) => [mc.from, mc.to] as const);
-}
-
-function overlapsAny(
-  ranges: readonly (readonly [number, number])[],
-  from: number,
-  to: number,
-): boolean {
-  return ranges.some(([a, b]) => a < to && b > from);
-}
-
 /** The whole marked text of a leaf (for a removed/added item, or the fallback whole-unit pass). */
 function leafContent(
   node: ReaderTextNode,
@@ -306,41 +310,45 @@ function renderRunSpans(
   const targetLeaf = asText(ctx.diff.target.body.blocks[block.id]);
   const baseMarks = baseLeaf ? resolveLeafMarks(baseLeaf) : [];
   const targetMarks = targetLeaf ? resolveLeafMarks(targetLeaf) : [];
-  const changed = changedMarkRanges(text);
   const spans: ReactNode[] = [];
-  let tOff = 0;
-  let bOff = 0;
-  text.runs.forEach((run, index) => {
-    const len = run.text.length;
+  // Drive the read-only track-changes spans off the SHARED partition (docs/039 §6.2): the editor's
+  // woven overlay reads the same `partitionTextRuns`, so "which chars are inserted/deleted/kept, and
+  // where" is identical on both surfaces; only the span DOM differs (here read-only, there editable).
+  // Each slice carries its base/target start offset (so a side's marks clamp to it) and, for a keep
+  // slice, whether it overlaps a changed mark (the dotted `rt-diff-mark` cue).
+  partitionTextRuns(text).forEach((slice, index) => {
+    const len = slice.text.length;
     const key = `run.${index}`;
-    if (run.op === "delete") {
+    if (slice.op === "delete") {
       if (side !== "target") {
         spans.push(
           <span className="rt-diff-del" key={key}>
             {renderMarkedSpans(
-              run.text,
-              clampMarks(baseMarks, bOff, bOff + len),
+              slice.text,
+              clampMarks(baseMarks, slice.baseOffset, slice.baseOffset + len),
               ctx.diff.base,
             )}
           </span>,
         );
       }
-      bOff += len;
       return;
     }
-    if (run.op === "insert") {
+    if (slice.op === "insert") {
       if (side !== "base") {
         spans.push(
           <span className="rt-diff-ins" key={key}>
             {renderMarkedSpans(
-              run.text,
-              clampMarks(targetMarks, tOff, tOff + len),
+              slice.text,
+              clampMarks(
+                targetMarks,
+                slice.targetOffset,
+                slice.targetOffset + len,
+              ),
               ctx.diff.target,
             )}
           </span>,
         );
       }
-      tOff += len;
       return;
     }
     // keep — shown on both sides, in that side's coordinate space.
@@ -348,159 +356,44 @@ function renderRunSpans(
       spans.push(
         <span key={key}>
           {renderMarkedSpans(
-            run.text,
-            clampMarks(baseMarks, bOff, bOff + len),
+            slice.text,
+            clampMarks(baseMarks, slice.baseOffset, slice.baseOffset + len),
             ctx.diff.base,
           )}
         </span>,
       );
     } else {
-      const cls = overlapsAny(changed, tOff, tOff + len)
-        ? "rt-diff-mark"
-        : undefined;
+      const cls = slice.markChanged ? "rt-diff-mark" : undefined;
       spans.push(
         <span className={cls} key={key}>
           {renderMarkedSpans(
-            run.text,
-            clampMarks(targetMarks, tOff, tOff + len),
+            slice.text,
+            clampMarks(
+              targetMarks,
+              slice.targetOffset,
+              slice.targetOffset + len,
+            ),
             ctx.diff.target,
           )}
         </span>,
       );
     }
-    tOff += len;
-    bOff += len;
   });
   return spans;
 }
 
-/** Format an attr/field value for a change summary: string as-is, else JSON, truncated; `—` for absent. */
-function fmtVal(value: unknown): string {
-  if (value === undefined) return "—";
-  const raw = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
-  return raw.length > 48 ? `${raw.slice(0, 48)}…` : raw;
-}
-
-/** A friendly label for a mark kind in the mark-change summary (§6.4). */
-const MARK_LABEL: Readonly<Record<string, string>> = {
-  bold: "Bold",
-  code: "Code",
-  comment: "Comment",
-  glossary: "Glossary",
-  highlight: "Highlight",
-  italic: "Italic",
-  link: "Link",
-  strikethrough: "Strikethrough",
-  subscript: "Subscript",
-  superscript: "Superscript",
-  underline: "Underline",
-};
-
-function markLabel(kind: string): string {
-  return MARK_LABEL[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
-}
-
-/** The affected text of a mark change: base-side for a removed mark, target-side otherwise (§6.4). */
-function markSnippet(
-  ctx: DiffContext,
-  block: ReaderBlockDiff,
-  change: ReaderTextLeafDiff["markChanges"][number],
-): string {
-  const leaf =
-    change.op === "removed"
-      ? asText(ctx.diff.base.body.blocks[block.id])
-      : asText(ctx.diff.target.body.blocks[block.id]);
-  if (!leaf) return "";
-  const s = leaf.content.text.slice(change.from, change.to);
-  return s.length > 40 ? `${s.slice(0, 40)}…` : s;
-}
-
-const markTagClass = (op: "added" | "removed" | "changed"): string =>
-  op === "removed"
-    ? "rt-diff-tag-removed"
-    : op === "added"
-      ? "rt-diff-tag-added"
-      : "rt-diff-tag-changed";
-
 /**
- * The change-detail summary of a changed block (docs/036 §6.4): its `attrs` diff (align, indent,
- * heading level, a table cell's fill), its `markChanges` including removals (unstyled bold, a
- * dropped link — invisible in the runs), and its object `fields` (from the `diffData` seam). Each
- * is a row so a change that touches no text run is still visible. Rendered as an inline
- * `display:block` `<span>` so it is valid inside a `<p>`, `<li>`, or `<td>` — a `<ul>` there is not.
+ * The change-detail summary of a changed block (docs/036 §6.4, docs/039 §6.2 Atom 2) — its `attrs`
+ * diff, its `markChanges` including removals, and its object `fields`, one row each, so a change with
+ * no text-run glyph is still visible. Now the SHARED `<ChangeDetail>` component (`change-detail.tsx`),
+ * so the diff view card and the woven review chip render the identical rows. Called (not JSX-mounted)
+ * so its `null`-when-empty return still gates the callers' `if (detail)` appends.
  */
 function renderChangeDetail(
   ctx: DiffContext,
   block: ReaderBlockDiff,
 ): ReactNode {
-  const rows: ReactNode[] = [];
-  const attrs = block.attrs;
-  if (attrs) {
-    for (const [key, value] of Object.entries(attrs.added)) {
-      rows.push(
-        <span className="rt-diff-detail-row" key={`aa.${key}`}>
-          <span className="rt-diff-field-key">{key}</span> —{" → "}
-          <span className="rt-diff-ins">{fmtVal(value)}</span>
-        </span>,
-      );
-    }
-    for (const [key, pair] of Object.entries(attrs.changed)) {
-      rows.push(
-        <span className="rt-diff-detail-row" key={`ac.${key}`}>
-          <span className="rt-diff-field-key">{key}</span>{" "}
-          <span className="rt-diff-del">{fmtVal(pair.base)}</span>
-          {" → "}
-          <span className="rt-diff-ins">{fmtVal(pair.target)}</span>
-        </span>,
-      );
-    }
-    for (const [key, value] of Object.entries(attrs.removed)) {
-      rows.push(
-        <span className="rt-diff-detail-row" key={`ar.${key}`}>
-          <span className="rt-diff-field-key">{key}</span>{" "}
-          <span className="rt-diff-del">{fmtVal(value)}</span>
-          {" → —"}
-        </span>,
-      );
-    }
-  }
-  const markChanges = block.text?.markChanges ?? [];
-  markChanges.forEach((change, index) => {
-    const snippet = markSnippet(ctx, block, change);
-    const href =
-      change.op !== "removed" &&
-      change.attrs &&
-      typeof change.attrs.href === "string"
-        ? change.attrs.href
-        : undefined;
-    rows.push(
-      <span className="rt-diff-detail-row" key={`m.${index}`}>
-        <span className={`rt-diff-marktag ${markTagClass(change.op)}`}>
-          {markLabel(change.kind)} {change.op}
-        </span>
-        {snippet ? (
-          <>
-            {" on “"}
-            <span className="rt-diff-mark-snip">{snippet}</span>
-            {"”"}
-          </>
-        ) : null}
-        {href ? <> · {href}</> : null}
-      </span>,
-    );
-  });
-  for (const field of block.object?.fields ?? []) {
-    rows.push(
-      <span className="rt-diff-detail-row" key={`f.${field.path}`}>
-        <span className="rt-diff-field-key">{field.path}</span>{" "}
-        <span className="rt-diff-del">{fmtVal(field.base)}</span>
-        {" → "}
-        <span className="rt-diff-ins">{fmtVal(field.target)}</span>
-      </span>,
-    );
-  }
-  if (rows.length === 0) return null;
-  return <span className="rt-diff-detail">{rows}</span>;
+  return ChangeDetail({ base: ctx.diff.base, block, target: ctx.diff.target });
 }
 
 // --- decorated content (shared by cards + inline) ----------------------------
@@ -513,6 +406,37 @@ const sideOf = (column: DiffColumn): DiffColumn => column;
  * its children re-rendered NESTED (only changed descendants decorate, inline); a changed object
  * gets its render plus the field summary. Reuses `renderBlock`'s shell via `cloneElement`.
  */
+/**
+ * Render an object node's own diff through the injected per-node SPI (docs/039 §8), or `null` when no
+ * renderer is wired for its type (the caller falls back to the field-row summary). Reads the base and
+ * target opaque data off the diff's two snapshots and passes them plus the status; a renderer that
+ * throws on bad data returns `null`, so the review degrades to the summary rather than blanking (§14).
+ */
+function renderNodeDiff(
+  ctx: DiffContext,
+  block: ReaderBlockDiff,
+  node: ReaderBlockNode,
+): ReactNode {
+  if (node.kind !== "object") return null;
+  const renderer = ctx.getNodeDiffRenderer?.(node.type);
+  if (!renderer) return null;
+  const baseNode = ctx.diff.base.body.blocks[block.id];
+  const targetNode = ctx.diff.target.body.blocks[block.id];
+  const base = baseNode?.kind === "object" ? baseNode.data : undefined;
+  const target = targetNode?.kind === "object" ? targetNode.data : undefined;
+  const status =
+    block.status === "added"
+      ? "added"
+      : block.status === "removed"
+        ? "removed"
+        : "changed";
+  try {
+    return renderer({ base, status, target }) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function changedInner(
   ctx: DiffContext,
   block: ReaderBlockDiff,
@@ -550,6 +474,20 @@ function changedInner(
       : shell;
   }
   if (node.kind === "object") {
+    // The per-node diff SPI (docs/039 §8): if the host wired a renderer for this object type, the
+    // object renders its OWN diff (a code line diff, a table cell grid) in place of the live shell —
+    // the `code: const x =…  →  const y =…` truncated string becomes a real diff. The `diffData` field
+    // rows (`detail`, e.g. `language: js → ts`) still ride alongside as the summary. A renderer that
+    // throws on bad data falls back to the shell + field rows, never blanking the review (docs/039 §14).
+    const rendered = renderNodeDiff(ctx, block, node);
+    if (rendered !== null) {
+      return (
+        <>
+          {rendered}
+          {detail}
+        </>
+      );
+    }
     return (
       <>
         {shell}
@@ -1404,11 +1342,13 @@ export function DiffView({
   context = "all",
   contextRadius = 2,
   embedStyles = true,
+  getNodeDiffRenderer,
   ...options
 }: DiffViewProps): ReactNode {
   const ctx: DiffContext = {
     context,
     diff,
+    getNodeDiffRenderer,
     mode,
     options,
     radius: Math.max(0, contextRadius),

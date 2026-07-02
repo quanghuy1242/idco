@@ -274,14 +274,12 @@ export {
   applyReviewIndicators,
   changedBlockIds,
   changedElements,
-  deletionAnchors,
   REVIEW_INDICATOR_CSS,
   useReviewChangeIndicator,
   useReviewSnapshot,
   type ReviewBlockStatus,
   type ReviewChangedBlock,
   type ReviewChangedElement,
-  type ReviewDeletionAnchor,
   type ReviewMarkerKind,
 } from "./view";
 // The woven inline overlay's ReviewModel (docs/038 §5, R6-J J0+J2): project a `SnapshotDiff` into the
@@ -297,6 +295,11 @@ export {
   type ReviewModel,
   type ReviewModelOptions,
 } from "./view";
+// The per-node diff SPI (docs/039 §8): `nodeDiffRendererResolver` builds the `getNodeDiffRenderer`
+// a host passes to `<DiffView>` and the woven inline band, so an object node (the code block) renders
+// its own diff (a real line diff) instead of a truncated field string; a host adds custom-node
+// renderers through the resolver's `extra` map.
+export { codeBlockDiffRenderer, nodeDiffRendererResolver } from "./view";
 // The review cursor (docs/038 §7, R6-J J4): the headless controller that steps a single active
 // surface through the diff's changed top-level blocks (`useReviewCursor` — next/prev/goTo + scroll-to-
 // block reveal), plus its pure stops/detail derivation (`reviewCursorEntries`, `reviewEntryDetail`).
@@ -310,6 +313,11 @@ export {
   type ReviewCursorEntry,
   type ReviewCursorOptions,
 } from "./view";
+// The ring affordance (docs/039 R-RG/R-EX, P4d): a delegated-click surface that opens a nested change's
+// detail — a `<ChangeDetail>` chip (a re-colored cell's `Fill: red → green`) or a scoped `<DiffView>`
+// band (a code block's line diff). Mount it beside the editor with the review diff + the same node-diff
+// resolver the diff view uses.
+export { ReviewElementDetail } from "./view";
 export { EditorToolbar } from "./view";
 export {
   FindBar,
@@ -438,6 +446,7 @@ export {
   type JsonValue,
   type ParentEntry,
   type CommittedTransaction,
+  type Step,
   type TransactionOrigin,
 } from "./core";
 export {

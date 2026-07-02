@@ -101,6 +101,9 @@ export function EngineBlock(props: {
         registerBlock={registerBlock}
         registerInputBackend={registerInputBackend}
         requestFocus={requestFocus}
+        // Live track-changes for a changed leaf during review (docs/039 R-T1): the leaf renders its
+        // insert/delete runs decorated instead of plain text. Absent (the shipped default) ⇒ normal.
+        reviewText={review?.textDiffs.get(id)}
         revealBlock={revealBlock}
         store={store}
       />

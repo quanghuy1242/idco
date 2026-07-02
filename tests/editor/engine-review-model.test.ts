@@ -9,7 +9,7 @@
  * virtualizes it).
  */
 import { describe, expect, it } from "vitest";
-import { diffSnapshots } from "../../packages/editor/src/core";
+import { blockDiffIndex, diffSnapshots } from "../../packages/editor/src/core";
 import { buildReviewModel } from "../../packages/editor/src/view/review-model";
 import { container, leaf, snap } from "./diff-fixtures";
 import { alloc } from "./diff-fixtures";
@@ -118,6 +118,65 @@ describe("buildReviewModel — tables are deferred, not spliced (J2)", () => {
     expect(model.ghosts.has(rowB.id)).toBe(false);
     expect(model.ghosts.size).toBe(0);
     expect(model.collapsed.get(tableId)).toBe(1);
+  });
+});
+
+describe("buildReviewModel — replacement pairing (docs/039 P5)", () => {
+  it("pairs a removed block with the added block that replaces it in the same gap", () => {
+    const a = alloc("replace");
+    const p1 = leaf(a, "p1");
+    const oldPara = leaf(a, "old");
+    const p2 = leaf(a, "p2");
+    const newPara = leaf(a, "new");
+    const base = snap([p1, oldPara, p2]);
+    const target = snap([p1, newPara, p2]); // `old` removed, `new` added in the same gap
+
+    const diff = diffSnapshots(base, target);
+    const model = buildReviewModel(diff);
+
+    // The engine linked the removal to its replacement; the model surfaces the pairing so the view
+    // renders them as one unit (struck base above green replacement).
+    expect(model.replacements.get(oldPara.id)).toBe(newPara.id);
+    // The removed block is still a ghost; the replacement is a live added block.
+    expect(model.ghosts.has(oldPara.id)).toBe(true);
+    expect(model.ghosts.has(newPara.id)).toBe(false);
+  });
+
+  it("leaves replacements empty when nothing was replaced", () => {
+    const a = alloc("noreplace");
+    const s = snap([leaf(a, "x"), leaf(a, "y")]);
+    const model = buildReviewModel(diffSnapshots(s, s));
+    expect(model.replacements.size).toBe(0);
+  });
+});
+
+describe("blockDiffIndex (docs/039 P5)", () => {
+  it("resolves a nested element's BlockDiff in the recursive tree", () => {
+    const a = alloc("index");
+    const t1 = leaf(a, "cellText");
+    const cellId = a.createNodeId();
+    const cell = container(a, "tablecell", [t1], { id: cellId });
+    const row = container(a, "tablerow", [cell]);
+    const tableId = a.createNodeId();
+    const baseTable = container(a, "table", [row], { id: tableId });
+    // Re-color the cell (an attr change on a nested element).
+    const cell2 = container(a, "tablecell", [t1], {
+      attrs: { fill: "green" },
+      id: cellId,
+    });
+    const row2 = container(a, "tablerow", [cell2]);
+    const targetTable = container(a, "table", [row2], { id: tableId });
+    const base = snap([baseTable], { nested: [row, cell, t1] });
+    const target = snap([targetTable], { nested: [row2, cell2, t1] });
+
+    const index = blockDiffIndex(diffSnapshots(base, target));
+
+    // The nested cell resolves, and its attr change is on the resolved entry.
+    const cellDiff = index.get(cellId);
+    expect(cellDiff?.id).toBe(cellId);
+    expect(cellDiff?.attrs).toBeDefined();
+    // The table itself resolves too (every id is one entry).
+    expect(index.get(tableId)?.id).toBe(tableId);
   });
 });
 

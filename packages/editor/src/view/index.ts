@@ -24,14 +24,13 @@ export {
   applyReviewIndicators,
   changedBlockIds,
   changedElements,
-  deletionAnchors,
   REVIEW_INDICATOR_CSS,
   ReviewCursorSurface,
+  ReviewElementDetail,
   useReviewChangeIndicator,
   type ReviewBlockStatus,
   type ReviewChangedBlock,
   type ReviewChangedElement,
-  type ReviewDeletionAnchor,
   type ReviewMarkerKind,
 } from "./overlays";
 export { useReviewSnapshot } from "./store-hooks";
@@ -42,6 +41,10 @@ export {
   type ReviewModel,
   type ReviewModelOptions,
 } from "./review-model";
+export {
+  codeBlockDiffRenderer,
+  nodeDiffRendererResolver,
+} from "./render/node-diff-renderers";
 export {
   reviewCursorEntries,
   reviewEntryDetail,

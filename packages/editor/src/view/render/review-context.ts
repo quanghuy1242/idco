@@ -22,12 +22,18 @@
  * @categoryDefault Inline Review
  */
 import { createContext, useContext } from "react";
-import type { EditorNode, NodeId } from "../../core";
+import type { EditorNode, NodeId, TextLeafDiff } from "../../core";
 
 /** The per-block review lookups `EngineBlock`/`block-dispatch` consult while a review is active. */
 export type ReviewRender = {
   readonly ghosts: ReadonlyMap<NodeId, EditorNode>;
   readonly childOrder: ReadonlyMap<NodeId, readonly NodeId[]>;
+  /**
+   * A live changed text leaf id → its `TextLeafDiff` (docs/039 R-T1): `block-dispatch` passes it to the
+   * leaf so it renders live track-changes (inserted runs decorated, deleted runs as inert ghosts)
+   * instead of plain text. Absent for an unchanged leaf, which renders normally.
+   */
+  readonly textDiffs: ReadonlyMap<NodeId, TextLeafDiff>;
 };
 
 /** Null outside a review (the shipped path); set by the view while a `ReviewModel` is active. */

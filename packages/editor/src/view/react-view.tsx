@@ -262,7 +262,13 @@ export const OwnedModelEditorView = forwardRef(function OwnedModelEditorView(
   // in-container removed children; `null` (the shipped default) makes every review branch inert.
   const reviewRender = useMemo<ReviewRender | null>(
     () =>
-      review ? { childOrder: review.childOrder, ghosts: review.ghosts } : null,
+      review
+        ? {
+            childOrder: review.childOrder,
+            ghosts: review.ghosts,
+            textDiffs: review.textDiffs,
+          }
+        : null,
     [review],
   );
 

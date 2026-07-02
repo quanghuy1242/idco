@@ -224,4 +224,8 @@ export const RICH_TEXT_DIFF_CSS =
   ".rt-diff-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 1.5rem;align-items:start;}" +
   ".rt-diff-cell{min-width:0;align-self:start;}" +
   ".rt-diff-gap{min-width:0;min-height:1.4rem;border-radius:6px;background:color-mix(in oklab, var(--color-base-content, currentColor) 3%, transparent);}" +
-  ".rt-diff-colhead{font-size:0.72em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);padding-bottom:0.25rem;border-bottom:1px solid color-mix(in oklab, var(--color-base-content, currentColor) 12%, transparent);margin-bottom:0.4rem;}";
+  ".rt-diff-colhead{font-size:0.72em;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:color-mix(in oklab, var(--color-base-content, currentColor) 55%, transparent);padding-bottom:0.25rem;border-bottom:1px solid color-mix(in oklab, var(--color-base-content, currentColor) 12%, transparent);margin-bottom:0.4rem;}" +
+  // Visually-hidden status label (docs/039 R-NL): the card's colored left bar + the content shape
+  // (struck delete, tinted insert) carry the status, so the WORD ("Edited"/"Removed") is not painted —
+  // but it stays in the DOM so a screen reader still announces it. Standard clip-rect pattern.
+  ".rt-diff-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}";

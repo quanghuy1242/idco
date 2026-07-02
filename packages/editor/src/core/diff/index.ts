@@ -11,6 +11,7 @@
  * model/format concern, unit-testable without a renderer.
  */
 export { diffSnapshots } from "./diff-snapshots";
+export { blockDiffIndex } from "./index-blocks";
 export {
   BODY_SCOPE_ID,
   buildParentIndex,

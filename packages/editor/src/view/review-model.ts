@@ -41,6 +41,7 @@ import type {
   EditorStore,
   NodeId,
   SnapshotDiff,
+  TextLeafDiff,
 } from "../core";
 import { useReviewSnapshot } from "./store-hooks";
 
@@ -80,6 +81,20 @@ export type ReviewModel = {
   readonly ghosts: ReadonlyMap<NodeId, EditorNode>;
   readonly childOrder: ReadonlyMap<NodeId, readonly NodeId[]>;
   readonly collapsed: ReadonlyMap<NodeId, number>;
+  /**
+   * A removed ghost id → the added id that replaces it in the same gap (docs/038 §5.4 `replacedBy`,
+   * docs/039 P5). The merged spine already places the ghost directly above its replacement, so the
+   * view reads this pairing to render the two as ONE unit — a struck base above its green replacement,
+   * grouped, one bar — instead of two unrelated add/remove cards. Empty when nothing was replaced.
+   */
+  readonly replacements: ReadonlyMap<NodeId, NodeId>;
+  /**
+   * A live (non-removed) changed text leaf id → its `TextLeafDiff` (docs/039 R-T1, P4c). The woven
+   * text decorator (`renderReviewLeafMarks`) reads this to render the leaf as live track-changes:
+   * inserted runs washed + underlined (editable store text), deleted runs as inert struck ghosts. A
+   * removed leaf is NOT here (it renders whole as a `GhostBlock`); only a surviving edited leaf.
+   */
+  readonly textDiffs: ReadonlyMap<NodeId, TextLeafDiff>;
 };
 
 /**
@@ -102,6 +117,8 @@ export function buildReviewModel(
   const ghosts = new Map<NodeId, EditorNode>();
   const childOrder = new Map<NodeId, readonly NodeId[]>();
   const collapsed = new Map<NodeId, number>();
+  const replacements = new Map<NodeId, NodeId>();
+  const textDiffs = new Map<NodeId, TextLeafDiff>();
 
   // Visit one scope's blocks and return its merged (post-budget) id order plus how many ghosts the
   // budget dropped. `virtualized` is true only for the top-level body scope (the treap windows it, so
@@ -127,10 +144,17 @@ export function buildReviewModel(
         }
         ghosts.set(b.id, b.node);
         order.push(b.id);
+        // A removed block that was replaced in its gap (docs/038 §5.4) pairs with its replacement so
+        // the view renders the struck base + green replacement as one unit (docs/039 P5). The spine
+        // already stacks them; this records the pairing the renderer groups on.
+        if (b.replacedBy) replacements.set(b.id, b.replacedBy);
         // A removed subtree is one ghost (its base node) — do not recurse into it.
         continue;
       }
       order.push(b.id);
+      // A surviving changed text leaf carries its `TextLeafDiff` for the woven track-changes decorator
+      // (docs/039 R-T1). A removed leaf is handled above (a whole ghost), so it never lands here.
+      if (b.text) textDiffs.set(b.id, b.text);
       if (b.children && b.children.length > 0) {
         if (isTableFamily(b.node.type)) {
           // J2 does NOT weave ghosts inside a table. A `GhostBlock` is a `<div>`, which is invalid
@@ -157,7 +181,14 @@ export function buildReviewModel(
   };
 
   const top = visitScope(diff.blocks, true);
-  return { childOrder, collapsed, ghosts, order: top.order };
+  return {
+    childOrder,
+    collapsed,
+    ghosts,
+    order: top.order,
+    replacements,
+    textDiffs,
+  };
 }
 
 /**
